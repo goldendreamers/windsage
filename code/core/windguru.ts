@@ -472,6 +472,12 @@ export async function fixSpotStations<
       out.push({
         ...station,
         kind: resolved.kind,
+        sourceName:
+          resolved.spotName ||
+          resolved.linkedLiveStation?.spotname ||
+          resolved.linkedLiveStation?.name ||
+          (station as { sourceName?: string }).sourceName ||
+          null,
         nickname:
           (station.nickname || '').trim() ||
           resolved.spotName ||

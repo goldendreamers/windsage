@@ -167,6 +167,12 @@ export function StationDetailScreen({
                         liveStationId: target.liveStationId,
                         linkedLiveStation: target.linkedLiveStation,
                         liveLinkWarning: target.liveLinkWarning,
+                        sourceName:
+                          target.spotName?.trim() ||
+                          target.linkedLiveStation?.spotname?.trim() ||
+                          target.linkedLiveStation?.name?.trim() ||
+                          station.sourceName ||
+                          null,
                         nickname:
                           station.nickname.trim() ||
                           target.spotName ||
@@ -223,6 +229,12 @@ export function StationDetailScreen({
                   liveStationId: target.liveStationId,
                   linkedLiveStation: target.linkedLiveStation,
                   liveLinkWarning: target.liveLinkWarning,
+                  sourceName:
+                    target.spotName?.trim() ||
+                    target.linkedLiveStation?.spotname?.trim() ||
+                    target.linkedLiveStation?.name?.trim() ||
+                    station.sourceName ||
+                    null,
                   nickname:
                     station.nickname.trim() ||
                     target.spotName ||
@@ -674,6 +686,12 @@ export function StationDetailScreen({
                 liveStationId: target.liveStationId,
                 linkedLiveStation: target.linkedLiveStation,
                 liveLinkWarning: target.liveLinkWarning,
+                sourceName:
+                  target.spotName?.trim() ||
+                  target.linkedLiveStation?.spotname?.trim() ||
+                  target.linkedLiveStation?.name?.trim() ||
+                  station.sourceName ||
+                  null,
                 nickname:
                   station.nickname.trim() ||
                   target.spotName ||

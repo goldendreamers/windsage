@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { Linking, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import type { AlertState, AppSettings, CheckResult, FollowedStation, StationReading } from '../shared/types';
 
 const FALLBACK_CLOUD = 'https://windsage.nimrod.bio';
@@ -91,6 +91,18 @@ async function getExpoPushTokenSafe(): Promise<string | null> {
   }
 }
 
+export class CloudError extends Error {
+  status: number;
+  suggestions?: string[];
+
+  constructor(message: string, status = 400, suggestions?: string[]) {
+    super(message);
+    this.name = 'CloudError';
+    this.status = status;
+    this.suggestions = suggestions;
+  }
+}
+
 async function cloudFetch<T>(
   path: string,
   options: RequestInit & { secret?: string; token?: string | null } = {},
@@ -107,9 +119,16 @@ async function cloudFetch<T>(
     ...options,
     headers,
   });
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+    suggestions?: string[];
+  };
   if (!response.ok) {
-    throw new Error(data.error || `Cloud HTTP ${response.status}`);
+    throw new CloudError(
+      data.error || `Cloud HTTP ${response.status}`,
+      response.status,
+      Array.isArray(data.suggestions) ? data.suggestions.map(String) : undefined,
+    );
   }
   return data;
 }
@@ -120,12 +139,20 @@ export async function registerWithCloud(): Promise<{
 }> {
   const creds = await getDeviceCreds();
   const pushToken = await getExpoPushTokenSafe();
+  let webPushSubscription: unknown = null;
+  try {
+    const { getCachedWebPushSubscription } = await import('./notifications');
+    webPushSubscription = getCachedWebPushSubscription();
+  } catch {
+    // ignore
+  }
   await cloudFetch('/v1/devices', {
     method: 'POST',
     body: JSON.stringify({
       deviceId: creds.deviceId,
       secret: creds.secret,
       pushToken,
+      webPushSubscription: webPushSubscription || undefined,
     }),
   });
   return { creds, pushToken };
@@ -228,7 +255,9 @@ export async function pullMyStations(): Promise<AppSettings | null> {
   };
 }
 
-export async function startGoogleSignIn(mode: 'login' | 'link' = 'login'): Promise<void> {
+export async function startGoogleSignIn(
+  mode: 'login' | 'link' = 'login',
+): Promise<{ token?: string; error?: string } | void> {
   const { creds } = await registerWithCloud();
   const token = mode === 'link' ? await getSessionToken() : null;
   const url = new URL(`${getCloudBaseUrl()}/v1/auth/google/start`);
@@ -241,7 +270,39 @@ export async function startGoogleSignIn(mode: 'login' | 'link' = 'login'): Promi
     window.location.href = url.toString();
     return;
   }
-  await Linking.openURL(url.toString());
+
+  // Native: AuthSession so Google returns into the app via windsage:// (or exp:// in Expo Go).
+  const LinkingExpo = await import('expo-linking');
+  const WebBrowser = await import('expo-web-browser');
+  const returnTo = LinkingExpo.createURL('auth');
+  url.searchParams.set('returnTo', returnTo);
+
+  await WebBrowser.maybeCompleteAuthSession();
+  const result = await WebBrowser.openAuthSessionAsync(url.toString(), returnTo);
+  if (result.type === 'success' && result.url) {
+    return consumeAuthRedirectParamsFromUrl(result.url);
+  }
+  if (result.type === 'cancel' || result.type === 'dismiss') {
+    return { error: 'Sign-in cancelled' };
+  }
+  return { error: 'Google sign-in failed' };
+}
+
+/** Parse auth_token / auth_error from a web or deep-link URL. */
+export async function consumeAuthRedirectParamsFromUrl(rawUrl: string): Promise<{
+  token?: string;
+  error?: string;
+} | null> {
+  try {
+    const parsed = new URL(rawUrl);
+    const token = parsed.searchParams.get('auth_token');
+    const error = parsed.searchParams.get('auth_error');
+    if (!token && !error) return null;
+    if (token) await setSessionToken(token);
+    return { token: token || undefined, error: error || undefined };
+  } catch {
+    return null;
+  }
 }
 
 /** Consume ?auth_token= / ?auth_error= from Google redirect (web). */
@@ -250,16 +311,14 @@ export async function consumeAuthRedirectParams(): Promise<{
   error?: string;
 } | null> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  const result = await consumeAuthRedirectParamsFromUrl(window.location.href);
+  if (!result) return null;
   const url = new URL(window.location.href);
-  const token = url.searchParams.get('auth_token');
-  const error = url.searchParams.get('auth_error');
-  if (!token && !error) return null;
   url.searchParams.delete('auth_token');
   url.searchParams.delete('auth_error');
   url.searchParams.delete('auth_mode');
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-  if (token) await setSessionToken(token);
-  return { token: token || undefined, error: error || undefined };
+  return result;
 }
 
 export async function syncStationsToCloud(
@@ -273,6 +332,13 @@ export async function syncStationsToCloud(
   const session = await getSessionToken();
   const { creds } = await registerWithCloud();
   const tokenPush = pushToken ?? (await getExpoPushTokenSafe());
+  let webPushSubscription: unknown = null;
+  try {
+    const { getCachedWebPushSubscription } = await import('./notifications');
+    webPushSubscription = getCachedWebPushSubscription();
+  } catch {
+    // ignore
+  }
 
   if (session) {
     const data = await cloudFetch<{
@@ -286,6 +352,7 @@ export async function syncStationsToCloud(
         stations: settings.stations,
         pollIntervalMinutes: settings.pollIntervalMinutes,
         pushToken: tokenPush ?? undefined,
+        webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
         secret: creds.secret,
       }),
@@ -308,6 +375,7 @@ export async function syncStationsToCloud(
       stations: settings.stations,
       pollIntervalMinutes: settings.pollIntervalMinutes,
       pushToken: tokenPush ?? undefined,
+      webPushSubscription: webPushSubscription || undefined,
     }),
   });
   return {
@@ -315,6 +383,83 @@ export async function syncStationsToCloud(
     stations: data.stations,
     rewrittenSpots: data.rewrittenSpots,
   };
+}
+
+export async function fetchCatalogStations(): Promise<
+  Pick<
+    FollowedStation,
+    | 'stationId'
+    | 'kind'
+    | 'sourceName'
+    | 'liveStationId'
+    | 'linkedLiveStation'
+    | 'liveLinkWarning'
+  >[]
+> {
+  try {
+    const data = await cloudFetch<{
+      stations: Array<{
+        stationId: string;
+        kind?: FollowedStation['kind'];
+        sourceName?: string | null;
+        liveStationId?: string | null;
+        linkedLiveStation?: FollowedStation['linkedLiveStation'];
+        liveLinkWarning?: string | null;
+      }>;
+    }>('/v1/catalog/stations', { method: 'GET' });
+    return (data.stations || [])
+      .filter((s) => s.stationId?.trim())
+      .map((s) => ({
+        stationId: String(s.stationId).trim(),
+        kind: s.kind === 'spot' ? 'spot' : 'station',
+        sourceName: s.sourceName ?? null,
+        liveStationId: s.liveStationId ?? null,
+        linkedLiveStation: s.linkedLiveStation ?? null,
+        liveLinkWarning: s.liveLinkWarning ?? null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export type CloudAnnouncement = {
+  id: string;
+  version?: string | null;
+  title: string;
+  body: string;
+  url?: string | null;
+  createdAt?: string | null;
+};
+
+const ANNOUNCE_DISMISS_KEY = 'windsage.announcement.dismissed.v1';
+
+export async function fetchAnnouncement(): Promise<CloudAnnouncement | null> {
+  try {
+    const data = await cloudFetch<{ announcement: CloudAnnouncement | null }>(
+      '/v1/announcement',
+      { method: 'GET' },
+    );
+    const a = data.announcement;
+    if (!a?.id?.trim() || !a.title?.trim()) return null;
+    return {
+      id: String(a.id).trim(),
+      version: a.version ?? null,
+      title: String(a.title),
+      body: String(a.body || ''),
+      url: a.url ?? null,
+      createdAt: a.createdAt ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getDismissedAnnouncementId(): Promise<string | null> {
+  return AsyncStorage.getItem(ANNOUNCE_DISMISS_KEY);
+}
+
+export async function dismissAnnouncement(id: string): Promise<void> {
+  await AsyncStorage.setItem(ANNOUNCE_DISMISS_KEY, id);
 }
 
 export async function fetchCloudSnapshot(): Promise<{

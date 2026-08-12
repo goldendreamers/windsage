@@ -1,0 +1,13 @@
+{
+  "name": "Windsage",
+  "short_name": "Windsage",
+  "description": "Watch Windguru stations from the Wald cloud",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#061821",
+  "theme_color": "#061821",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

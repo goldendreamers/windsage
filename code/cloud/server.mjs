@@ -21,12 +21,15 @@ import {
   ensureDevice,
   createUser,
   findUserByUsername,
+  suggestAvailableUsernames,
   findUserByGoogleSub,
   createSession,
   getSession,
   revokeSession,
   mergeStations,
+  upsertSharedStations,
   publicUser,
+  publicCatalogStations,
 } from './lib/store.mjs';
 import {
   hashPassword,
@@ -44,6 +47,13 @@ import {
   oauthConfig,
 } from './lib/oauth.mjs';
 import { sendExpoPush } from './lib/push.mjs';
+import {
+  vapidConfig,
+  ensureWebPushConfigured,
+  upsertWebPushSubscription,
+  collectWebPushSubscriptions,
+  sendWebPushMany,
+} from './lib/webpush.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -76,6 +86,8 @@ const MIME = {
   '.map': 'application/json',
   '.txt': 'text/plain; charset=utf-8',
   '.webp': 'image/webp',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
 function cors(res) {
@@ -128,6 +140,32 @@ function collectPushTokens(bag) {
   return [...tokens];
 }
 
+async function dispatchAlertNotifications(bag, station, result, sid) {
+  const unit =
+    station.rule.metric === 'temperature'
+      ? '°C'
+      : station.rule.metric === 'wave_height'
+        ? 'm'
+        : 'kt';
+  const cmp = station.rule.comparison === 'gte' ? '≥' : '≤';
+  const value =
+    result.metricValue == null ? 'n/a' : `${result.metricValue.toFixed(1)} ${unit}`;
+  const title = `Windsage · ${displayName(station)}`;
+  const body = `${station.rule.metric} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${value})`;
+  const data = { followId: station.id, stationId: sid };
+
+  const pushTokens = collectPushTokens(bag);
+  for (const to of pushTokens) {
+    await sendExpoPush({ to, title, body, data });
+  }
+
+  const subs = collectWebPushSubscriptions(bag);
+  if (subs.length) {
+    const { alive } = await sendWebPushMany(subs, { title, body, data });
+    bag.webPushSubscriptions = alive;
+  }
+}
+
 async function runBagChecks(store, bag, { notify = true } = {}) {
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
@@ -146,7 +184,6 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
   }
 
   const results = [];
-  const pushTokens = collectPushTokens(bag);
 
   for (const station of stations) {
     const sid = station.stationId.trim();
@@ -203,24 +240,8 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
     };
     results.push({ station, result, nextState });
 
-    if (notify && result.shouldNotify && station.enabled && pushTokens.length) {
-      const unit =
-        station.rule.metric === 'temperature'
-          ? '°C'
-          : station.rule.metric === 'wave_height'
-            ? 'm'
-            : 'kt';
-      const cmp = station.rule.comparison === 'gte' ? '≥' : '≤';
-      const value =
-        result.metricValue == null ? 'n/a' : `${result.metricValue.toFixed(1)} ${unit}`;
-      for (const to of pushTokens) {
-        await sendExpoPush({
-          to,
-          title: `Windsage · ${displayName(station)}`,
-          body: `${station.rule.metric} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${value})`,
-          data: { followId: station.id, stationId: sid },
-        });
-      }
+    if (notify && result.shouldNotify && station.enabled) {
+      await dispatchAlertNotifications(bag, station, result, sid);
     }
   }
 
@@ -245,14 +266,18 @@ async function pollAll() {
   for (const user of Object.values(store.users)) {
     const active = (user.stations || []).some((s) => s.enabled && s.stationId?.trim());
     if (!active) continue;
-    // Collect push tokens from linked devices
+    // Collect push tokens + web-push subscriptions from linked devices
     const tokens = new Set(collectPushTokens(user));
+    const webSubs = new Map();
+    for (const s of collectWebPushSubscriptions(user)) webSubs.set(s.endpoint, s);
     for (const device of Object.values(store.devices)) {
       if (device.userId === user.id) {
         for (const t of collectPushTokens(device)) tokens.add(t);
+        for (const s of collectWebPushSubscriptions(device)) webSubs.set(s.endpoint, s);
       }
     }
     user.pushTokens = [...tokens];
+    user.webPushSubscriptions = [...webSubs.values()];
     try {
       await runBagChecks(store, user, { notify: true });
       touched = true;
@@ -303,7 +328,7 @@ function requireUser(store, req, res) {
   return { user, token, session };
 }
 
-async function attachDeviceToUser(store, user, deviceId, secret, pushToken) {
+async function attachDeviceToUser(store, user, deviceId, secret, pushToken, webPushSubscription) {
   if (!deviceId || !secret) return;
   const existing = store.devices[deviceId];
   if (existing && existing.secret !== secret) return;
@@ -313,6 +338,10 @@ async function attachDeviceToUser(store, user, deviceId, secret, pushToken) {
     device.pushToken = pushToken;
     if (!device.pushTokens.includes(pushToken)) device.pushTokens.push(pushToken);
     if (!user.pushTokens.includes(pushToken)) user.pushTokens.push(pushToken);
+  }
+  if (webPushSubscription) {
+    upsertWebPushSubscription(device, webPushSubscription);
+    upsertWebPushSubscription(user, webPushSubscription);
   }
   // Merge guest stations into user once.
   user.stations = mergeStations(user.stations || [], device.stations || []);
@@ -355,11 +384,37 @@ async function serveStatic(req, res, pathname) {
 
   const ext = path.extname(filePath).toLowerCase();
   cors(res);
-  res.writeHead(200, {
+  const headers = {
     'Content-Type': MIME[ext] || 'application/octet-stream',
     'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=86400',
-  });
+  };
+  if (ext === '.zip') {
+    headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
+  }
+  res.writeHead(200, headers);
   createReadStream(filePath).pipe(res);
+}
+
+function oauthReturnUrl(returnTo, pub, params) {
+  const allowed =
+    typeof returnTo === 'string' &&
+    (returnTo.startsWith('windsage://') ||
+      returnTo.startsWith('exp://') ||
+      returnTo.startsWith('exps://') ||
+      returnTo.startsWith(`${pub}/`) ||
+      returnTo === pub ||
+      returnTo === `${pub}/`);
+  const base = allowed ? returnTo : `${pub}/`;
+  try {
+    const target = new URL(base);
+    for (const [key, value] of Object.entries(params)) {
+      if (value != null) target.searchParams.set(key, String(value));
+    }
+    return target.toString();
+  } catch {
+    const q = new URLSearchParams(params).toString();
+    return `${pub}/?${q}`;
+  }
 }
 
 async function handleAuth(req, res, pathname, url) {
@@ -376,7 +431,11 @@ async function handleAuth(req, res, pathname, url) {
 
     const store = await loadStore(DATA_DIR);
     if (findUserByUsername(store, u.username)) {
-      return json(res, 409, { error: 'Username already taken' });
+      const suggestions = suggestAvailableUsernames(store, u.username, 2);
+      return json(res, 409, {
+        error: 'Username already taken',
+        suggestions,
+      });
     }
     const { passwordHash, passwordSalt } = await hashPassword(p.password);
     const user = createUser(store, {
@@ -384,7 +443,7 @@ async function handleAuth(req, res, pathname, url) {
       passwordHash,
       passwordSalt,
     });
-    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken);
+    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
     const token = createSession(store, user.id);
     await saveStore(DATA_DIR, store);
     return json(res, 200, {
@@ -403,7 +462,7 @@ async function handleAuth(req, res, pathname, url) {
     if (!user) return json(res, 401, { error: 'Invalid username or password' });
     const ok = await verifyPassword(body.password, user.passwordHash, user.passwordSalt);
     if (!ok) return json(res, 401, { error: 'Invalid username or password' });
-    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken);
+    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
     const token = createSession(store, user.id);
     await saveStore(DATA_DIR, store);
     return json(res, 200, {
@@ -428,8 +487,9 @@ async function handleAuth(req, res, pathname, url) {
     const deviceId = url.searchParams.get('deviceId') || '';
     const secret = url.searchParams.get('secret') || '';
     const linkToken = url.searchParams.get('token') || '';
+    const returnTo = url.searchParams.get('returnTo') || '';
     try {
-      const state = encodeOAuthState({ mode, deviceId, secret, linkToken });
+      const state = encodeOAuthState({ mode, deviceId, secret, linkToken, returnTo });
       return redirect(res, googleAuthUrl(state));
     } catch (error) {
       return json(res, 503, { error: error.message || 'Google not configured' });
@@ -441,7 +501,10 @@ async function handleAuth(req, res, pathname, url) {
     const state = decodeOAuthState(url.searchParams.get('state'));
     const pub = oauthConfig().publicUrl;
     if (!code) {
-      return redirect(res, `${pub}/?auth_error=${encodeURIComponent('Missing Google code')}`);
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, { auth_error: 'Missing Google code' }),
+      );
     }
     try {
       const profile = await exchangeGoogleCode(code);
@@ -470,17 +533,22 @@ async function handleAuth(req, res, pathname, url) {
         user.sso.google = { sub: profile.sub, email: profile.email, name: profile.name };
       }
 
-      await attachDeviceToUser(store, user, state.deviceId, state.secret, null);
+      await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null);
       const token = createSession(store, user.id);
       await saveStore(DATA_DIR, store);
       return redirect(
         res,
-        `${pub}/?auth_token=${encodeURIComponent(token)}&auth_mode=${encodeURIComponent(state.mode || 'login')}`,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_token: token,
+          auth_mode: state.mode || 'login',
+        }),
       );
     } catch (error) {
       return redirect(
         res,
-        `${pub}/?auth_error=${encodeURIComponent(error.message || 'Google sign-in failed')}`,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_error: error.message || 'Google sign-in failed',
+        }),
       );
     }
   }
@@ -517,6 +585,7 @@ async function handleMe(req, res, pathname) {
     const incoming = Array.isArray(body.stations) ? body.stations : [];
     const fixed = await fixSpotStations(incoming);
     user.stations = fixed.stations;
+    upsertSharedStations(store, fixed.stations);
     if (body.pollIntervalMinutes) {
       user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
@@ -524,12 +593,12 @@ async function handleMe(req, res, pathname) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
     if (body.deviceId && body.secret) {
-      await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken);
+      await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
     }
     user.updatedAt = Date.now();
     await saveStore(DATA_DIR, store);
-    await runBagChecks(store, user, { notify: false });
-    await saveStore(DATA_DIR, store);
+    // Do not await Windguru bag checks on sync — poll loop + explicit /check cover that.
+    // Returning last snapshots keeps PUT fast so app boot is not blocked.
     return json(res, 200, {
       ok: true,
       snapshots: user.snapshots || {},
@@ -598,6 +667,12 @@ async function handleDevices(req, res, pathname) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
     }
+    if (body.webPushSubscription) {
+      upsertWebPushSubscription(device, body.webPushSubscription);
+      if (device.userId && store.users[device.userId]) {
+        upsertWebPushSubscription(store.users[device.userId], body.webPushSubscription);
+      }
+    }
     device.updatedAt = Date.now();
     await saveStore(DATA_DIR, store);
     return json(res, 200, {
@@ -630,6 +705,7 @@ async function handleDevices(req, res, pathname) {
     const incoming = Array.isArray(body.stations) ? body.stations : [];
     const fixed = await fixSpotStations(incoming);
     bag.stations = fixed.stations;
+    upsertSharedStations(store, fixed.stations);
     if (body.pollIntervalMinutes) {
       bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
@@ -640,11 +716,14 @@ async function handleDevices(req, res, pathname) {
         bag.pushTokens.push(body.pushToken);
       }
     }
+    if (body.webPushSubscription) {
+      upsertWebPushSubscription(device, body.webPushSubscription);
+      upsertWebPushSubscription(bag, body.webPushSubscription);
+    }
     device.updatedAt = Date.now();
     bag.updatedAt = Date.now();
     await saveStore(DATA_DIR, store);
-    await runBagChecks(store, bag, { notify: false });
-    await saveStore(DATA_DIR, store);
+    // Skip synchronous Windguru checks on every stations PUT (boot/sync path).
     return json(res, 200, {
       ok: true,
       snapshots: bag.snapshots || {},
@@ -694,14 +773,29 @@ async function handleDevices(req, res, pathname) {
 
 async function handleApi(req, res, pathname, url) {
   if (req.method === 'GET' && pathname === '/health') {
+    const store = await loadStore(DATA_DIR);
     return json(res, 200, {
       ok: true,
       service: 'windsage-cloud',
       web: true,
       auth: true,
       providers: providersStatus(),
+      announcementId: store.announcement?.id || null,
+      webPush: vapidConfig().enabled,
       ts: Date.now(),
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/announcement') {
+    const store = await loadStore(DATA_DIR);
+    const a = store.announcement || null;
+    return json(res, 200, { ok: true, announcement: a });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/push/vapid-public-key') {
+    const cfg = vapidConfig();
+    if (!cfg.enabled) return json(res, 503, { error: 'Web Push not configured' });
+    return json(res, 200, { ok: true, publicKey: cfg.publicKey });
   }
 
   // Public: browsers cannot set Windguru Referer, so spot/station resolve must run server-side.
@@ -714,6 +808,15 @@ async function handleApi(req, res, pathname, url) {
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
     }
+  }
+
+  // Shared catalog for follow suggestions only — never auto-added to user bags.
+  if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
+    const store = await loadStore(DATA_DIR);
+    return json(res, 200, {
+      ok: true,
+      stations: publicCatalogStations(store),
+    });
   }
 
   const authHandled = await handleAuth(req, res, pathname, url);
@@ -768,6 +871,18 @@ server.listen(PORT, HOST, async () => {
   console.log(`[windsage-cloud] data=${DATA_DIR}`);
   console.log(`[windsage-cloud] web=${WEB_DIR}`);
   console.log(`[windsage-cloud] providers`, providersStatus());
+  ensureWebPushConfigured()
+    .then((ok) => console.log(`[windsage-cloud] webPush=${ok ? 'enabled' : 'disabled'}`))
+    .catch((e) => console.error('[windsage-cloud] webPush init failed', e));
+  try {
+    const store = await loadStore(DATA_DIR);
+    await saveStore(DATA_DIR, store); // persist migrate (sharedStations rebuild)
+    console.log(
+      `[windsage-cloud] sharedStations=${(store.sharedStations || []).length}`,
+    );
+  } catch (e) {
+    console.error('[windsage-cloud] store migrate failed', e);
+  }
   setTimeout(() => {
     pollAll().catch((e) => console.error(e));
   }, 5_000);

@@ -60,27 +60,39 @@ def fill_rounded_icon(src: Image.Image, size: int = 1024) -> Image.Image:
     return base.convert("RGBA")
 
 
-def adaptive_foreground(icon: Image.Image, size: int = 512) -> Image.Image:
-    """Foreground with transparent margins; keep mark in Android safe zone (~66%)."""
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    mark = icon.resize((size, size), Image.Resampling.LANCZOS)
-    # Punch navy bg to transparent so adaptive background shows.
-    px = mark.load()
-    for y in range(size):
-        for x in range(size):
+def punch_navy(mark: Image.Image) -> Image.Image:
+    """Make near-navy pixels transparent so adaptive background shows through."""
+    out = mark.convert("RGBA")
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
             r, g, b, a = px[x, y]
+            if a < 8:
+                continue
             if abs(r - NAVY_RGB[0]) < 18 and abs(g - NAVY_RGB[1]) < 18 and abs(b - NAVY_RGB[2]) < 18:
                 px[x, y] = (0, 0, 0, 0)
-    # Scale mark into safe zone
-    safe = int(size * 0.72)
-    mark = mark.resize((safe, safe), Image.Resampling.LANCZOS)
+    return out
+
+
+def adaptive_foreground(icon: Image.Image, size: int = 1024) -> Image.Image:
+    """Foreground with transparent margins; keep mark in Android safe zone (~66%).
+
+    Expo / Android expect 1024×1024. Punch at source size, then one LANCZOS
+    downscale into the safe zone (avoids the soft double-resize we had at 512).
+    """
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    mark = punch_navy(icon)
+    # Android keyline: important content inside ~66% of the canvas.
+    safe = int(size * 0.66)
+    if mark.size != (safe, safe):
+        mark = mark.resize((safe, safe), Image.Resampling.LANCZOS)
     offset = (size - safe) // 2
     canvas.alpha_composite(mark, (offset, offset))
     return canvas
 
 
-def monochrome_icon(fg: Image.Image, size: int = 432) -> Image.Image:
-    img = fg.resize((size, size), Image.Resampling.LANCZOS)
+def monochrome_icon(fg: Image.Image, size: int = 1024) -> Image.Image:
+    img = fg if fg.size == (size, size) else fg.resize((size, size), Image.Resampling.LANCZOS)
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     src = img.load()
     dst = out.load()
@@ -262,29 +274,60 @@ def main() -> None:
     banner.save(UI / "empty-hero.png", optimize=True)
     print("wrote ui/empty-hero.png")
 
-    # Compact brand mark for in-app header
-    mark = adaptive_foreground(icon, 512)
+    # Compact brand mark for in-app header / boot (@3x needs ≥384; keep 1024)
+    mark = adaptive_foreground(icon, 1024)
     mark.save(UI / "mark.png", optimize=True)
     print("wrote ui/mark.png")
 
-    fg = adaptive_foreground(icon, 512)
+    # Android adaptive layers — Expo recommends 1024; 512 looked soft on xxhdpi+
+    fg = adaptive_foreground(icon, 1024)
     fg.save(STORE / "android-icon-foreground.png", optimize=True)
-    Image.new("RGBA", (512, 512), NAVY).save(STORE / "android-icon-background.png", optimize=True)
-    monochrome_icon(fg, 432).save(STORE / "android-icon-monochrome.png", optimize=True)
-    print("wrote store android adaptive icons")
+    Image.new("RGBA", (1024, 1024), NAVY).save(STORE / "android-icon-background.png", optimize=True)
+    monochrome_icon(fg, 1024).save(STORE / "android-icon-monochrome.png", optimize=True)
+    print("wrote store android adaptive icons (1024)")
 
-    icon.resize((48, 48), Image.Resampling.LANCZOS).convert("RGBA").save(STORE / "favicon.png", optimize=True)
+    # Web favicon + PWA / Add to Home Screen (Chrome needs 192 + 512)
+    public = ROOT / "public"
+    public.mkdir(parents=True, exist_ok=True)
+    fav192 = icon.resize((192, 192), Image.Resampling.LANCZOS).convert("RGBA")
+    fav192.save(STORE / "favicon.png", optimize=True)
+    pwa192 = icon.resize((192, 192), Image.Resampling.LANCZOS).convert("RGBA")
+    pwa512 = icon.resize((512, 512), Image.Resampling.LANCZOS).convert("RGBA")
+    apple = icon.resize((180, 180), Image.Resampling.LANCZOS).convert("RGBA")
+    pwa192.save(STORE / "pwa-192.png", optimize=True)
+    pwa512.save(STORE / "pwa-512.png", optimize=True)
+    apple.save(STORE / "apple-touch-icon.png", optimize=True)
+    pwa192.save(public / "icon-192.png", optimize=True)
+    pwa512.save(public / "icon-512.png", optimize=True)
+    apple.save(public / "apple-touch-icon.png", optimize=True)
+    fav192.save(public / "favicon.png", optimize=True)
+    (public / "manifest.webmanifest").write_text(
+        "{\n"
+        '  "name": "Windsage",\n'
+        '  "short_name": "Windsage",\n'
+        '  "description": "Watch Windguru stations from the Wald cloud",\n'
+        '  "start_url": "/",\n'
+        '  "display": "standalone",\n'
+        '  "background_color": "#061821",\n'
+        '  "theme_color": "#061821",\n'
+        '  "icons": [\n'
+        '    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },\n'
+        '    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }\n'
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
     notification_icon(icon, 96).save(STORE / "notification-icon.png", optimize=True)
-    print("wrote store favicon + notification-icon")
+    print("wrote store/web favicon + PWA icons")
 
     for kind in ("wind", "gust", "temp", "wave", "check", "bell", "station"):
         draw_metric_icon(kind, 256).save(UI / f"{kind}.png", optimize=True)
     print("wrote ui metric icons")
 
     # Boot / loading tile
-    boot = Image.new("RGBA", (512, 512), NAVY)
-    logo = mark.resize((280, 280), Image.Resampling.LANCZOS)
-    boot.alpha_composite(logo, ((512 - 280) // 2, (512 - 280) // 2))
+    boot = Image.new("RGBA", (1024, 1024), NAVY)
+    logo = mark.resize((560, 560), Image.Resampling.LANCZOS)
+    boot.alpha_composite(logo, ((1024 - 560) // 2, (1024 - 560) // 2))
     boot.save(UI / "boot-mark.png", optimize=True)
     print("done")
 

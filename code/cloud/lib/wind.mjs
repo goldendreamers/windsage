@@ -162,6 +162,21 @@ function formatLinkedWarning(linked) {
   return `No live sensor on this spot — using nearest live station ${linked.name} (#${linked.id}, ${km} km)`;
 }
 
+/** Look up official name for a live station id from Windguru station_list. */
+async function lookupLiveStationName(liveStationId) {
+  try {
+    const list = await getStationList();
+    const row = list.find(
+      (item) => String(Math.trunc(Number(item?.id_station))) === String(liveStationId),
+    );
+    if (!row) return undefined;
+    const name = String(row.name || row.spotname || '').trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Spot IDs resolve to a native live station when Windguru links one;
  * otherwise attach the geographically nearest live station and warn.
@@ -175,10 +190,12 @@ export async function resolveWindguruId(inputId) {
 
   try {
     await tryStationCurrent(id);
+    const spotName = await lookupLiveStationName(id);
     const value = {
       inputId: id,
       liveStationId: id,
       kind: 'station',
+      spotName,
       hasLiveStation: true,
       linkedLiveStation: null,
       warning: null,
@@ -284,8 +301,7 @@ export async function fixSpotStations(stations = []) {
     }
     const needsEnrich =
       !(station.kind === 'spot' || station.kind === 'station') ||
-      (station.kind === 'spot' &&
-        (!station.liveStationId || !!station.liveLinkWarning));
+      (station.kind === 'spot' && !station.liveStationId);
     if (!needsEnrich) {
       out.push(station);
       continue;
@@ -299,6 +315,12 @@ export async function fixSpotStations(stations = []) {
         liveStationId: resolved.liveStationId,
         linkedLiveStation: resolved.linkedLiveStation || null,
         liveLinkWarning: resolved.warning || null,
+        sourceName:
+          resolved.spotName ||
+          resolved.linkedLiveStation?.spotname ||
+          resolved.linkedLiveStation?.name ||
+          station.sourceName ||
+          null,
         nickname:
           (station.nickname || '').trim() ||
           resolved.spotName ||

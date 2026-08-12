@@ -2,7 +2,7 @@
   "expo": {
     "name": "Windsage",
     "slug": "windsage",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/store/icon.png",
     "userInterfaceStyle": "dark",
@@ -16,7 +16,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.windsage.app",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -60,7 +62,8 @@
           "imageWidth": 180
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

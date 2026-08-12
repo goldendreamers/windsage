@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import {
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,6 +11,8 @@ import {
 } from 'react-native';
 import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
+import type { CatalogStation } from '../shared/defaults';
+import type { CloudAnnouncement } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
@@ -37,12 +40,19 @@ type Props = {
     stationId: string,
     nickname: string,
     kind: FollowedStation['kind'],
-    extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+    extras?: Pick<
+      FollowedStation,
+      'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+    >,
   ) => void;
+  onReuse: (followId: string) => void;
+  catalogStations?: CatalogStation[];
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
   onOpenAccount?: () => void;
   onOpenDownload?: () => void;
+  announcement?: CloudAnnouncement | null;
+  onDismissAnnouncement?: () => void;
 };
 
 export function HomeScreen({
@@ -55,10 +65,14 @@ export function HomeScreen({
   onOpenAdd,
   onCloseAdd,
   onAdd,
+  onReuse,
+  catalogStations = [],
   onRefresh,
   onOpenStation,
   onOpenAccount,
   onOpenDownload,
+  announcement,
+  onDismissAnnouncement,
 }: Props) {
   const hasStations = stations.length > 0;
 
@@ -77,6 +91,38 @@ export function HomeScreen({
         }
       >
         <BrandHero hasStation={hasStations} />
+
+        {announcement ? (
+          <View style={styles.updateBanner}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.updateTitle}>{announcement.title}</Text>
+              {announcement.body ? (
+                <Text style={styles.updateBody}>{announcement.body}</Text>
+              ) : null}
+              {announcement.url ? (
+                <Pressable
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    void Linking.openURL(announcement.url!);
+                  }}
+                >
+                  <Text style={styles.updateLink}>Details / install →</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {onDismissAnnouncement ? (
+              <Pressable
+                style={styles.updateDismiss}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onDismissAnnouncement();
+                }}
+              >
+                <Text style={styles.updateDismissText}>Dismiss</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
@@ -147,7 +193,7 @@ export function HomeScreen({
               onOpenDownload();
             }}
           >
-            <Text style={styles.downloadLinkText}>Get Windsage · Download</Text>
+            <Text style={styles.downloadLinkText}>Install app</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -156,7 +202,9 @@ export function HomeScreen({
         visible={addOpen}
         onClose={onCloseAdd}
         onSave={onAdd}
-        existingIds={stations.map((s) => s.stationId)}
+        onReuse={onReuse}
+        existingStations={stations}
+        catalogStations={catalogStations}
       />
     </View>
   );
@@ -177,6 +225,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  updateBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: colors.accentDim,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  updateTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  updateBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  updateLink: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  updateDismiss: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  updateDismissText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
   },
   heading: {
     color: colors.text,

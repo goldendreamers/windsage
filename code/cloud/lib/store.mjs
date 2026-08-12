@@ -5,23 +5,49 @@ import crypto from 'node:crypto';
 const STORE_FILE = 'store.json';
 
 const empty = () => ({
-  version: 2,
+  version: 3,
   devices: {},
   users: {},
   sessions: {},
+  /** Shared follow catalog visible to every new/empty user on this server. */
+  sharedStations: [],
+  /** Latest product update shown in-app (and used by broadcast script). */
+  announcement: null,
 });
 
 function migrate(store) {
   if (!store.devices) store.devices = {};
   if (!store.users) store.users = {};
   if (!store.sessions) store.sessions = {};
+  if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
+  if (store.announcement === undefined) store.announcement = null;
   for (const device of Object.values(store.devices)) {
     if (device.userId === undefined) device.userId = null;
     if (!Array.isArray(device.pushTokens)) {
       device.pushTokens = device.pushToken ? [device.pushToken] : [];
     }
+    if (!Array.isArray(device.webPushSubscriptions)) device.webPushSubscriptions = [];
   }
-  store.version = 2;
+  for (const user of Object.values(store.users)) {
+    if (!Array.isArray(user.pushTokens)) {
+      user.pushTokens = user.pushToken ? [user.pushToken] : [];
+    }
+    if (!Array.isArray(user.webPushSubscriptions)) user.webPushSubscriptions = [];
+  }
+  // One-time rebuild if catalog is empty but users/devices already have follows.
+  if (store.sharedStations.length === 0) {
+    const collected = [];
+    for (const user of Object.values(store.users)) {
+      collected.push(...(user.stations || []));
+    }
+    for (const device of Object.values(store.devices)) {
+      collected.push(...(device.stations || []));
+    }
+    if (collected.length) {
+      store.sharedStations = mergeStations([], collected);
+    }
+  }
+  store.version = 3;
   return store;
 }
 
@@ -51,6 +77,7 @@ export function ensureDevice(store, deviceId, secret) {
       userId: null,
       pushToken: null,
       pushTokens: [],
+      webPushSubscriptions: [],
       stations: [],
       pollIntervalMinutes: 10,
       alertStates: {},
@@ -66,6 +93,7 @@ export function ensureDevice(store, deviceId, secret) {
   if (!Array.isArray(device.pushTokens)) {
     device.pushTokens = device.pushToken ? [device.pushToken] : [];
   }
+  if (!Array.isArray(device.webPushSubscriptions)) device.webPushSubscriptions = [];
   return device;
 }
 
@@ -100,6 +128,36 @@ export function findUserByUsername(store, username) {
       (u) => u.username && String(u.username).toLowerCase() === needle,
     ) || null
   );
+}
+
+/** Two unused username alternatives when the desired name is taken. */
+export function suggestAvailableUsernames(store, desired, count = 2) {
+  const raw = String(desired || 'user')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '');
+  const base = (raw.slice(0, 24) || 'user').replace(/[._-]+$/g, '') || 'user';
+  const out = [];
+  const seen = new Set([base.toLowerCase()]);
+
+  const tryAdd = (candidate) => {
+    const c = String(candidate).slice(0, 32);
+    if (c.length < 3) return;
+    const key = c.toLowerCase();
+    if (seen.has(key)) return;
+    if (findUserByUsername(store, c)) return;
+    seen.add(key);
+    out.push(c);
+  };
+
+  // Prefer readable variants: name2, name3, …
+  for (let n = 2; out.length < count && n < 500; n += 1) {
+    tryAdd(`${base}${n}`);
+  }
+  // Then short random suffixes
+  while (out.length < count) {
+    tryAdd(`${base}_${crypto.randomBytes(2).toString('hex')}`);
+  }
+  return out.slice(0, count);
 }
 
 export function findUserByGoogleSub(store, sub) {
@@ -144,6 +202,73 @@ export function mergeStations(userStations = [], guestStations = []) {
     if (!map.has(sid)) map.set(sid, s);
   }
   return [...map.values()];
+}
+
+/** Upsert follows into the server-wide catalog (keyed by Windguru stationId). */
+export function upsertSharedStations(store, stations = []) {
+  if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
+  if (!stations?.length) return store.sharedStations;
+  const map = new Map();
+  for (const s of store.sharedStations) {
+    if (s?.stationId?.trim()) map.set(String(s.stationId).trim(), s);
+  }
+  for (const s of stations) {
+    const sid = s?.stationId?.trim();
+    if (!sid) continue;
+    const prev = map.get(sid);
+    if (!prev) {
+      map.set(sid, { ...s });
+      continue;
+    }
+    map.set(sid, {
+      ...prev,
+      ...s,
+      // Prefer richer Windguru naming / live-link metadata when present.
+      sourceName: s.sourceName || prev.sourceName || null,
+      liveStationId: s.liveStationId || prev.liveStationId || null,
+      linkedLiveStation: s.linkedLiveStation || prev.linkedLiveStation || null,
+      liveLinkWarning:
+        s.liveLinkWarning != null ? s.liveLinkWarning : prev.liveLinkWarning ?? null,
+      nickname: prev.nickname || s.nickname || '',
+      kind: s.kind || prev.kind,
+      rule: prev.rule || s.rule,
+      enabled: prev.enabled !== false,
+    });
+  }
+  store.sharedStations = [...map.values()];
+  return store.sharedStations;
+}
+
+/** Fresh local ids so alert state does not collide across users. */
+export function cloneStationsForBag(stations = []) {
+  return (stations || []).map((s) => ({
+    ...s,
+    id: `st_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+  }));
+}
+
+/**
+ * If a user/device bag has no follows, seed from the shared catalog.
+ * Returns true when the bag was modified.
+ * @deprecated Do not auto-seed — catalog is suggestion-only.
+ */
+export function seedBagFromShared(bag, store) {
+  return false;
+}
+
+/** Public catalog rows for follow suggestions (no alert state / push tokens). */
+export function publicCatalogStations(store) {
+  return (store.sharedStations || [])
+    .filter((s) => s?.stationId?.trim())
+    .map((s) => ({
+      stationId: String(s.stationId).trim(),
+      kind: s.kind === 'spot' ? 'spot' : 'station',
+      sourceName: s.sourceName || null,
+      nickname: '',
+      liveStationId: s.liveStationId || null,
+      linkedLiveStation: s.linkedLiveStation || null,
+      liveLinkWarning: s.liveLinkWarning || null,
+    }));
 }
 
 export function publicUser(user) {

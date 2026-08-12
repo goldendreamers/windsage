@@ -104,6 +104,7 @@ export function createFollowedStation(
     stationId: stationId.trim(),
     kind,
     nickname: nickname.trim(),
+    sourceName: partial?.sourceName?.trim() || null,
     enabled: partial?.enabled ?? true,
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
@@ -114,7 +115,125 @@ export function createFollowedStation(
 
 export function displayName(station: FollowedStation): string {
   if (station.nickname.trim()) return station.nickname.trim();
+  return windguruName(station);
+}
+
+/** Official Windguru name for a follow (ignores user nickname). */
+export function windguruName(station: FollowedStation): string {
+  const source = (station.sourceName ?? '').trim();
+  if (source) return source;
+  const linked =
+    (station.linkedLiveStation?.spotname ?? '').trim() ||
+    (station.linkedLiveStation?.name ?? '').trim();
+  if (linked) return linked;
   return station.kind === 'spot'
     ? `Spot ${station.stationId}`
     : `Station ${station.stationId}`;
+}
+
+/** Match a follow by the Windguru ID the user chose (`stationId` only).
+
+ * Do not match on `liveStationId`: many spots share one live sensor, and after
+ * editing a follow to a new location the old spot ID must be free to follow again.
+ */
+export function findExistingFollow(
+  stations: FollowedStation[],
+  ids: {
+    stationId?: string | null;
+    /** @deprecated Ignored — kept so older call sites keep typing. */
+    inputId?: string | null;
+    /** @deprecated Ignored — live link is not a follow identity. */
+    liveStationId?: string | null;
+  },
+): FollowedStation | null {
+  const want = (ids.stationId ?? '').trim();
+  if (!want) return null;
+  for (const station of stations) {
+    if ((station.stationId ?? '').trim() === want) return station;
+  }
+  return null;
+}
+
+/** Typeahead filter over already-followed stations (Windguru name / ids). */
+export function suggestExistingFollows(
+  stations: FollowedStation[],
+  query: string,
+  limit = 6,
+): FollowedStation[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const digits = q.replace(/\D/g, '');
+  const out: FollowedStation[] = [];
+  for (const station of stations) {
+    const label = windguruName(station).toLowerCase();
+    const sid = station.stationId.trim().toLowerCase();
+    const live = (station.liveStationId ?? '').trim().toLowerCase();
+    const hit =
+      label.includes(q) ||
+      sid.includes(q) ||
+      (live && live.includes(q)) ||
+      (digits.length > 0 &&
+        (sid.includes(digits) || (live && live.includes(digits))));
+    if (hit) {
+      out.push(station);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+export type CatalogStation = Pick<
+  FollowedStation,
+  | 'stationId'
+  | 'kind'
+  | 'sourceName'
+  | 'liveStationId'
+  | 'linkedLiveStation'
+  | 'liveLinkWarning'
+>;
+
+/** Catalog suggestions excluding IDs already in the user's follow list. */
+export function suggestCatalogStations(
+  catalog: CatalogStation[],
+  existing: FollowedStation[],
+  query: string,
+  limit = 6,
+): CatalogStation[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const digits = q.replace(/\D/g, '');
+  const taken = new Set<string>();
+  for (const s of existing) {
+    if (s.stationId?.trim()) taken.add(s.stationId.trim());
+  }
+  const out: CatalogStation[] = [];
+  for (const entry of catalog) {
+    const sid = entry.stationId.trim();
+    if (!sid || taken.has(sid)) continue;
+    const asFollow = {
+      id: `catalog_${sid}`,
+      stationId: sid,
+      kind: entry.kind,
+      nickname: '',
+      sourceName: entry.sourceName ?? null,
+      enabled: true,
+      rule: DEFAULT_RULE,
+      liveStationId: entry.liveStationId ?? null,
+      linkedLiveStation: entry.linkedLiveStation ?? null,
+      liveLinkWarning: entry.liveLinkWarning ?? null,
+    } satisfies FollowedStation;
+    const label = windguruName(asFollow).toLowerCase();
+    const live = (entry.liveStationId ?? '').trim().toLowerCase();
+    const hit =
+      label.includes(q) ||
+      sid.toLowerCase().includes(q) ||
+      (live && live.includes(q)) ||
+      (digits.length > 0 &&
+        (sid.includes(digits) || (live && live.includes(digits))));
+    if (hit) {
+      out.push(entry);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
 }

@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -9,6 +9,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  DEFAULT_RULE,
+  type CatalogStation,
+  findExistingFollow,
+  suggestCatalogStations,
+  suggestExistingFollows,
+  windguruName,
+} from '../shared/defaults';
 import { colors } from '../shared/theme';
 import type { FollowedStation, WindguruKind } from '../shared/types';
 import { followTargetForKind, normalizeWindguruFollowInput, parseWindguruRef } from '../core/windguru';
@@ -20,12 +28,24 @@ type Props = {
     stationId: string,
     nickname: string,
     kind: WindguruKind,
-    extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+    extras?: Pick<
+      FollowedStation,
+      'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+    >,
   ) => void;
-  existingIds: string[];
+  onReuse: (followId: string) => void;
+  existingStations: FollowedStation[];
+  catalogStations?: CatalogStation[];
 };
 
-export function AddStationModal({ visible, onClose, onSave, existingIds }: Props) {
+export function AddStationModal({
+  visible,
+  onClose,
+  onSave,
+  onReuse,
+  existingStations,
+  catalogStations = [],
+}: Props) {
   const [stationId, setStationId] = useState('');
   const [nickname, setNickname] = useState('');
   const [kind, setKind] = useState<WindguruKind>('station');
@@ -33,6 +53,15 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
   const [busy, setBusy] = useState(false);
   const [linkHint, setLinkHint] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+
+  const existingSuggestions = useMemo(
+    () => suggestExistingFollows(existingStations, stationId),
+    [existingStations, stationId],
+  );
+  const catalogSuggestions = useMemo(
+    () => suggestCatalogStations(catalogStations, existingStations, stationId),
+    [catalogStations, existingStations, stationId],
+  );
 
   const reset = () => {
     setStationId('');
@@ -48,6 +77,41 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
     reset();
     onClose();
   };
+
+  const pickExisting = (follow: FollowedStation) => {
+    void Haptics.selectionAsync();
+    reset();
+    onReuse(follow.id);
+  };
+
+  const pickCatalog = (entry: CatalogStation) => {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const name =
+      nickname.trim() ||
+      entry.sourceName?.trim() ||
+      (entry.kind === 'spot' ? `Spot ${entry.stationId}` : `Station ${entry.stationId}`);
+    reset();
+    onSave(entry.stationId, name, entry.kind, {
+      sourceName: entry.sourceName ?? null,
+      liveStationId: entry.liveStationId ?? null,
+      linkedLiveStation: entry.linkedLiveStation ?? null,
+      liveLinkWarning: entry.liveLinkWarning ?? null,
+    });
+  };
+
+  const catalogLabel = (entry: CatalogStation) =>
+    windguruName({
+      id: `catalog_${entry.stationId}`,
+      stationId: entry.stationId,
+      kind: entry.kind,
+      nickname: '',
+      sourceName: entry.sourceName ?? null,
+      enabled: true,
+      rule: DEFAULT_RULE,
+      liveStationId: entry.liveStationId ?? null,
+      linkedLiveStation: entry.linkedLiveStation ?? null,
+      liveLinkWarning: entry.liveLinkWarning ?? null,
+    });
 
   const applyIdText = (text: string) => {
     setStationId(text);
@@ -72,18 +136,22 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
       const resolved = await normalizeWindguruFollowInput(stationId);
       const target = followTargetForKind(kind, resolved);
 
-      if (
-        existingIds.includes(target.stationId) ||
-        existingIds.includes(resolved.inputId) ||
-        existingIds.includes(resolved.liveStationId)
-      ) {
-        setError('You already follow this spot or station');
+      const existing = findExistingFollow(existingStations, {
+        stationId: target.stationId,
+      });
+      if (existing) {
+        void Haptics.selectionAsync();
+        reset();
+        onReuse(existing.id);
         return;
       }
-      const name =
-        nickname.trim() ||
-        target.spotName ||
-        (target.kind === 'spot' ? `Spot ${target.stationId}` : '');
+
+      const sourceName =
+        target.spotName?.trim() ||
+        target.linkedLiveStation?.spotname?.trim() ||
+        target.linkedLiveStation?.name?.trim() ||
+        null;
+      const name = nickname.trim() || sourceName || '';
       if (kind === 'station' && resolved.kind === 'spot' && resolved.hasLiveStation) {
         setLinkHint(
           `Spot ${resolved.inputId} → live station ${resolved.liveStationId} (you chose Station)`,
@@ -99,13 +167,20 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
         liveStationId: target.liveStationId,
         linkedLiveStation: target.linkedLiveStation,
         liveLinkWarning: target.liveLinkWarning,
+        sourceName,
       });
       reset();
     } catch (e) {
       if (kind === 'spot') {
         const id = parsed.id;
-        if (existingIds.includes(id)) {
-          setError('You already follow this spot or station');
+        const existing = findExistingFollow(existingStations, {
+          stationId: id,
+          inputId: id,
+        });
+        if (existing) {
+          void Haptics.selectionAsync();
+          reset();
+          onReuse(existing.id);
           return;
         }
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -126,8 +201,9 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
         <View style={styles.sheet}>
           <Text style={styles.title}>Follow Windguru</Text>
           <Text style={styles.hint}>
-            Choose spot or live station, then paste a Windguru URL or number. Forecast-only spots
-            are allowed and link to the nearest live station for readings.
+            Choose spot or live station, then paste a Windguru URL or number. Matching follows you
+            already have open instead of duplicating. House catalog spots appear as suggestions
+            only — they are not added until you pick one.
           </Text>
 
           <Text style={styles.label}>Type</Text>
@@ -183,6 +259,57 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
             autoCorrect={false}
             editable={!busy}
           />
+
+          {existingSuggestions.length > 0 ? (
+            <View style={styles.suggestions}>
+              <Text style={styles.suggestLabel}>Already following</Text>
+              {existingSuggestions.map((follow) => (
+                <Pressable
+                  key={follow.id}
+                  style={styles.suggestRow}
+                  onPress={() => pickExisting(follow)}
+                  disabled={busy}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.suggestName}>{windguruName(follow)}</Text>
+                    <Text style={styles.suggestMeta}>
+                      {follow.kind === 'spot' ? 'Spot' : 'Station'} #{follow.stationId}
+                      {follow.liveStationId && follow.liveStationId !== follow.stationId
+                        ? ` · live #${follow.liveStationId}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.suggestOpen}>Open</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {catalogSuggestions.length > 0 ? (
+            <View style={styles.suggestions}>
+              <Text style={styles.suggestLabel}>Suggested from house catalog</Text>
+              {catalogSuggestions.map((entry) => (
+                <Pressable
+                  key={`cat_${entry.stationId}`}
+                  style={styles.suggestRow}
+                  onPress={() => pickCatalog(entry)}
+                  disabled={busy}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.suggestName}>{catalogLabel(entry)}</Text>
+                    <Text style={styles.suggestMeta}>
+                      {entry.kind === 'spot' ? 'Spot' : 'Station'} #{entry.stationId}
+                      {entry.liveStationId && entry.liveStationId !== entry.stationId
+                        ? ` · live #${entry.liveStationId}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.suggestOpen}>Add</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}
           {warning ? <Text style={styles.warning}>{warning}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -275,6 +402,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: colors.line,
+  },
+  suggestions: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.input,
+    overflow: 'hidden',
+  },
+  suggestLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  suggestName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  suggestMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  suggestOpen: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
   },
   linkHint: {
     color: colors.accent,

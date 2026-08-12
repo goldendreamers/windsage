@@ -11,10 +11,12 @@ import {
 } from 'react-native';
 import type { CloudUser } from '../core/cloud';
 import {
+  CloudError,
   fetchAuthProviders,
   fetchMe,
   loginAccount,
   logoutAccount,
+  pullMyStations,
   registerAccount,
   startGoogleSignIn,
 } from '../core/cloud';
@@ -38,6 +40,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -72,6 +75,26 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function finishGoogle(mode: 'login' | 'link') {
+    const result = await startGoogleSignIn(mode);
+    // Web navigates away; native AuthSession returns here.
+    if (!result) return;
+    if (result.error) throw new Error(result.error);
+    if (!result.token) throw new Error('Google sign-in returned no session');
+    const me = await fetchMe();
+    if (!me) throw new Error('Signed in but could not load account');
+    if (mode === 'link') {
+      setUser(me);
+      return;
+    }
+    const pulled = await pullMyStations();
+    onAuthed({
+      user: me,
+      stations: pulled?.stations || [],
+      pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+    });
   }
 
   if (loading) {
@@ -110,7 +133,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
             <Pressable
               style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
               disabled={busy}
-              onPress={() => void run(async () => startGoogleSignIn('link'))}
+              onPress={() => void run(async () => finishGoogle('link'))}
             >
               <Text style={styles.btnSecondaryText}>Link Google</Text>
             </Pressable>
@@ -136,12 +159,36 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
             <TextInput
               style={styles.input}
               value={username}
-              onChangeText={setUsername}
+              onChangeText={(text) => {
+                setUsername(text);
+                setNameSuggestions([]);
+              }}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="yourname"
               placeholderTextColor={colors.muted}
             />
+            {nameSuggestions.length > 0 ? (
+              <View style={styles.suggestWrap}>
+                <Text style={styles.hint}>Try one of these instead:</Text>
+                <View style={styles.suggestRow}>
+                  {nameSuggestions.map((name) => (
+                    <Pressable
+                      key={name}
+                      style={styles.suggestChip}
+                      onPress={() => {
+                        void Haptics.selectionAsync();
+                        setUsername(name);
+                        setNameSuggestions([]);
+                        setError(null);
+                      }}
+                    >
+                      <Text style={styles.suggestChipText}>{name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
             <Text style={[styles.label, styles.spaced]}>Password</Text>
             <TextInput
               style={styles.input}
@@ -170,9 +217,17 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
                 disabled={busy}
                 onPress={() =>
                   void run(async () => {
-                    const data = await registerAccount(username.trim(), password);
-                    setUser(data.user);
-                    onAuthed(data);
+                    setNameSuggestions([]);
+                    try {
+                      const data = await registerAccount(username.trim(), password);
+                      setUser(data.user);
+                      onAuthed(data);
+                    } catch (e) {
+                      if (e instanceof CloudError && e.suggestions?.length) {
+                        setNameSuggestions(e.suggestions.slice(0, 2));
+                      }
+                      throw e;
+                    }
                   })
                 }
               >
@@ -186,7 +241,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
               <Pressable
                 style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
                 disabled={busy}
-                onPress={() => void run(async () => startGoogleSignIn('login'))}
+                onPress={() => void run(async () => finishGoogle('login'))}
               >
                 <Text style={styles.btnPrimaryText}>Continue with Google</Text>
               </Pressable>
@@ -230,6 +285,17 @@ const styles = StyleSheet.create({
   label: { color: colors.text, fontSize: 14, fontWeight: '600' },
   spaced: { marginTop: 8 },
   hint: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  suggestWrap: { gap: 8, marginTop: 8 },
+  suggestRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  suggestChip: {
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  suggestChipText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   input: {
     backgroundColor: colors.input,
     borderRadius: 12,

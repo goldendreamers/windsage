@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { BootScreen } from '../components/BootScreen';
 import { AccountScreen } from '../screens/AccountScreen';
 import { DownloadScreen } from '../screens/DownloadScreen';
@@ -12,9 +12,14 @@ import {
   type CloudUser,
   getCloudBaseUrl,
   consumeAuthRedirectParams,
+  consumeAuthRedirectParamsFromUrl,
+  fetchCatalogStations,
+  fetchAnnouncement,
   fetchCloudSnapshot,
   fetchMe,
   formatCloudAge,
+  getDismissedAnnouncementId,
+  dismissAnnouncement,
   pingCloud,
   pullMyStations,
   registerWithCloud,
@@ -22,9 +27,12 @@ import {
   resetCloudAlert,
   snapshotsToLive,
   syncStationsToCloud,
+  type CloudAnnouncement,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, createFollowedStation, displayName } from '../shared/defaults';
-import { configureAndroidChannel, ensureNotificationPermissions } from '../core/notifications';
+import { DEFAULT_SETTINGS, createFollowedStation, displayName, windguruName } from '../shared/defaults';
+import type { CatalogStation } from '../shared/defaults';
+import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
+import { initPwaInstallCapture } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
 import { loadSettings, saveSettings } from '../core/storage';
 import { colors } from '../shared/theme';
@@ -63,6 +71,10 @@ async function hapticError() {
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
+if (Platform.OS === 'web') {
+  initPwaInstallCapture();
+}
+
 type LiveEntry = {
   reading: StationReading | null;
   result: CheckResult | null;
@@ -98,6 +110,8 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
+  const [catalogStations, setCatalogStations] = useState<CatalogStation[]>([]);
+  const [announcement, setAnnouncement] = useState<CloudAnnouncement | null>(null);
 
   const settingsRef = useRef(settings);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,6 +122,27 @@ export default function App() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2800);
   }, []);
+
+  const loadCatalog = useCallback(async () => {
+    const rows = await fetchCatalogStations();
+    setCatalogStations(rows);
+  }, []);
+
+  const loadAnnouncement = useCallback(async () => {
+    const next = await fetchAnnouncement();
+    if (!next) {
+      setAnnouncement(null);
+      return;
+    }
+    const dismissed = await getDismissedAnnouncementId();
+    setAnnouncement(dismissed === next.id ? null : next);
+  }, []);
+
+  const onDismissAnnouncement = useCallback(async () => {
+    if (!announcement) return;
+    await dismissAnnouncement(announcement.id);
+    setAnnouncement(null);
+  }, [announcement]);
 
   const applySnapshots = useCallback((snapshots: Record<string, LiveEntry>) => {
     setLive(snapshots);
@@ -141,6 +176,8 @@ export default function App() {
         const snap = await fetchCloudSnapshot();
         setLastPollAt(snap.lastPollAt);
         setCloudStatus(`cloud · ${formatCloudAge(snap.lastPollAt)}`);
+        void loadCatalog();
+        void loadAnnouncement();
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
@@ -152,7 +189,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [applySnapshots, showToast],
+    [applySnapshots, loadAnnouncement, loadCatalog, showToast],
   );
 
   const persistSettings = useCallback(
@@ -206,8 +243,16 @@ export default function App() {
         applySnapshots(snapshotsToLive(snapshots));
         setLastPollAt(Date.now());
         setCloudStatus('cloud · just now');
+        const snap = snapshots[station.id];
+        if (snap?.result?.shouldNotify) {
+          await sendThresholdNotification(station, snap.result);
+        }
         await hapticLight();
-        showToast('Cloud check complete');
+        showToast(
+          snap?.result?.shouldNotify
+            ? 'Alert fired — check phone notifications'
+            : 'Cloud check complete',
+        );
       } catch (error) {
         await hapticError();
         showToast(error instanceof Error ? error.message : 'Check failed');
@@ -219,9 +264,26 @@ export default function App() {
   );
 
   const openDownload = useCallback(() => {
+    // RN-web Linking.openURL is unreliable for same-site routes (often no-ops).
+    // Drive the public /download page via history + in-app screen instead.
     setAccountOpen(false);
     setActiveStationId(null);
     setDownloadOpen(true);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      if (host === 'windsage.nimrod.bio') {
+        const next = 'https://windsage.nimrod.bio/download';
+        if (window.location.href.replace(/\/+$/, '') !== next.replace(/\/+$/, '')) {
+          window.history.pushState({ windsage: '/download' }, '', '/download');
+        }
+        return;
+      }
+      // Dev / other hosts: jump to the public download page.
+      if (host !== 'localhost' && host !== '127.0.0.1' && !host.endsWith('.ts.net')) {
+        window.location.assign('https://windsage.nimrod.bio/download');
+        return;
+      }
+    }
     setWebPath('/download');
   }, []);
 
@@ -237,6 +299,37 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // Native deep-link fallback if AuthSession hands off via windsage://auth
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let cancelled = false;
+    const handleUrl = async (url: string | null) => {
+      if (!url || cancelled) return;
+      const oauth = await consumeAuthRedirectParamsFromUrl(url);
+      if (!oauth || cancelled) return;
+      if (oauth.error) {
+        showToast(oauth.error);
+        return;
+      }
+      if (!oauth.token) return;
+      const me = await fetchMe().catch(() => null);
+      const pulled = await pullMyStations().catch(() => null);
+      if (me && !cancelled) {
+        await applyAccountPayload({
+          user: me,
+          stations: pulled?.stations || [],
+          pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+        });
+      }
+    };
+    void Linking.getInitialURL().then((url) => void handleUrl(url));
+    const sub = Linking.addEventListener('url', ({ url }) => void handleUrl(url));
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, [applyAccountPayload, showToast]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -244,6 +337,7 @@ export default function App() {
       try {
         await configureAndroidChannel();
         await ensureNotificationPermissions();
+        await registerWebPushSubscription().catch(() => null);
         await unregisterBackgroundFetch().catch(() => undefined);
 
         const oauth = await consumeAuthRedirectParams();
@@ -278,8 +372,13 @@ export default function App() {
         }
 
         await registerWithCloud().catch(() => undefined);
-        if (!cancelled) await refreshFromCloud('auto');
-      } finally {
+        // Show local UI immediately — cloud sync continues in background.
+        if (!cancelled) {
+          setLoading(false);
+          await SplashScreen.hideAsync().catch(() => undefined);
+          void refreshFromCloud('auto');
+        }
+      } catch {
         if (!cancelled) {
           setLoading(false);
           await SplashScreen.hideAsync().catch(() => undefined);
@@ -318,7 +417,10 @@ export default function App() {
       stationId: string,
       nickname: string,
       kind: FollowedStation['kind'] = 'station',
-      extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+      extras?: Pick<
+        FollowedStation,
+        'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+      >,
     ) => {
       const station = createFollowedStation(stationId, nickname, { kind, ...extras });
       const payload = {
@@ -329,11 +431,24 @@ export default function App() {
       setAddOpen(false);
       setActiveStationId(station.id);
       const warn = extras?.liveLinkWarning ? ' · nearest live linked' : '';
-      showToast(
-        `Following ${nickname || (kind === 'spot' ? `Spot ${stationId}` : `Station ${stationId}`)}${warn}`,
-      );
+      const label =
+        extras?.sourceName?.trim() ||
+        nickname ||
+        (kind === 'spot' ? `Spot ${stationId}` : `Station ${stationId}`);
+      showToast(`Following ${label}${warn}`);
     },
     [persistSettings, showToast],
+  );
+
+  const reuseStation = useCallback(
+    (followId: string) => {
+      const existing = settingsRef.current.stations.find((s) => s.id === followId);
+      setAddOpen(false);
+      if (!existing) return;
+      setActiveStationId(existing.id);
+      showToast(`Already following — opened ${windguruName(existing)}`);
+    },
+    [showToast],
   );
 
   const unfollow = useCallback(
@@ -430,15 +545,22 @@ export default function App() {
           live={live}
           refreshing={refreshing}
           addOpen={addOpen}
-          onOpenAdd={() => setAddOpen(true)}
+          onOpenAdd={() => {
+            setAddOpen(true);
+            void loadCatalog();
+          }}
           onCloseAdd={() => setAddOpen(false)}
           onAdd={(stationId, nickname, kind, extras) =>
             void addStation(stationId, nickname, kind, extras)
           }
+          onReuse={reuseStation}
+          catalogStations={catalogStations}
           onRefresh={() => void refreshFromCloud('manual')}
           onOpenStation={setActiveStationId}
           onOpenAccount={() => setAccountOpen(true)}
           onOpenDownload={openDownload}
+          announcement={announcement}
+          onDismissAnnouncement={() => void onDismissAnnouncement()}
           accountLabel={
             account
               ? account.username

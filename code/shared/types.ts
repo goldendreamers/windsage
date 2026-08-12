@@ -68,6 +68,8 @@ export interface FollowedStation {
    */
   kind: WindguruKind;
   nickname: string;
+  /** Official Windguru spot/station name (not the user nickname). */
+  sourceName?: string | null;
   enabled: boolean;
   rule: AlertRule;
   /** Live station used for sensor readings (native link or nearest). */

@@ -98,6 +98,41 @@ def snapshot() -> Path:
     return target
 
 
+def patch_web_icons(dist: Path = DIST) -> None:
+    """Ensure sharp PWA / home-screen icons are linked (not only the tiny favicon)."""
+    index = dist / "index.html"
+    if not index.exists():
+        return
+    html = index.read_text(encoding="utf-8")
+    inject = (
+        '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+        '<link rel="manifest" href="/manifest.webmanifest">'
+        '<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">'
+    )
+    if "manifest.webmanifest" not in html and "</head>" in html:
+        html = html.replace("</head>", inject + "</head>", 1)
+        index.write_text(html, encoding="utf-8")
+        print("patched index.html with PWA icon links")
+    else:
+        print("index.html already has PWA icon links (or no </head>)")
+
+
+def build_downloadable_zip(dist: Path = DIST) -> Path:
+    """Ship a downloadable static web build next to the live site."""
+    import zipfile
+
+    zip_path = dist / "windsage-web.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(dist.rglob("*")):
+            if not path.is_file() or path == zip_path:
+                continue
+            zf.write(path, path.relative_to(dist).as_posix())
+    print(f"downloadable zip: {zip_path} ({zip_path.stat().st_size} bytes)")
+    return zip_path
+
+
 def deploy(remote: str = "wald-mc", remote_web: str = "/data/windsage/web") -> None:
     env = os.environ.copy()
     # Cloud code without wiping remote web/
@@ -110,6 +145,8 @@ def deploy(remote: str = "wald-mc", remote_web: str = "/data/windsage/web") -> N
             "data",
             "--exclude",
             "web",
+            "--exclude",
+            "node_modules",
             # Operator secrets on Wald — never wipe with --delete
             "--exclude",
             "oauth.env",
@@ -117,6 +154,15 @@ def deploy(remote: str = "wald-mc", remote_web: str = "/data/windsage/web") -> N
             "*.env",
             str(ROOT / "code" / "cloud") + "/",
             f"{remote}:/data/windsage/",
+        ],
+        env=env,
+    )
+    # Web Push dependency (optional until VAPID keys exist)
+    run(
+        [
+            "ssh",
+            remote,
+            "cd /data/windsage && /usr/bin/npm install --omit=dev --no-fund --no-audit",
         ],
         env=env,
     )
@@ -165,6 +211,8 @@ def main() -> int:
         os.environ["PATH"] = f"{node_bin}:{path_bin}"
 
     run(["npx", "expo", "export", "--platform", "web"])
+    patch_web_icons(DIST)
+    build_downloadable_zip(DIST)
     snapshot()
     deleted = prune_versions()
     print(f"pruned {len(deleted)} version(s)")
