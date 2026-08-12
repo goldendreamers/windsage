@@ -18,10 +18,13 @@ import {
   logoutAccount,
   pullMyStations,
   registerAccount,
+  sendTestPhoneAlert,
   startGoogleSignIn,
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
+import { registerWebPushSubscription, ensureNotificationPermissions, isInstalledPwa } from '../core/notifications';
+import { isRunningAsInstalledApp } from '../core/pwaInstall';
 
 type Props = {
   onBack: () => void;
@@ -42,6 +45,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [phoneAlertMsg, setPhoneAlertMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,6 +269,59 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         </>
       )}
 
+      <Section
+        title="Phone alerts"
+        icon="bell"
+        hint="Must wake the lock screen — not only after you open the phone."
+      >
+        {!isInstalledPwa() && !isRunningAsInstalledApp() ? (
+          <Text style={[styles.hint, styles.warnHint]}>
+            Open Windsage from the home-screen icon (installed app), not a Chrome tab. Lock-screen
+            wake is unreliable in a normal browser tab.
+          </Text>
+        ) : (
+          <Text style={styles.hint}>Running as installed app ✓</Text>
+        )}
+        <Text style={styles.hint}>
+          Android (required for alerts while locked):{'\n'}
+          1. Settings → Apps → Windsage (and Chrome) → Battery → Unrestricted{'\n'}
+          2. Notifications → Lock screen → Show all / Alerting{'\n'}
+          3. Turn Adaptive Battery off if alerts still wait for unlock{'\n'}
+          Then lock the phone, wait 30s, and tap the test below.
+        </Text>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
+          disabled={busy}
+          onPress={() =>
+            void run(async () => {
+              setPhoneAlertMsg(null);
+              const allowed = await ensureNotificationPermissions();
+              if (!allowed) {
+                throw new CloudError(
+                  'Notifications are blocked. Enable them in phone settings for Windsage / Chrome.',
+                  400,
+                );
+              }
+              await registerWebPushSubscription();
+              const result = await sendTestPhoneAlert();
+              const lockHint =
+                !isInstalledPwa() && !isRunningAsInstalledApp()
+                  ? ' Tip: install + open from home screen, then set Battery → Unrestricted.'
+                  : ' Keep the phone locked — it should buzz without unlocking.';
+              setPhoneAlertMsg(
+                result.delivered > 0
+                  ? `Test sent.${lockHint}`
+                  : 'Nothing was delivered.',
+              );
+              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            })
+          }
+        >
+          <Text style={styles.btnPrimaryText}>Send test phone alert</Text>
+        </Pressable>
+        {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
+      </Section>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
   );
@@ -285,6 +342,7 @@ const styles = StyleSheet.create({
   label: { color: colors.text, fontSize: 14, fontWeight: '600' },
   spaced: { marginTop: 8 },
   hint: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  warnHint: { color: '#E8B84A' },
   suggestWrap: { gap: 8, marginTop: 8 },
   suggestRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   suggestChip: {

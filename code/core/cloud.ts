@@ -543,6 +543,41 @@ export async function resetCloudAlert(followId: string): Promise<void> {
   });
 }
 
+/** Register web push (if needed) and ask the cloud to send a Discord-style test alert. */
+export async function sendTestPhoneAlert(): Promise<{ delivered: number }> {
+  const { registerWebPushSubscription, getCachedWebPushSubscription } = await import(
+    './notifications'
+  );
+  await registerWebPushSubscription().catch(() => null);
+  const webPushSubscription = getCachedWebPushSubscription();
+  const creds = await getDeviceCreds();
+  // Ensure device exists + subscription stored.
+  await cloudFetch('/v1/devices', {
+    method: 'POST',
+    body: JSON.stringify({
+      deviceId: creds.deviceId,
+      secret: creds.secret,
+      webPushSubscription: webPushSubscription || undefined,
+    }),
+  });
+  const data = await cloudFetch<{ ok: boolean; delivered?: number; error?: string }>(
+    `/v1/devices/${encodeURIComponent(creds.deviceId)}/test-push`,
+    {
+      method: 'POST',
+      secret: creds.secret,
+      body: JSON.stringify({
+        webPushSubscription: webPushSubscription || undefined,
+        message:
+          'Phone alerts work. You will get a message like this when wind hits your rule.',
+      }),
+    },
+  );
+  if (!data.ok) {
+    throw new CloudError(data.error || 'Test alert failed', 400);
+  }
+  return { delivered: data.delivered || 0 };
+}
+
 export async function pingCloud(): Promise<boolean> {
   try {
     const data = await cloudFetch<{ ok: boolean }>('/health', { method: 'GET' });

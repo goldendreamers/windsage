@@ -159,7 +159,7 @@ export async function findNearestLiveStation(lat, lon) {
 
 function formatLinkedWarning(linked) {
   const km = linked.distanceKm.toFixed(1);
-  return `No live sensor on this spot — using nearest live station ${linked.name} (#${linked.id}, ${km} km)`;
+  return `No live sensor on this spot — showing forecast; alerts use nearest live ${linked.name} (#${linked.id}, ${km} km)`;
 }
 
 /** Look up official name for a live station id from Windguru station_list. */
@@ -301,9 +301,11 @@ export async function fixSpotStations(stations = []) {
     }
     const needsEnrich =
       !(station.kind === 'spot' || station.kind === 'station') ||
-      (station.kind === 'spot' && !station.liveStationId);
+      (station.kind === 'spot' && !station.liveStationId) ||
+      station.enabled === undefined ||
+      station.enabled === null;
     if (!needsEnrich) {
-      out.push(station);
+      out.push({ ...station, enabled: station.enabled !== false });
       continue;
     }
     try {
@@ -311,6 +313,7 @@ export async function fixSpotStations(stations = []) {
       changed += 1;
       out.push({
         ...station,
+        enabled: station.enabled !== false,
         kind: station.kind === 'spot' || station.kind === 'station' ? station.kind : resolved.kind,
         liveStationId: resolved.liveStationId,
         linkedLiveStation: resolved.linkedLiveStation || null,
@@ -330,6 +333,7 @@ export async function fixSpotStations(stations = []) {
     } catch {
       out.push({
         ...station,
+        enabled: station.enabled !== false,
         kind: station.kind === 'spot' ? 'spot' : 'station',
       });
       changed += 1;
@@ -344,6 +348,106 @@ export async function fetchCurrentReading(stationId) {
     throw new Error('No live station available for readings');
   }
   return tryStationCurrent(resolved.liveStationId);
+}
+
+/**
+ * Current (nearest-hour) GFS/model forecast for a Windguru spot.
+ * Used when a spot has no native live sensor — UI shows forecast; alerts use nearest live.
+ */
+export async function fetchSpotForecastNow(spotId, preferredModel = null) {
+  const id = String(spotId || '').trim();
+  if (!/^\d+$/.test(id)) throw new Error('Spot ID must be numeric');
+
+  const spot = await fetchJson(`https://www.windguru.cz/${id}`, {
+    q: 'spot',
+    id_spot: id,
+  });
+  const models = Array.isArray(spot?.models)
+    ? spot.models.map((m) => Number(m)).filter((n) => Number.isFinite(n))
+    : [];
+  const idModel =
+    preferredModel != null && models.includes(Number(preferredModel))
+      ? Number(preferredModel)
+      : models.includes(3)
+        ? 3
+        : models[0];
+  if (idModel == null) {
+    throw new Error(`Windguru spot #${id} has no forecast models`);
+  }
+
+  const data = await fetchJson(`https://www.windguru.cz/${id}`, {
+    q: 'forecast',
+    id_spot: id,
+    id_model: String(idModel),
+  });
+  if (data?.return === 'error') {
+    throw new Error(data.message || data.error_details || 'Forecast unavailable');
+  }
+  const fcst = data?.fcst;
+  if (!fcst || !Array.isArray(fcst.hours) || !fcst.hours.length) {
+    throw new Error('Forecast data missing');
+  }
+
+  const initstamp = asNumber(fcst.initstamp) ?? 0;
+  const hours = fcst.hours.map((h) => asNumber(h) ?? 0);
+  const nowSec = Date.now() / 1000;
+  let best = 0;
+  let bestDelta = Infinity;
+  for (let i = 0; i < hours.length; i += 1) {
+    const t = initstamp + hours[i] * 3600;
+    const delta = Math.abs(t - nowSec);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+
+  const unixtime = initstamp + hours[best] * 3600;
+  const windspd = Array.isArray(fcst.WINDSPD) ? fcst.WINDSPD : [];
+  const gust = Array.isArray(fcst.GUST) ? fcst.GUST : [];
+  const winddir = Array.isArray(fcst.WINDDIR) ? fcst.WINDDIR : [];
+  const tmp = Array.isArray(fcst.TMP)
+    ? fcst.TMP
+    : Array.isArray(fcst.TMPE)
+      ? fcst.TMPE
+      : [];
+  const waveKeys = ['HTsGW', 'HTSGW', 'SWELL1', 'wave_height'];
+  let wave = null;
+  for (const key of waveKeys) {
+    if (Array.isArray(fcst[key])) {
+      wave = asNumber(fcst[key][best]);
+      if (wave != null) break;
+    }
+  }
+
+  return {
+    reading: {
+      wind_avg: asNumber(windspd[best]),
+      wind_max: asNumber(gust[best]),
+      wind_min: null,
+      wind_direction: asNumber(winddir[best]),
+      temperature: asNumber(tmp[best]),
+      wave_height: wave,
+      datetime: new Date(unixtime * 1000).toISOString(),
+      unixtime,
+    },
+    modelName:
+      fcst.model_name ||
+      data?.wgmodel?.model_name ||
+      data?.model ||
+      `model ${idModel}`,
+    idModel,
+    hour: hours[best],
+    spotName: typeof spot?.spotname === 'string' ? spot.spotname : undefined,
+  };
+}
+
+/** Spot uses nearest-live fallback (no native sensor on the spot). */
+export function isForecastOnlySpot(station) {
+  return (
+    station?.kind === 'spot' &&
+    !!(station.linkedLiveStation || station.liveLinkWarning)
+  );
 }
 
 export async function fetchRecentHistory(stationId, metric, hours, avgMinutes = 10) {
@@ -492,8 +596,9 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       ? Math.max(nowMs - conditionSinceMs, historySustainedMs)
       : 0;
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
+  const monitoringOn = station.enabled !== false;
   const shouldNotify =
-    station.enabled && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
   if (shouldNotify) notifiedForRun = true;
 
   const unit =
@@ -516,7 +621,7 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
     reading.wind_avg == null ? 'n/a' : `${reading.wind_avg.toFixed(1)} kt`;
 
   let message;
-  if (!station.enabled) message = 'Monitoring paused';
+  if (!monitoringOn) message = 'Monitoring paused';
   else if (value == null) message = `${label} is not reported by this station`;
   else if (!metricOk)
     message = `Waiting — ${label} ${valueText} (need ${cmp}${station.rule.threshold} ${unit})`;

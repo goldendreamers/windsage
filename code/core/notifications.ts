@@ -1,8 +1,7 @@
 import { Platform } from 'react-native';
-import { displayName } from '../shared/defaults';
 import type { CheckResult, FollowedStation } from '../shared/types';
-import { metricLabel, metricUnit } from './windguru';
 import { getCloudBaseUrl } from './cloud';
+import { formatAlertNotificationCopy } from './notifyCopy';
 
 export type WebPushSubscriptionJSON = {
   endpoint: string;
@@ -97,16 +96,30 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
     const keyJson = (await keyRes.json()) as { publicKey?: string };
     if (!keyJson.publicKey) return null;
 
-    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    // Cache-bust so phones pick up lock-screen SW fixes after deploy.
+    const swVersion = '4';
+    const reg = await navigator.serviceWorker.register(`/sw.js?v=${swVersion}`, { scope: '/' });
     await navigator.serviceWorker.ready;
+    await reg.update().catch(() => undefined);
 
     let sub = await reg.pushManager.getSubscription();
+    const prevSw = window.localStorage.getItem('windsage.swPushVersion');
+    const needsRefresh = !sub || prevSw !== swVersion;
+    if (needsRefresh && sub) {
+      try {
+        await sub.unsubscribe();
+      } catch {
+        // ignore
+      }
+      sub = null;
+    }
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(keyJson.publicKey),
       });
     }
+    window.localStorage.setItem('windsage.swPushVersion', swVersion);
     const json = sub.toJSON();
     if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return null;
     cachedWebPush = {
@@ -121,22 +134,40 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
   }
 }
 
+/** True when running as an installed PWA (needed for reliable Android lock-screen wake). */
+export function isInstalledPwa(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return Platform.OS !== 'web';
+  const media = window.matchMedia?.('(display-mode: standalone)')?.matches;
+  const iosStandalone = Boolean((window.navigator as { standalone?: boolean }).standalone);
+  return !!(media || iosStandalone);
+}
+
 async function showWebOsNotification(title: string, body: string, data?: Record<string, string>) {
   try {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://windsage.nimrod.bio';
+    const icon = `${origin}/notify-icon.png`;
+    const badge = `${origin}/badge-96.png`;
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.ready.catch(() => null);
       if (reg?.showNotification) {
         await reg.showNotification(title, {
           body,
-          icon: '/icon-192.png',
-          badge: '/icon-192.png',
-          tag: data?.followId || 'windsage-alert',
+          icon,
+          badge,
+          tag: `${data?.followId || 'windsage-alert'}-${Date.now()}`,
+          renotify: true,
+          requireInteraction: true,
+          silent: false,
+          vibrate: [300, 120, 300],
           data: data || {},
         });
         return;
       }
     }
-    new Notification(title, { body, icon: '/icon-192.png' });
+    new Notification(title, { body, icon, requireInteraction: true, silent: false });
   } catch {
     // ignore
   }
@@ -149,18 +180,13 @@ export async function sendThresholdNotification(
   const allowed = await ensureNotificationPermissions();
   if (!allowed) return;
 
-  const unit = metricUnit(station.rule.metric);
-  const label = metricLabel(station.rule.metric);
-  const name = displayName(station);
-  const value =
-    result.metricValue == null ? 'n/a' : `${result.metricValue.toFixed(1)} ${unit}`;
-  const cmp = station.rule.comparison === 'gte' ? '≥' : '≤';
-  const title = `Windsage · ${name}`;
-  const body = `${label} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${value})`;
+  const { title, body } = formatAlertNotificationCopy(station, result);
   const data = {
     followId: station.id,
     stationId: station.stationId,
+    liveStationId: station.liveStationId || station.linkedLiveStation?.id || station.stationId,
     metric: station.rule.metric,
+    kind: 'alert',
   };
 
   if (Platform.OS === 'web') {

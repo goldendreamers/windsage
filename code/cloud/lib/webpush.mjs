@@ -89,9 +89,16 @@ export async function sendWebPush(subscription, { title, body, data } = {}) {
     data: data || {},
   });
   try {
+    // urgency:high → FCM high priority (needed to wake Android while locked).
+    // TTL kept ≥1h so Doze-delayed delivery still arrives instead of being dropped.
     await webpush.sendNotification(subscription, payload, {
-      TTL: 60 * 60,
+      TTL: 60 * 60 * 6,
       urgency: 'high',
+      topic: 'windsage-alert',
+      headers: {
+        Urgency: 'high',
+        Topic: 'windsage-alert',
+      },
     });
     return { ok: true };
   } catch (error) {

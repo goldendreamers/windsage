@@ -105,7 +105,7 @@ export function createFollowedStation(
     kind,
     nickname: nickname.trim(),
     sourceName: partial?.sourceName?.trim() || null,
-    enabled: partial?.enabled ?? true,
+    enabled: partial?.enabled !== false,
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
     linkedLiveStation: partial?.linkedLiveStation ?? null,

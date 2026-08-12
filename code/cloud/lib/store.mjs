@@ -232,7 +232,7 @@ export function upsertSharedStations(store, stations = []) {
       nickname: prev.nickname || s.nickname || '',
       kind: s.kind || prev.kind,
       rule: prev.rule || s.rule,
-      enabled: prev.enabled !== false,
+      enabled: prev.enabled !== false && s.enabled !== false,
     });
   }
   store.sharedStations = [...map.values()];

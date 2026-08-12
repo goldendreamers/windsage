@@ -103,27 +103,46 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
         </Text>
       </View>
 
-      <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void onInstall()}>
-        <Text style={styles.btnPrimaryText}>{installLabel}</Text>
-        <Text style={styles.btnHintPrimary}>{installHint}</Text>
-      </Pressable>
+      {!installed ? (
+        <>
+          <Pressable
+            style={[styles.btn, styles.btnPrimary]}
+            onPress={() => void onInstall()}
+          >
+            <Text style={styles.btnPrimaryText}>{installLabel}</Text>
+            <Text style={styles.btnHintPrimary}>{installHint}</Text>
+          </Pressable>
 
-      <Pressable
-        style={[styles.btn, styles.btnSecondary]}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          onOpenApp();
-        }}
-      >
-        <Text style={styles.btnSecondaryText}>Open in browser</Text>
-        <Text style={styles.btnHintSecondary}>Use the app now without installing</Text>
-      </Pressable>
+          <Pressable
+            style={[styles.btn, styles.btnSecondary]}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenApp();
+            }}
+          >
+            <Text style={styles.btnSecondaryText}>Open in browser</Text>
+            <Text style={styles.btnHintSecondary}>Use the app now without installing</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable
+          style={[styles.btn, styles.btnSecondary]}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onOpenApp();
+          }}
+        >
+          <Text style={styles.btnSecondaryText}>Back to home</Text>
+          <Text style={styles.btnHintSecondary}>Windsage is already installed on this device</Text>
+        </Pressable>
+      )}
 
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
       <Text style={styles.foot}>
-        After installing, open Windsage from the home-screen icon and allow notifications so wind
-        alerts can reach your phone.
+        After installing, open Windsage from the home-screen icon (not a browser tab), allow
+        notifications, and set Battery → Unrestricted for Windsage and Chrome. Otherwise Android
+        often holds alerts until you unlock the phone.
       </Text>
       <Text style={styles.footUrl}>{PUBLIC_APP}</Text>
     </ScrollView>

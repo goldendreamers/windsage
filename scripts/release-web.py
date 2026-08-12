@@ -98,6 +98,20 @@ def snapshot() -> Path:
     return target
 
 
+def copy_public_assets(dist: Path = DIST) -> None:
+    """Expo export usually copies public/, but force-sync SW + PWA assets."""
+    public = ROOT / "public"
+    if not public.exists() or not dist.exists():
+        return
+    for path in public.rglob("*"):
+        if not path.is_file():
+            continue
+        target = dist / path.relative_to(public)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        print(f"public → dist: {path.relative_to(public)}")
+
+
 def patch_web_icons(dist: Path = DIST) -> None:
     """Ensure sharp PWA / home-screen icons are linked (not only the tiny favicon)."""
     index = dist / "index.html"
@@ -211,6 +225,7 @@ def main() -> int:
         os.environ["PATH"] = f"{node_bin}:{path_bin}"
 
     run(["npx", "expo", "export", "--platform", "web"])
+    copy_public_assets(DIST)
     patch_web_icons(DIST)
     build_downloadable_zip(DIST)
     snapshot()

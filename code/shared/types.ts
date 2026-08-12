@@ -115,7 +115,15 @@ export interface AlertState {
 export type AlertStateMap = Record<string, AlertState>;
 
 export interface CheckResult {
+  /** Live sensor reading used for alert evaluation (native or nearest). */
   reading: StationReading | null;
+  /**
+   * Spot model forecast “now” — set when the followed spot has no native live sensor.
+   * Home/detail show this; alerts still use `reading` from the nearest live station.
+   */
+  forecast?: StationReading | null;
+  /** Windguru model label for `forecast` (e.g. GFS 13 km). */
+  forecastModel?: string | null;
   metricValue: number | null;
   conditionMet: boolean;
   sustainedMs: number;

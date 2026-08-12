@@ -12,7 +12,9 @@ import {
   evaluateAlert,
   fetchCurrentReading,
   fetchRecentHistory,
+  fetchSpotForecastNow,
   fixSpotStations,
+  isForecastOnlySpot,
   normalizeWindguruFollowInput,
 } from './lib/wind.mjs';
 import {
@@ -54,6 +56,7 @@ import {
   collectWebPushSubscriptions,
   sendWebPushMany,
 } from './lib/webpush.mjs';
+import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -141,28 +144,55 @@ function collectPushTokens(bag) {
 }
 
 async function dispatchAlertNotifications(bag, station, result, sid) {
-  const unit =
-    station.rule.metric === 'temperature'
-      ? '°C'
-      : station.rule.metric === 'wave_height'
-        ? 'm'
-        : 'kt';
-  const cmp = station.rule.comparison === 'gte' ? '≥' : '≤';
-  const value =
-    result.metricValue == null ? 'n/a' : `${result.metricValue.toFixed(1)} ${unit}`;
-  const title = `Windsage · ${displayName(station)}`;
-  const body = `${station.rule.metric} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${value})`;
-  const data = { followId: station.id, stationId: sid };
+  const { title, body } = formatAlertNotificationCopy(station, result);
+  const data = {
+    followId: station.id,
+    stationId: sid,
+    liveStationId: station.liveStationId || station.linkedLiveStation?.id || sid,
+    kind: 'alert',
+  };
 
+  let delivered = 0;
   const pushTokens = collectPushTokens(bag);
   for (const to of pushTokens) {
-    await sendExpoPush({ to, title, body, data });
+    const r = await sendExpoPush({ to, title, body, data });
+    if (r?.ok) delivered += 1;
   }
 
   const subs = collectWebPushSubscriptions(bag);
   if (subs.length) {
-    const { alive } = await sendWebPushMany(subs, { title, body, data });
+    const { results, alive } = await sendWebPushMany(subs, { title, body, data });
     bag.webPushSubscriptions = alive;
+    delivered += results.filter((r) => r.ok).length;
+  }
+
+  console.log(
+    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length}`,
+  );
+  return { delivered, title, body };
+}
+
+function sensorPollId(station) {
+  return String(station.liveStationId || station.stationId || '').trim();
+}
+
+async function attachSpotForecast(station, result, forecastCache) {
+  if (!isForecastOnlySpot(station)) {
+    return { ...result, forecast: null, forecastModel: null };
+  }
+  const sid = String(station.stationId).trim();
+  if (forecastCache.has(sid)) {
+    return { ...result, ...forecastCache.get(sid) };
+  }
+  try {
+    const fc = await fetchSpotForecastNow(sid);
+    const hit = { forecast: fc.reading, forecastModel: fc.modelName || null };
+    forecastCache.set(sid, hit);
+    return { ...result, ...hit };
+  } catch {
+    const hit = { forecast: null, forecastModel: null };
+    forecastCache.set(sid, hit);
+    return { ...result, ...hit };
   }
 }
 
@@ -171,15 +201,16 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
 
-  const uniqueIds = [...new Set(stations.map((s) => s.stationId.trim()))];
+  const uniqueIds = [...new Set(stations.map((s) => sensorPollId(s)).filter(Boolean))];
   const readingCache = new Map();
   const historyCache = new Map();
+  const forecastCache = new Map();
 
-  for (const stationId of uniqueIds) {
+  for (const pollId of uniqueIds) {
     try {
-      readingCache.set(stationId, await fetchCurrentReading(stationId));
+      readingCache.set(pollId, await fetchCurrentReading(pollId));
     } catch (error) {
-      readingCache.set(stationId, { error: error.message || 'fetch failed' });
+      readingCache.set(pollId, { error: error.message || 'fetch failed' });
     }
   }
 
@@ -187,8 +218,9 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
 
   for (const station of stations) {
     const sid = station.stationId.trim();
+    const pollId = sensorPollId(station) || sid;
     const prev = { ...DEFAULT_ALERT, ...(bag.alertStates[station.id] || {}) };
-    const cached = readingCache.get(sid);
+    const cached = readingCache.get(pollId);
 
     if (!cached || cached.error) {
       const message = cached?.error || 'No reading';
@@ -198,31 +230,35 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
         lastError: message,
         lastStationId: sid,
       };
+      const baseResult = {
+        reading: null,
+        metricValue: null,
+        conditionMet: false,
+        sustainedMs: 0,
+        shouldNotify: false,
+        message,
+        forecast: null,
+        forecastModel: null,
+      };
+      const result = await attachSpotForecast(station, baseResult, forecastCache);
       bag.alertStates[station.id] = nextState;
       bag.snapshots[station.id] = {
         reading: null,
-        result: {
-          reading: null,
-          metricValue: null,
-          conditionMet: false,
-          sustainedMs: 0,
-          shouldNotify: false,
-          message,
-        },
+        result,
         alertState: nextState,
         updatedAt: Date.now(),
       };
-      results.push({ station, result: bag.snapshots[station.id].result, nextState });
+      results.push({ station, result, nextState });
       continue;
     }
 
     const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
-    const histKey = `${sid}:${station.rule.metric}:${hours}`;
+    const histKey = `${pollId}:${station.rule.metric}:${hours}`;
     if (!historyCache.has(histKey)) {
       try {
         historyCache.set(
           histKey,
-          await fetchRecentHistory(sid, station.rule.metric, hours, 10),
+          await fetchRecentHistory(pollId, station.rule.metric, hours, 10),
         );
       } catch {
         historyCache.set(histKey, { unixtime: [], values: [] });
@@ -230,7 +266,9 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
     }
 
     const history = historyCache.get(histKey);
-    const { result, nextState } = evaluateAlert(cached, history, station, prev);
+    const evaluated = evaluateAlert(cached, history, station, prev);
+    const result = await attachSpotForecast(station, evaluated.result, forecastCache);
+    const { nextState } = evaluated;
     bag.alertStates[station.id] = nextState;
     bag.snapshots[station.id] = {
       reading: cached,
@@ -240,8 +278,23 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
     };
     results.push({ station, result, nextState });
 
-    if (notify && result.shouldNotify && station.enabled) {
-      await dispatchAlertNotifications(bag, station, result, sid);
+    if (notify && result.shouldNotify && station.enabled !== false) {
+      const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
+      // If nothing reached a phone, undo "already notified" so the next poll retries.
+      if (!delivered) {
+        const state = bag.alertStates[station.id] || nextState;
+        state.notifiedForRun = false;
+        bag.alertStates[station.id] = state;
+        if (bag.snapshots?.[station.id]) {
+          bag.snapshots[station.id].alertState = state;
+          bag.snapshots[station.id].result = {
+            ...result,
+            shouldNotify: true,
+            message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+          };
+        }
+        console.warn(`[notify] no delivery for ${station.id} — will retry`);
+      }
     }
   }
 
@@ -264,7 +317,7 @@ async function pollAll() {
   let touched = false;
 
   for (const user of Object.values(store.users)) {
-    const active = (user.stations || []).some((s) => s.enabled && s.stationId?.trim());
+    const active = (user.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
     if (!active) continue;
     // Collect push tokens + web-push subscriptions from linked devices
     const tokens = new Set(collectPushTokens(user));
@@ -289,7 +342,7 @@ async function pollAll() {
   for (const deviceId of Object.keys(store.devices)) {
     const device = store.devices[deviceId];
     if (device.userId) continue; // already covered via user
-    const active = (device.stations || []).some((s) => s.enabled && s.stationId?.trim());
+    const active = (device.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
     if (!active) continue;
     try {
       await runBagChecks(store, device, { notify: true });
@@ -383,10 +436,18 @@ async function serveStatic(req, res, pathname) {
   }
 
   const ext = path.extname(filePath).toLowerCase();
+  const base = path.basename(filePath).toLowerCase();
   cors(res);
+  const noCache =
+    ext === '.html' ||
+    base === 'sw.js' ||
+    base === 'manifest.webmanifest' ||
+    base === 'badge-96.png' ||
+    base === 'notify-icon.png' ||
+    base.startsWith('sw.js');
   const headers = {
     'Content-Type': MIME[ext] || 'application/octet-stream',
-    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=86400',
+    'Cache-Control': noCache ? 'no-cache, no-store, must-revalidate' : 'public, max-age=86400',
   };
   if (ext === '.zip') {
     headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
@@ -768,6 +829,46 @@ async function handleDevices(req, res, pathname) {
     return json(res, 200, { ok: true });
   }
 
+  if (req.method === 'POST' && rest === '/test-push') {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.webPushSubscription) {
+      upsertWebPushSubscription(device, body.webPushSubscription);
+      upsertWebPushSubscription(bag, body.webPushSubscription);
+    }
+    if (bag !== device) {
+      for (const s of collectWebPushSubscriptions(device)) upsertWebPushSubscription(bag, s);
+    }
+    const { title, body: bodyText } = formatTestNotificationCopy(
+      typeof body.message === 'string' ? body.message : '',
+    );
+    const data = { kind: 'test' };
+    let delivered = 0;
+    for (const to of collectPushTokens(bag)) {
+      const r = await sendExpoPush({ to, title, body: bodyText, data });
+      if (r?.ok) delivered += 1;
+    }
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, {
+        title,
+        body: bodyText,
+        data,
+      });
+      bag.webPushSubscriptions = alive;
+      if (bag !== device) device.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
+    await saveStore(DATA_DIR, store);
+    console.log(`[notify] test-push device=${deviceId} delivered=${delivered}`);
+    return json(res, delivered ? 200 : 400, {
+      ok: delivered > 0,
+      delivered,
+      error: delivered
+        ? undefined
+        : 'No phone subscription yet. Allow notifications, install the app, open it once, then try again.',
+    });
+  }
+
   return json(res, 404, { error: 'not found' });
 }
 
@@ -807,6 +908,21 @@ async function handleApi(req, res, pathname, url) {
       return json(res, 200, { ok: true, ...resolved });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
+    }
+  }
+
+  // Public: spot forecast “now” (model) for UI when a spot has no native live sensor.
+  if (req.method === 'POST' && pathname === '/v1/windguru/forecast') {
+    const body = await readBody(req);
+    const input = typeof body.input === 'string' ? body.input : typeof body.id === 'string' ? body.id : '';
+    const trimmed = String(input).trim();
+    const spotId = /^\d+$/.test(trimmed) ? trimmed : trimmed.match(/(\d{3,})/)?.[1];
+    try {
+      if (!spotId) throw new Error('Paste a Windguru spot URL or number');
+      const forecast = await fetchSpotForecastNow(spotId);
+      return json(res, 200, { ok: true, ...forecast });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Could not fetch forecast' });
     }
   }
 

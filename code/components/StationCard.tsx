@@ -23,15 +23,23 @@ export const StationCard = memo(function StationCard({
 }: Props) {
   const name = displayName(station);
   const hasNickname = !!station.nickname.trim();
-  const wind = reading?.wind_avg;
-  const gust = reading?.wind_max;
+  const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
+  const displayReading =
+    forecastOnly && result?.forecast ? result.forecast : reading;
+  const showingForecast = forecastOnly && !!result?.forecast;
+  const wind = displayReading?.wind_avg;
+  const gust = displayReading?.wind_max;
   const holding = !!result?.conditionMet;
-  const errored = !!alertState?.lastError && !reading;
+  const errored = !!alertState?.lastError && !reading && !result?.forecast;
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed, !station.enabled && styles.cardPaused]}
+      style={({ pressed }) => [
+        styles.card,
+        pressed && styles.cardPressed,
+        station.enabled === false && styles.cardPaused,
+      ]}
     >
       <View style={styles.topRow}>
         <View style={styles.identity}>
@@ -46,9 +54,12 @@ export const StationCard = memo(function StationCard({
                 : station.kind === 'spot'
                   ? 'Windguru spot'
                   : 'Windguru station'}
-              {station.enabled ? '' : ' · paused'}
-              {station.liveLinkWarning && station.linkedLiveStation
-                ? ` · via #${station.linkedLiveStation.id}`
+              {station.enabled === false ? ' · paused' : ''}
+              {showingForecast
+                ? ` · forecast${result?.forecastModel ? ` (${result.forecastModel})` : ''}`
+                : ''}
+              {forecastOnly && station.linkedLiveStation
+                ? ` · alerts via #${station.linkedLiveStation.id}`
                 : ''}
             </Text>
             {station.liveLinkWarning && station.linkedLiveStation ? (
@@ -63,13 +74,13 @@ export const StationCard = memo(function StationCard({
 
       <View style={styles.stats}>
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>Avg</Text>
+          <Text style={styles.statLabel}>{showingForecast ? 'Fcst avg' : 'Avg'}</Text>
           <Text style={styles.statValue}>{wind == null ? '—' : wind.toFixed(1)}</Text>
           <Text style={styles.statUnit}>kt</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>Gust</Text>
+          <Text style={styles.statLabel}>{showingForecast ? 'Fcst gust' : 'Gust'}</Text>
           <Text style={styles.statValue}>{gust == null ? '—' : gust.toFixed(1)}</Text>
           <Text style={styles.statUnit}>kt</Text>
         </View>

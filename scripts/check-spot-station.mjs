@@ -13,6 +13,17 @@ async function resolve(input) {
   return data;
 }
 
+async function forecast(input) {
+  const res = await fetch(`${BASE}/v1/windguru/forecast`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ input }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `forecast ${res.status}`);
+  return data;
+}
+
 async function main() {
   const cases = [
     {
@@ -52,7 +63,9 @@ async function main() {
       const okWarn =
         c.expectWarning === undefined ? true : c.expectWarning ? hasWarn : !data.warning;
       const okNearest =
-        !c.expectNearest || data.liveStationId === c.expectNearest || data.linkedLiveStation?.id === c.expectNearest;
+        !c.expectNearest ||
+        data.liveStationId === c.expectNearest ||
+        data.linkedLiveStation?.id === c.expectNearest;
       const ok = okKind && okWarn && okNearest;
       console.log(
         ok ? 'OK' : 'FAIL',
@@ -73,11 +86,32 @@ async function main() {
       console.log('FAIL', c.label, e.message || e);
     }
   }
+
+  try {
+    const fc = await forecast('377929');
+    const ok =
+      !!fc.reading && typeof fc.reading.wind_avg === 'number' && !!fc.modelName;
+    console.log(
+      ok ? 'OK' : 'FAIL',
+      'forecast-now',
+      JSON.stringify({
+        modelName: fc.modelName,
+        wind_avg: fc.reading?.wind_avg,
+        wind_max: fc.reading?.wind_max,
+        hour: fc.hour,
+      }),
+    );
+    if (!ok) failed += 1;
+  } catch (e) {
+    failed += 1;
+    console.log('FAIL', 'forecast-now', e.message || e);
+  }
+
   if (failed) {
-    console.error(`failed ${failed}/${cases.length}`);
+    console.error(`failed ${failed}/${cases.length + 1}`);
     process.exit(1);
   }
-  console.log(`all ${cases.length} spot/station resolve checks passed`);
+  console.log(`all ${cases.length + 1} spot/station resolve checks passed`);
 }
 
 main();

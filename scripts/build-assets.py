@@ -318,7 +318,20 @@ def main() -> None:
         encoding="utf-8",
     )
     notification_icon(icon, 96).save(STORE / "notification-icon.png", optimize=True)
-    print("wrote store/web favicon + PWA icons")
+    # PWA push assets: colorful tray icon + monochrome status-bar badge
+    badge = notification_icon(icon, 96)
+    badge.save(public / "badge-96.png", optimize=True)
+    fg = adaptive_foreground(icon, 512)
+    notify = Image.new("RGBA", (192, 192), (0, 0, 0, 0))
+    # rounded navy plate so Android never shows a blank/white square
+    plate = Image.new("RGBA", (192, 192), (*NAVY[:3], 255))
+    mask = Image.new("L", (192, 192), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, 191, 191), radius=40, fill=255)
+    plate.putalpha(mask)
+    logo = fg.resize((140, 140), Image.Resampling.LANCZOS)
+    plate.alpha_composite(logo, ((192 - 140) // 2, (192 - 140) // 2))
+    plate.save(public / "notify-icon.png", optimize=True)
+    print("wrote store/web favicon + PWA icons + notify badge")
 
     for kind in ("wind", "gust", "temp", "wave", "check", "bell", "station"):
         draw_metric_icon(kind, 256).save(UI / f"{kind}.png", optimize=True)

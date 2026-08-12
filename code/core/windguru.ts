@@ -453,7 +453,15 @@ export function followTargetForKind(
  * Spot IDs stay as spots; live readings still resolve at fetch time.
  */
 export async function fixSpotStations<
-  T extends { stationId: string; nickname?: string; kind?: 'spot' | 'station' },
+  T extends {
+    stationId: string;
+    nickname?: string;
+    kind?: 'spot' | 'station';
+    liveStationId?: string | null;
+    linkedLiveStation?: ResolvedWindguru['linkedLiveStation'];
+    liveLinkWarning?: string | null;
+    sourceName?: string | null;
+  },
 >(stations: T[]): Promise<{ stations: T[]; changed: number }> {
   const out: T[] = [];
   let changed = 0;
@@ -462,8 +470,13 @@ export async function fixSpotStations<
       out.push(station);
       continue;
     }
-    if (station.kind === 'spot' || station.kind === 'station') {
-      out.push(station);
+    const needsEnrich =
+      !(station.kind === 'spot' || station.kind === 'station') ||
+      (station.kind === 'spot' && !station.liveStationId) ||
+      station.enabled === undefined ||
+      station.enabled === null;
+    if (!needsEnrich) {
+      out.push({ ...station, enabled: station.enabled !== false });
       continue;
     }
     try {
@@ -471,12 +484,16 @@ export async function fixSpotStations<
       changed += 1;
       out.push({
         ...station,
-        kind: resolved.kind,
+        enabled: station.enabled !== false,
+        kind: station.kind === 'spot' || station.kind === 'station' ? station.kind : resolved.kind,
+        liveStationId: resolved.liveStationId,
+        linkedLiveStation: resolved.linkedLiveStation ?? null,
+        liveLinkWarning: resolved.warning ?? null,
         sourceName:
           resolved.spotName ||
           resolved.linkedLiveStation?.spotname ||
           resolved.linkedLiveStation?.name ||
-          (station as { sourceName?: string }).sourceName ||
+          station.sourceName ||
           null,
         nickname:
           (station.nickname || '').trim() ||
@@ -485,7 +502,11 @@ export async function fixSpotStations<
           '',
       });
     } catch {
-      out.push({ ...station, kind: 'station' });
+      out.push({
+        ...station,
+        enabled: station.enabled !== false,
+        kind: station.kind === 'spot' ? 'spot' : 'station',
+      });
       changed += 1;
     }
   }
@@ -496,6 +517,59 @@ export async function fixSpotStations<
 export async function fetchCurrentReading(stationId: string): Promise<StationReading> {
   const resolved = await resolveWindguruId(stationId);
   return tryStationCurrent(resolved.liveStationId);
+}
+
+export type SpotForecastNow = {
+  reading: StationReading;
+  modelName: string;
+  idModel: number;
+  hour: number;
+  spotName?: string;
+};
+
+/** Spot uses nearest-live fallback (no native sensor on the spot). */
+export function isForecastOnlySpot(station: {
+  kind?: WindguruKind;
+  linkedLiveStation?: unknown;
+  liveLinkWarning?: string | null;
+}): boolean {
+  return (
+    station?.kind === 'spot' && !!(station.linkedLiveStation || station.liveLinkWarning)
+  );
+}
+
+/**
+ * Current (nearest-hour) model forecast for a Windguru spot.
+ * On web this must go through Wald (Referer). Used for UI when there is no native live sensor.
+ */
+export async function fetchSpotForecastNow(spotId: string): Promise<SpotForecastNow> {
+  const id = spotId.trim();
+  if (!/^\d+$/.test(id)) {
+    throw new Error('Spot ID must be numeric');
+  }
+
+  const response = await fetch(`${resolveCloudBaseUrl()}/v1/windguru/forecast`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: id }),
+  });
+  const data = (await response.json().catch(() => ({}))) as Partial<SpotForecastNow> & {
+    error?: string;
+    ok?: boolean;
+  };
+  if (!response.ok || !data.reading) {
+    throw new Error(data.error || `Could not fetch forecast (${response.status})`);
+  }
+  return {
+    reading: data.reading,
+    modelName: data.modelName || 'forecast',
+    idModel: data.idModel ?? 3,
+    hour: data.hour ?? 0,
+    spotName: data.spotName,
+  };
 }
 
 /**

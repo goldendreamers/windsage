@@ -17,7 +17,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
   return createFollowedStation(raw.stationId, raw.nickname ?? '', {
     id: raw.id,
     kind: raw.kind === 'spot' ? 'spot' : 'station',
-    enabled: raw.enabled,
+    enabled: raw.enabled !== false,
     rule: { ...DEFAULT_RULE, ...(raw.rule ?? {}) },
     sourceName: raw.sourceName ?? null,
     liveStationId: raw.liveStationId ?? null,

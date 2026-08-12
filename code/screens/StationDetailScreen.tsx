@@ -69,6 +69,9 @@ export function StationDetailScreen({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const reading = result?.reading;
+  const forecast = result?.forecast ?? null;
+  const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
+  const showForecast = forecastOnly && !!forecast;
   const selectedMetric = METRIC_OPTIONS.find((m) => m.key === station.rule.metric);
   const windPrimary =
     station.rule.metric === 'wind_avg' || station.rule.metric === 'wind_max';
@@ -125,7 +128,7 @@ export function StationDetailScreen({
             style={styles.linkBtn}
           >
             <Text style={styles.linkText}>
-              Open linked live station #{station.linkedLiveStation.id}
+              Open nearest live station #{station.linkedLiveStation.id}
             </Text>
           </Pressable>
         </View>
@@ -269,13 +272,68 @@ export function StationDetailScreen({
         </Pressable>
       </Section>
 
+      {showForecast ? (
+        <Section
+          title="Forecast"
+          icon="wind"
+          hint={
+            result?.forecastModel
+              ? `${result.forecastModel} · nearest model hour for this spot`
+              : 'Model forecast for this spot (no native live sensor)'
+          }
+          right={
+            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
+              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
+            </Pressable>
+          }
+        >
+          <View style={styles.metricsRow}>
+            <MetricPill
+              title="Avg"
+              value={forecast?.wind_avg}
+              unit="kt"
+              icon={brandImages.wind}
+              emphasize={station.rule.metric === 'wind_avg'}
+            />
+            <MetricPill
+              title="Gust"
+              value={forecast?.wind_max}
+              unit="kt"
+              icon={brandImages.gust}
+              emphasize={station.rule.metric === 'wind_max'}
+            />
+            <MetricPill
+              title="Dir"
+              value={forecast?.wind_direction == null ? null : Math.round(forecast.wind_direction)}
+              unit="°"
+              icon={brandImages.wind}
+              emphasize={station.rule.windDirEnabled}
+            />
+            <MetricPill
+              title="Temp"
+              value={forecast?.temperature}
+              unit="°C"
+              icon={brandImages.temp}
+              emphasize={station.rule.metric === 'temperature'}
+            />
+          </View>
+        </Section>
+      ) : null}
+
       <Section
-        title="Live"
+        title={showForecast ? 'Nearest live (alerts)' : 'Live'}
         icon="wind"
+        hint={
+          showForecast
+            ? 'Alerts watch this nearest live station — not the forecast numbers above'
+            : undefined
+        }
         right={
-          <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
-            <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
-          </Pressable>
+          showForecast ? undefined : (
+            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
+              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
+            </Pressable>
+          )
         }
       >
         <View style={styles.metricsRow}>
@@ -284,28 +342,28 @@ export function StationDetailScreen({
             value={reading?.wind_avg}
             unit="kt"
             icon={brandImages.wind}
-            emphasize={station.rule.metric === 'wind_avg'}
+            emphasize={!showForecast && station.rule.metric === 'wind_avg'}
           />
           <MetricPill
             title="Gust"
             value={reading?.wind_max}
             unit="kt"
             icon={brandImages.gust}
-            emphasize={station.rule.metric === 'wind_max'}
+            emphasize={!showForecast && station.rule.metric === 'wind_max'}
           />
           <MetricPill
             title="Dir"
             value={reading?.wind_direction == null ? null : Math.round(reading.wind_direction)}
             unit="°"
             icon={brandImages.wind}
-            emphasize={station.rule.windDirEnabled}
+            emphasize={!showForecast && station.rule.windDirEnabled}
           />
           <MetricPill
             title="Temp"
             value={reading?.temperature}
             unit="°C"
             icon={brandImages.temp}
-            emphasize={station.rule.metric === 'temperature'}
+            emphasize={!showForecast && station.rule.metric === 'temperature'}
           />
         </View>
         <StatusPanel
@@ -655,10 +713,10 @@ export function StationDetailScreen({
       <View style={[styles.block, styles.rowBetween]}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.sectionTitle}>Monitoring</Text>
-          <Text style={styles.hint}>Off pauses alerts for this station only</Text>
+          <Text style={styles.hint}>On by default. Off pauses alerts for this station only</Text>
         </View>
         <Switch
-          value={station.enabled}
+          value={station.enabled !== false}
           onValueChange={(enabled) => {
             void Haptics.selectionAsync();
             onPersist({ ...station, enabled });

@@ -2,6 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import {
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -9,10 +10,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useEffect, useState } from 'react';
 import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
 import type { CloudAnnouncement } from '../core/cloud';
+import { isRunningAsInstalledApp } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
@@ -75,6 +78,22 @@ export function HomeScreen({
   onDismissAnnouncement,
 }: Props) {
   const hasStations = stations.length > 0;
+  const [installedApp, setInstalledApp] = useState(() =>
+    Platform.OS === 'web' ? isRunningAsInstalledApp() : true,
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      setInstalledApp(true);
+      return;
+    }
+    const tick = () => setInstalledApp(isRunningAsInstalledApp());
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const showInstall = !!onOpenDownload && !installedApp;
 
   return (
     <View style={styles.root}>
@@ -160,8 +179,8 @@ export function HomeScreen({
             <Image source={brandImages.station} style={styles.emptyIcon} contentFit="contain" />
             <Text style={styles.emptyTitle}>Nothing followed yet</Text>
             <Text style={styles.emptyCopy}>
-              Add a Windguru spot or live station and give it a nickname. It will show here with
-              live wind and your alert rule.
+              Add a Windguru spot or live station and give it a nickname. Spots without a live
+              sensor show forecast and alert from the nearest live station.
             </Text>
             <Pressable style={styles.emptyCta} onPress={onOpenAdd}>
               <Text style={styles.emptyCtaText}>Follow your first spot</Text>
@@ -185,12 +204,12 @@ export function HomeScreen({
           </View>
         )}
 
-        {onOpenDownload ? (
+        {showInstall ? (
           <Pressable
             style={styles.downloadLink}
             onPress={() => {
               void Haptics.selectionAsync();
-              onOpenDownload();
+              onOpenDownload?.();
             }}
           >
             <Text style={styles.downloadLinkText}>Install app</Text>
