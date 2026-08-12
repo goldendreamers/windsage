@@ -220,8 +220,16 @@ export default function App() {
       pollIntervalMinutes: number;
     }) => {
       setAccount(payload.user);
+      const cloudStations = payload.stations || [];
+      const localStations = settingsRef.current.stations || [];
+      const stations =
+        cloudStations.length > 0
+          ? cloudStations
+          : localStations.length > 0
+            ? localStations
+            : [];
       const next: AppSettings = {
-        stations: payload.stations || [],
+        stations,
         pollIntervalMinutes: Math.max(10, payload.pollIntervalMinutes || 10),
       };
       setSettings(next);
@@ -230,9 +238,14 @@ export default function App() {
       showToast(
         `Signed in · ${payload.user.username || payload.user.sso.google?.email || 'account'}`,
       );
-      await refreshFromCloud('auto');
+      // Push local follows up if cloud bag was empty.
+      if (cloudStations.length === 0 && localStations.length > 0) {
+        await persistSettings(next);
+      } else {
+        await refreshFromCloud('auto');
+      }
     },
-    [refreshFromCloud, showToast],
+    [persistSettings, refreshFromCloud, showToast],
   );
 
   const checkOne = useCallback(
@@ -335,49 +348,72 @@ export default function App() {
 
     (async () => {
       try {
-        await configureAndroidChannel();
-        await ensureNotificationPermissions();
-        await registerWebPushSubscription().catch(() => null);
-        await unregisterBackgroundFetch().catch(() => undefined);
-
-        const oauth = await consumeAuthRedirectParams();
-        if (oauth?.error && !cancelled) showToast(oauth.error);
-        if (oauth?.token && !cancelled) {
-          const me = await fetchMe();
-          const pulled = await pullMyStations();
-          if (me && pulled && !cancelled) {
-            await applyAccountPayload({
-              user: me,
-              stations: pulled.stations,
-              pollIntervalMinutes: pulled.pollIntervalMinutes,
-            });
-          }
-        }
-
+        // Paint from local storage first — do not wait on push/cloud network.
         const loaded = await loadSettings();
         if (cancelled) return;
+        setSettings(loaded);
+        setLoading(false);
+        await SplashScreen.hideAsync().catch(() => undefined);
 
-        const me = await fetchMe().catch(() => null);
-        if (me) {
-          setAccount(me);
-          const pulled = await pullMyStations().catch(() => null);
-          if (pulled) {
-            setSettings(pulled);
-            await saveSettings(pulled);
-          } else {
-            setSettings(loaded);
+        // Background warm-up after first paint.
+        void (async () => {
+          try {
+            await configureAndroidChannel();
+            await unregisterBackgroundFetch().catch(() => undefined);
+
+            const oauth = await consumeAuthRedirectParams();
+            if (cancelled) return;
+            if (oauth?.error) showToast(oauth.error);
+            if (oauth?.token) {
+              const me = await fetchMe().catch(() => null);
+              const pulled = await pullMyStations().catch(() => null);
+              if (me && pulled && !cancelled) {
+                await applyAccountPayload({
+                  user: me,
+                  stations: pulled.stations,
+                  pollIntervalMinutes: pulled.pollIntervalMinutes,
+                });
+                return;
+              }
+            }
+
+            const me = await fetchMe().catch(() => null);
+            if (cancelled) return;
+            if (me) {
+              setAccount(me);
+              const pulled = await pullMyStations().catch(() => null);
+              if (pulled && !cancelled) {
+                // Never wipe a non-empty local follow list with an empty cloud bag.
+                const cloudStations = pulled.stations || [];
+                const localStations = settingsRef.current.stations || [];
+                if (cloudStations.length > 0) {
+                  setSettings(pulled);
+                  await saveSettings(pulled);
+                } else if (localStations.length > 0) {
+                  await persistSettings({
+                    ...settingsRef.current,
+                    pollIntervalMinutes: Math.max(
+                      10,
+                      pulled.pollIntervalMinutes || settingsRef.current.pollIntervalMinutes,
+                    ),
+                  });
+                } else {
+                  setSettings(pulled);
+                  await saveSettings(pulled);
+                }
+              }
+            }
+
+            await registerWithCloud().catch(() => undefined);
+            // Permissions + push after UI is up (can prompt / hit network).
+            void ensureNotificationPermissions()
+              .then((ok) => (ok ? registerWebPushSubscription() : null))
+              .catch(() => null);
+            if (!cancelled) void refreshFromCloud('auto');
+          } catch {
+            if (!cancelled) void refreshFromCloud('auto');
           }
-        } else {
-          setSettings(loaded);
-        }
-
-        await registerWithCloud().catch(() => undefined);
-        // Show local UI immediately — cloud sync continues in background.
-        if (!cancelled) {
-          setLoading(false);
-          await SplashScreen.hideAsync().catch(() => undefined);
-          void refreshFromCloud('auto');
-        }
+        })();
       } catch {
         if (!cancelled) {
           setLoading(false);
@@ -395,7 +431,7 @@ export default function App() {
       sub.remove();
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
-  }, [applyAccountPayload, refreshFromCloud, showToast]);
+  }, [applyAccountPayload, persistSettings, refreshFromCloud, showToast]);
 
   const activeStation = useMemo(
     () => settings.stations.find((s) => s.id === activeStationId) ?? null,
@@ -419,7 +455,12 @@ export default function App() {
       kind: FollowedStation['kind'] = 'station',
       extras?: Pick<
         FollowedStation,
-        'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+        | 'provider'
+        | 'liveStationId'
+        | 'linkedLiveStation'
+        | 'liveLinkWarning'
+        | 'sourceName'
+        | 'locationBlend'
       >,
     ) => {
       const station = createFollowedStation(stationId, nickname, { kind, ...extras });

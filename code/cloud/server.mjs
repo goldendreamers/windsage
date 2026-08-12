@@ -10,13 +10,21 @@ import { createReadStream } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   evaluateAlert,
-  fetchCurrentReading,
-  fetchRecentHistory,
-  fetchSpotForecastNow,
+  fetchProviderCurrent,
+  fetchProviderForecast,
+  fetchProviderHistory,
   fixSpotStations,
   isForecastOnlySpot,
-  normalizeWindguruFollowInput,
-} from './lib/wind.mjs';
+  providerOf,
+  providerStatus,
+  resolveFollowInput,
+  sensorId,
+  cacheKey,
+  mapsStatus,
+} from './lib/providers/index.mjs';
+import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
+import { autocompletePlaces, geocodeAddress, placeDetails } from './lib/providers/geo.mjs';
+import { resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
   saveStore,
@@ -173,7 +181,11 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
 }
 
 function sensorPollId(station) {
-  return String(station.liveStationId || station.stationId || '').trim();
+  return sensorId(station);
+}
+
+function sensorCacheKey(station) {
+  return cacheKey(providerOf(station), sensorPollId(station));
 }
 
 async function attachSpotForecast(station, result, forecastCache) {
@@ -181,17 +193,18 @@ async function attachSpotForecast(station, result, forecastCache) {
     return { ...result, forecast: null, forecastModel: null };
   }
   const sid = String(station.stationId).trim();
-  if (forecastCache.has(sid)) {
-    return { ...result, ...forecastCache.get(sid) };
+  const key = `wg:${sid}`;
+  if (forecastCache.has(key)) {
+    return { ...result, ...forecastCache.get(key) };
   }
   try {
-    const fc = await fetchSpotForecastNow(sid);
+    const fc = await fetchProviderForecast(station);
     const hit = { forecast: fc.reading, forecastModel: fc.modelName || null };
-    forecastCache.set(sid, hit);
+    forecastCache.set(key, hit);
     return { ...result, ...hit };
   } catch {
     const hit = { forecast: null, forecastModel: null };
-    forecastCache.set(sid, hit);
+    forecastCache.set(key, hit);
     return { ...result, ...hit };
   }
 }
@@ -200,17 +213,50 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
+  if (!store.stationTrust) store.stationTrust = {};
 
-  const uniqueIds = [...new Set(stations.map((s) => sensorPollId(s)).filter(Boolean))];
+  const uniqueKeys = [
+    ...new Set(stations.map((s) => sensorCacheKey(s)).filter((k) => k && !k.endsWith(':'))),
+  ];
   const readingCache = new Map();
   const historyCache = new Map();
   const forecastCache = new Map();
+  const stationByKey = new Map();
+  for (const s of stations) {
+    const k = sensorCacheKey(s);
+    if (k && !stationByKey.has(k)) stationByKey.set(k, s);
+  }
 
-  for (const pollId of uniqueIds) {
+  for (const key of uniqueKeys) {
+    const sample = stationByKey.get(key);
     try {
-      readingCache.set(pollId, await fetchCurrentReading(pollId));
+      const raw = await fetchProviderCurrent(sample, { trustMap: store.stationTrust });
+      if (raw && raw._locationBlend) {
+        const {
+          _locationBlend,
+          _trustUpdates,
+          _members,
+          ...reading
+        } = raw;
+        readingCache.set(key, reading);
+        // Persist blend members + trust back onto matching follows in this bag.
+        for (const s of stations) {
+          if (sensorCacheKey(s) !== key) continue;
+          s.locationBlend = _locationBlend;
+          s.liveLinkWarning =
+            s.liveLinkWarning ||
+            `Blends ${(_members || []).filter((m) => m.ok).length} nearby stations`;
+        }
+        if (_trustUpdates) {
+          for (const [tk, tv] of Object.entries(_trustUpdates)) {
+            store.stationTrust[tk] = { ...(store.stationTrust[tk] || {}), ...tv };
+          }
+        }
+      } else {
+        readingCache.set(key, raw);
+      }
     } catch (error) {
-      readingCache.set(pollId, { error: error.message || 'fetch failed' });
+      readingCache.set(key, { error: error.message || 'fetch failed' });
     }
   }
 
@@ -219,8 +265,9 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
   for (const station of stations) {
     const sid = station.stationId.trim();
     const pollId = sensorPollId(station) || sid;
+    const key = sensorCacheKey(station);
     const prev = { ...DEFAULT_ALERT, ...(bag.alertStates[station.id] || {}) };
-    const cached = readingCache.get(pollId);
+    const cached = readingCache.get(key);
 
     if (!cached || cached.error) {
       const message = cached?.error || 'No reading';
@@ -253,12 +300,12 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
     }
 
     const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
-    const histKey = `${pollId}:${station.rule.metric}:${hours}`;
+    const histKey = `${key}:${station.rule.metric}:${hours}`;
     if (!historyCache.has(histKey)) {
       try {
         historyCache.set(
           histKey,
-          await fetchRecentHistory(pollId, station.rule.metric, hours, 10),
+          await fetchProviderHistory(station, station.rule.metric, hours, 10),
         );
       } catch {
         historyCache.set(histKey, { unixtime: [], values: [] });
@@ -280,7 +327,6 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
 
     if (notify && result.shouldNotify && station.enabled !== false) {
       const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
-      // If nothing reached a phone, undo "already notified" so the next poll retries.
       if (!delivered) {
         const state = bag.alertStates[station.id] || nextState;
         state.notifiedForRun = false;
@@ -411,6 +457,7 @@ async function attachDeviceToUser(store, user, deviceId, secret, pushToken, webP
 async function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel === '/' || rel === '') rel = '/index.html';
+  if (rel === '/privacy' || rel === '/privacy/') rel = '/privacy.html';
   let filePath = path.join(WEB_DIR, rel);
   const root = path.resolve(WEB_DIR);
   if (!path.resolve(filePath).startsWith(root)) {
@@ -445,9 +492,15 @@ async function serveStatic(req, res, pathname) {
     base === 'badge-96.png' ||
     base === 'notify-icon.png' ||
     base.startsWith('sw.js');
+  const longCache =
+    !noCache && (rel.includes('/_expo/') || rel.includes('/assets/') || ext === '.js');
   const headers = {
     'Content-Type': MIME[ext] || 'application/octet-stream',
-    'Cache-Control': noCache ? 'no-cache, no-store, must-revalidate' : 'public, max-age=86400',
+    'Cache-Control': noCache
+      ? 'no-cache, no-store, must-revalidate'
+      : longCache
+        ? 'public, max-age=604800, immutable'
+        : 'public, max-age=86400',
   };
   if (ext === '.zip') {
     headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
@@ -645,8 +698,10 @@ async function handleMe(req, res, pathname) {
     const body = await readBody(req);
     const incoming = Array.isArray(body.stations) ? body.stations : [];
     const fixed = await fixSpotStations(incoming);
-    user.stations = fixed.stations;
-    upsertSharedStations(store, fixed.stations);
+    const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
+    // Guard: never replace a non-empty bag with undefined/null from a bad fix result.
+    user.stations = Array.isArray(nextStations) ? nextStations : user.stations || [];
+    upsertSharedStations(store, user.stations);
     if (body.pollIntervalMinutes) {
       user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
@@ -664,7 +719,7 @@ async function handleMe(req, res, pathname) {
       ok: true,
       snapshots: user.snapshots || {},
       stations: user.stations || [],
-      annotatedKinds: fixed.changed,
+      annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
       rewrittenSpots: 0,
     });
   }
@@ -765,8 +820,9 @@ async function handleDevices(req, res, pathname) {
     const body = await readBody(req);
     const incoming = Array.isArray(body.stations) ? body.stations : [];
     const fixed = await fixSpotStations(incoming);
-    bag.stations = fixed.stations;
-    upsertSharedStations(store, fixed.stations);
+    const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
+    bag.stations = Array.isArray(nextStations) ? nextStations : bag.stations || [];
+    upsertSharedStations(store, bag.stations);
     if (body.pollIntervalMinutes) {
       bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
@@ -789,7 +845,7 @@ async function handleDevices(req, res, pathname) {
       ok: true,
       snapshots: bag.snapshots || {},
       stations: bag.stations || [],
-      annotatedKinds: fixed.changed,
+      annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
       rewrittenSpots: 0,
     });
   }
@@ -881,6 +937,8 @@ async function handleApi(req, res, pathname, url) {
       web: true,
       auth: true,
       providers: providersStatus(),
+      weatherSources: providerStatus(),
+      maps: mapsStatus(),
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
       ts: Date.now(),
@@ -905,9 +963,78 @@ async function handleApi(req, res, pathname, url) {
     const input = typeof body.input === 'string' ? body.input : '';
     try {
       const resolved = await normalizeWindguruFollowInput(input);
-      return json(res, 200, { ok: true, ...resolved });
+      return json(res, 200, { ok: true, provider: 'windguru', ...resolved });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
+    }
+  }
+
+  // Public: resolve a follow target for any weather source.
+  if (req.method === 'POST' && pathname === '/v1/stations/resolve') {
+    const body = await readBody(req);
+    const input = typeof body.input === 'string' ? body.input : '';
+    const provider =
+      typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : 'windguru';
+    try {
+      if (provider === 'location') {
+        const resolved = await resolveLocation(input || `${body.lat},${body.lon}`, {
+          address: body.address,
+          sourceName: body.sourceName,
+          lat: body.lat,
+          lon: body.lon,
+          radiusKm: body.radiusKm,
+          maxStations: body.maxStations,
+        });
+        return json(res, 200, { ok: true, ...resolved });
+      }
+      const resolved = await resolveFollowInput(provider, input, body);
+      return json(res, 200, { ok: true, ...resolved });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Could not resolve station' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/weather-sources') {
+    return json(res, 200, { ok: true, sources: providerStatus(), maps: mapsStatus() });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/maps/config') {
+    const maps = mapsStatus();
+    return json(res, 200, {
+      ok: true,
+      googleMapsJs: maps.googleMapsJs,
+      browserKey: maps.browserKey,
+      geocodeProvider: maps.googleGeocode ? 'google' : 'open-meteo',
+    });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/geo/autocomplete') {
+    const q = String(url.searchParams.get('q') || '').trim();
+    try {
+      const suggestions = await autocompletePlaces(q);
+      return json(res, 200, { ok: true, suggestions });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Autocomplete failed' });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/v1/geo/geocode') {
+    const body = await readBody(req);
+    try {
+      if (body.placeId) {
+        const hit = await placeDetails(String(body.placeId));
+        return json(res, 200, { ok: true, ...hit });
+      }
+      const query =
+        typeof body.query === 'string'
+          ? body.query
+          : typeof body.address === 'string'
+            ? body.address
+            : '';
+      const hit = await geocodeAddress(query);
+      return json(res, 200, { ok: true, ...hit });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Geocode failed' });
     }
   }
 

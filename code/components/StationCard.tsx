@@ -2,7 +2,8 @@ import { Image } from 'expo-image';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
-import { displayName } from '../shared/defaults';
+import { displayName, stationNick } from '../shared/defaults';
+import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 
@@ -22,7 +23,9 @@ export const StationCard = memo(function StationCard({
   onPress,
 }: Props) {
   const name = displayName(station);
-  const hasNickname = !!station.nickname.trim();
+  const hasNickname = !!stationNick(station);
+  const provider = normalizeProvider(station.provider);
+  const providerShort = PROVIDER_META[provider]?.short || 'WG';
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
   const displayReading =
     forecastOnly && result?.forecast ? result.forecast : reading;
@@ -49,11 +52,12 @@ export const StationCard = memo(function StationCard({
               {name}
             </Text>
             <Text style={styles.meta} numberOfLines={2}>
+              {providerShort} ·{' '}
               {hasNickname
                 ? `${station.kind === 'spot' ? 'Spot' : 'Station'} #${station.stationId}`
                 : station.kind === 'spot'
-                  ? 'Windguru spot'
-                  : 'Windguru station'}
+                  ? 'spot'
+                  : 'station'}
               {station.enabled === false ? ' · paused' : ''}
               {showingForecast
                 ? ` · forecast${result?.forecastModel ? ` (${result.forecastModel})` : ''}`

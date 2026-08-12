@@ -16,6 +16,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
   if (!raw.stationId?.trim()) return null;
   return createFollowedStation(raw.stationId, raw.nickname ?? '', {
     id: raw.id,
+    provider: raw.provider,
     kind: raw.kind === 'spot' ? 'spot' : 'station',
     enabled: raw.enabled !== false,
     rule: { ...DEFAULT_RULE, ...(raw.rule ?? {}) },
@@ -23,6 +24,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     liveStationId: raw.liveStationId ?? null,
     linkedLiveStation: raw.linkedLiveStation ?? null,
     liveLinkWarning: raw.liveLinkWarning ?? null,
+    locationBlend: raw.locationBlend ?? null,
   });
 }
 

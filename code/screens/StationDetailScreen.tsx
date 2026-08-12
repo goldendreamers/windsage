@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { metricIcon, brandImages } from '../shared/assets';
 import { METRIC_OPTIONS, displayName, ruleForMetric } from '../shared/defaults';
+import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type {
   AlertState,
@@ -27,8 +28,8 @@ import {
   normalizeWindguruFollowInput,
   parseWindguruId,
   parseWindguruRef,
-  stationUrl,
 } from '../core/windguru';
+import { followTargetFromResolved, resolveFollowInput, stationPageUrl } from '../core/stations';
 import { MetricChooser } from '../components/MetricChooser';
 import { MetricPill } from '../components/MetricPill';
 import { Section } from '../components/Section';
@@ -111,7 +112,8 @@ export function StationDetailScreen({
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>{displayName(station)}</Text>
           <Text style={styles.subtitle}>
-            Windguru {station.kind === 'spot' ? 'spot' : 'station'} #{station.stationId}
+            {PROVIDER_META[normalizeProvider(station.provider)].label}{' '}
+            {station.kind === 'spot' ? 'spot' : 'station'} #{station.stationId}
           </Text>
         </View>
       </View>
@@ -132,6 +134,57 @@ export function StationDetailScreen({
             </Text>
           </Pressable>
         </View>
+      ) : null}
+
+      {normalizeProvider(station.provider) === 'location' && station.locationBlend?.members?.length ? (
+        <Section
+          title="Blend members"
+          icon="station"
+          hint="Weights = distance × accuracy × your rating (tap stars)"
+        >
+          <Text style={styles.hintLine}>
+            {station.locationBlend.address ||
+              `${station.locationBlend.lat.toFixed(3)}, ${station.locationBlend.lon.toFixed(3)}`}{' '}
+            · {station.locationBlend.radiusKm} km radius
+          </Text>
+          {station.locationBlend.members.map((m) => {
+            const rating = Math.round(Number(m.rating) || 0);
+            return (
+              <View key={`${m.provider}:${m.stationId}`} style={styles.memberRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.memberName}>{m.name}</Text>
+                  <Text style={styles.memberMeta}>
+                    {m.provider} #{m.stationId} · {m.distanceKm.toFixed(1)} km
+                    {m.weightNorm != null ? ` · ${(m.weightNorm * 100).toFixed(0)}%` : ''}
+                    {m.ok === false ? ' · offline' : ''}
+                  </Text>
+                </View>
+                <View style={styles.stars}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Pressable
+                      key={n}
+                      onPress={() => {
+                        const members = (station.locationBlend?.members || []).map((row) =>
+                          row.provider === m.provider && row.stationId === m.stationId
+                            ? { ...row, rating: n }
+                            : row,
+                        );
+                        onPersist({
+                          ...station,
+                          locationBlend: station.locationBlend
+                            ? { ...station.locationBlend, members }
+                            : station.locationBlend,
+                        });
+                      }}
+                    >
+                      <Text style={[styles.star, n <= rating && styles.starOn]}>★</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </Section>
       ) : null}
 
       <Section title="Identity" icon="station" hint="Nickname appears on your home list">
@@ -201,7 +254,7 @@ export function StationDetailScreen({
           })}
         </View>
 
-        <Text style={[styles.label, styles.spaced]}>Windguru ID or URL</Text>
+        <Text style={[styles.label, styles.spaced]}>Source ID or URL</Text>
         <TextInput
           style={styles.input}
           value={station.stationId}
@@ -218,57 +271,78 @@ export function StationDetailScreen({
           onEndEditing={(e) => {
             const raw = e.nativeEvent.text;
             void (async () => {
-              const ref = parseWindguruRef(raw);
-              const parsed = ref?.id || parseWindguruId(raw) || raw.trim();
-              const preferred: WindguruKind = ref?.kindHint ?? station.kind;
-
+              const provider = normalizeProvider(station.provider);
               try {
-                const resolved = await normalizeWindguruFollowInput(raw);
-                const target = followTargetForKind(preferred, resolved);
+                if (provider === 'windguru') {
+                  const ref = parseWindguruRef(raw);
+                  const preferred: WindguruKind = ref?.kindHint ?? station.kind;
+                  const resolved = await normalizeWindguruFollowInput(raw);
+                  const target = followTargetForKind(preferred, resolved);
+                  onPersist({
+                    ...station,
+                    provider: 'windguru',
+                    stationId: target.stationId,
+                    kind: target.kind,
+                    liveStationId: target.liveStationId,
+                    linkedLiveStation: target.linkedLiveStation,
+                    liveLinkWarning: target.liveLinkWarning,
+                    sourceName:
+                      target.spotName?.trim() ||
+                      target.linkedLiveStation?.spotname?.trim() ||
+                      target.linkedLiveStation?.name?.trim() ||
+                      station.sourceName ||
+                      null,
+                    nickname:
+                      station.nickname.trim() ||
+                      target.spotName ||
+                      station.nickname,
+                  });
+                  return;
+                }
+                const resolved = await resolveFollowInput(provider, raw);
+                const target = followTargetFromResolved(provider, 'station', resolved);
                 onPersist({
                   ...station,
+                  provider: target.provider,
                   stationId: target.stationId,
                   kind: target.kind,
                   liveStationId: target.liveStationId,
                   linkedLiveStation: target.linkedLiveStation,
                   liveLinkWarning: target.liveLinkWarning,
-                  sourceName:
-                    target.spotName?.trim() ||
-                    target.linkedLiveStation?.spotname?.trim() ||
-                    target.linkedLiveStation?.name?.trim() ||
-                    station.sourceName ||
-                    null,
-                  nickname:
-                    station.nickname.trim() ||
-                    target.spotName ||
-                    station.nickname,
+                  sourceName: target.sourceName || station.sourceName || null,
                 });
               } catch {
+                const preferred =
+                  provider === 'windguru'
+                    ? parseWindguruRef(raw)?.kindHint ?? station.kind
+                    : 'station';
+                const parsed =
+                  provider === 'windguru'
+                    ? parseWindguruRef(raw)?.id || parseWindguruId(raw) || raw.trim()
+                    : raw.trim();
                 onPersist({
                   ...station,
                   stationId: parsed,
                   kind: preferred,
-                  liveStationId: null,
+                  liveStationId: provider === 'windguru' ? null : parsed,
                   linkedLiveStation: null,
                   liveLinkWarning: null,
                 });
               }
             })();
           }}
-          placeholder={
-            station.kind === 'spot'
-              ? 'https://www.windguru.cz/377929 or 910318'
-              : 'https://www.windguru.cz/station/2259 or 2259'
-          }
+          placeholder={PROVIDER_META[normalizeProvider(station.provider)].placeholder}
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
         />
         <Pressable
-          onPress={() => void Linking.openURL(stationUrl(station.stationId, station.kind))}
+          onPress={() => void Linking.openURL(stationPageUrl(station))}
           style={styles.linkBtn}
         >
-          <Text style={styles.linkText}>Open on Windguru</Text>
+          <Text style={styles.linkText}>
+            Open on {PROVIDER_META[normalizeProvider(station.provider)].label}
+          </Text>
         </Pressable>
       </Section>
 
@@ -706,7 +780,7 @@ export function StationDetailScreen({
           keyboardType="number-pad"
         />
         <Text style={styles.hint}>
-          Phone stays idle — Wald home server polls Windguru. Status: {bgStatus}
+          Phone stays idle — Wald home server polls your weather sources. Status: {bgStatus}
         </Text>
       </Section>
 
@@ -735,6 +809,10 @@ export function StationDetailScreen({
             setSaving(true);
             try {
               onPollIntervalChange(pollIntervalMinutes);
+              if (normalizeProvider(station.provider) !== 'windguru') {
+                onSave(station);
+                return;
+              }
               const resolved = await normalizeWindguruFollowInput(station.stationId);
               const target = followTargetForKind(station.kind, resolved);
               const next = {
@@ -828,6 +906,41 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(232,184,74,0.35)',
     padding: 12,
     gap: 6,
+  },
+  hintLine: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 6,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  memberName: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  memberMeta: {
+    color: colors.muted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  stars: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  star: {
+    color: colors.muted,
+    fontSize: 16,
+  },
+  starOn: {
+    color: '#E8B84A',
   },
   warnText: {
     color: '#E8B84A',

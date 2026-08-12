@@ -4,7 +4,7 @@ import type { MetricKey } from './types';
 export const brandImages = {
   mark: require('../../assets/ui/mark.png') as ImageSourcePropType,
   bootMark: require('../../assets/ui/boot-mark.png') as ImageSourcePropType,
-  emptyHero: require('../../assets/ui/empty-hero.png') as ImageSourcePropType,
+  emptyHero: require('../../assets/ui/empty-hero.jpg') as ImageSourcePropType,
   wind: require('../../assets/ui/wind.png') as ImageSourcePropType,
   gust: require('../../assets/ui/gust.png') as ImageSourcePropType,
   temp: require('../../assets/ui/temp.png') as ImageSourcePropType,

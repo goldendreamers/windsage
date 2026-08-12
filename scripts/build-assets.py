@@ -271,8 +271,8 @@ def main() -> None:
     print("wrote store/splash.jpg")
 
     banner = empty_state_banner(hero)
-    banner.save(UI / "empty-hero.png", optimize=True)
-    print("wrote ui/empty-hero.png")
+    banner.convert("RGB").save(UI / "empty-hero.jpg", quality=72, optimize=True)
+    print("wrote ui/empty-hero.jpg")
 
     # Compact brand mark for in-app header / boot (@3x needs ≥384; keep 1024)
     mark = adaptive_foreground(icon, 1024)

@@ -128,6 +128,11 @@ async function getStationList() {
   return list;
 }
 
+/** Public accessor for nearby-station search (location blend). */
+export async function getStationListForNearby() {
+  return getStationList();
+}
+
 /** Nearest live station to a lat/lon from Windguru's public station_list. */
 export async function findNearestLiveStation(lat, lon) {
   const latitude = asNumber(lat);

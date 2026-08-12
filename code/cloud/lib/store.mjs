@@ -13,6 +13,8 @@ const empty = () => ({
   sharedStations: [],
   /** Latest product update shown in-app (and used by broadcast script). */
   announcement: null,
+  /** Global station trust / accuracy scores for location blends. */
+  stationTrust: {},
 });
 
 function migrate(store) {
@@ -21,6 +23,7 @@ function migrate(store) {
   if (!store.sessions) store.sessions = {};
   if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
   if (store.announcement === undefined) store.announcement = null;
+  if (!store.stationTrust || typeof store.stationTrust !== 'object') store.stationTrust = {};
   for (const device of Object.values(store.devices)) {
     if (device.userId === undefined) device.userId = null;
     if (!Array.isArray(device.pushTokens)) {
@@ -192,38 +195,50 @@ export function revokeSession(store, token) {
 
 /** Prefer existing user station rules; add guest stations that are new by Windguru id. */
 export function mergeStations(userStations = [], guestStations = []) {
+  const keyOf = (s) => {
+    const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
+    const sid = String(s?.stationId || '').trim();
+    return sid ? `${provider}:${sid}` : '';
+  };
   const map = new Map();
   for (const s of userStations) {
-    if (s?.stationId?.trim()) map.set(String(s.stationId).trim(), s);
+    const k = keyOf(s);
+    if (k) map.set(k, s);
   }
   for (const s of guestStations) {
-    const sid = s?.stationId?.trim();
-    if (!sid) continue;
-    if (!map.has(sid)) map.set(sid, s);
+    const k = keyOf(s);
+    if (!k) continue;
+    if (!map.has(k)) map.set(k, s);
   }
   return [...map.values()];
 }
 
-/** Upsert follows into the server-wide catalog (keyed by Windguru stationId). */
+/** Upsert follows into the server-wide catalog (keyed by provider:stationId). */
 export function upsertSharedStations(store, stations = []) {
   if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
   if (!stations?.length) return store.sharedStations;
+  const keyOf = (s) => {
+    const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
+    const sid = String(s?.stationId || '').trim();
+    return sid ? `${provider}:${sid}` : '';
+  };
   const map = new Map();
   for (const s of store.sharedStations) {
-    if (s?.stationId?.trim()) map.set(String(s.stationId).trim(), s);
+    const k = keyOf(s);
+    if (k) map.set(k, s);
   }
   for (const s of stations) {
-    const sid = s?.stationId?.trim();
-    if (!sid) continue;
-    const prev = map.get(sid);
+    const k = keyOf(s);
+    if (!k) continue;
+    const prev = map.get(k);
     if (!prev) {
-      map.set(sid, { ...s });
+      map.set(k, { ...s, provider: String(s.provider || 'windguru').toLowerCase() });
       continue;
     }
-    map.set(sid, {
+    map.set(k, {
       ...prev,
       ...s,
-      // Prefer richer Windguru naming / live-link metadata when present.
+      provider: String(s.provider || prev.provider || 'windguru').toLowerCase(),
       sourceName: s.sourceName || prev.sourceName || null,
       liveStationId: s.liveStationId || prev.liveStationId || null,
       linkedLiveStation: s.linkedLiveStation || prev.linkedLiveStation || null,
@@ -261,6 +276,7 @@ export function publicCatalogStations(store) {
   return (store.sharedStations || [])
     .filter((s) => s?.stationId?.trim())
     .map((s) => ({
+      provider: String(s.provider || 'windguru').toLowerCase(),
       stationId: String(s.stationId).trim(),
       kind: s.kind === 'spot' ? 'spot' : 'station',
       sourceName: s.sourceName || null,

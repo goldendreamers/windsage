@@ -179,8 +179,8 @@ export function HomeScreen({
             <Image source={brandImages.station} style={styles.emptyIcon} contentFit="contain" />
             <Text style={styles.emptyTitle}>Nothing followed yet</Text>
             <Text style={styles.emptyCopy}>
-              Add a Windguru spot or live station and give it a nickname. Spots without a live
-              sensor show forecast and alert from the nearest live station.
+              Follow Windguru, NDBC buoys, Open-Meteo points, and more. Name them and get notified
+              when your conditions hold.
             </Text>
             <Pressable style={styles.emptyCta} onPress={onOpenAdd}>
               <Text style={styles.emptyCtaText}>Follow your first spot</Text>

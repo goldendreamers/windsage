@@ -97,7 +97,7 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
     if (!keyJson.publicKey) return null;
 
     // Cache-bust so phones pick up lock-screen SW fixes after deploy.
-    const swVersion = '4';
+    const swVersion = '5';
     const reg = await navigator.serviceWorker.register(`/sw.js?v=${swVersion}`, { scope: '/' });
     await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);

@@ -1,9 +1,10 @@
 import * as Haptics from 'expo-haptics';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,9 +18,23 @@ import {
   suggestExistingFollows,
   windguruName,
 } from '../shared/defaults';
+import {
+  PROVIDER_META,
+  STATION_PROVIDERS,
+  normalizeProvider,
+  type StationProvider,
+} from '../shared/providers';
 import { colors } from '../shared/theme';
 import type { FollowedStation, WindguruKind } from '../shared/types';
-import { followTargetForKind, normalizeWindguruFollowInput, parseWindguruRef } from '../core/windguru';
+import {
+  detectProviderFromInput,
+  followTargetFromResolved,
+  resolveFollowInput,
+} from '../core/stations';
+import { parseWindguruRef } from '../core/windguru';
+import { getCloudBaseUrl } from '../core/cloud';
+import { LocationPicker, type LocationPick } from './LocationPicker';
+import type { LocationBlend } from '../shared/types';
 
 type Props = {
   visible: boolean;
@@ -30,7 +45,12 @@ type Props = {
     kind: WindguruKind,
     extras?: Pick<
       FollowedStation,
-      'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+      | 'provider'
+      | 'liveStationId'
+      | 'linkedLiveStation'
+      | 'liveLinkWarning'
+      | 'sourceName'
+      | 'locationBlend'
     >,
   ) => void;
   onReuse: (followId: string) => void;
@@ -46,6 +66,7 @@ export function AddStationModal({
   existingStations,
   catalogStations = [],
 }: Props) {
+  const [provider, setProvider] = useState<StationProvider>('windguru');
   const [stationId, setStationId] = useState('');
   const [nickname, setNickname] = useState('');
   const [kind, setKind] = useState<WindguruKind>('station');
@@ -53,14 +74,49 @@ export function AddStationModal({
   const [busy, setBusy] = useState(false);
   const [linkHint, setLinkHint] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [sourceReady, setSourceReady] = useState<Record<string, boolean> | null>(null);
+  const [locationPick, setLocationPick] = useState<LocationPick | null>(null);
+  const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
+  const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
+  const nicknameInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`${getCloudBaseUrl()}/v1/weather-sources`);
+        const data = (await res.json()) as {
+          sources?: Record<string, { ready?: boolean }>;
+        };
+        if (cancelled || !data.sources) return;
+        const map: Record<string, boolean> = {};
+        for (const [k, v] of Object.entries(data.sources)) {
+          map[k] = !!v?.ready;
+        }
+        setSourceReady(map);
+      } catch {
+        // ignore — assume free sources ready
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
+  const meta = PROVIDER_META[provider];
+  const providerReady = sourceReady ? sourceReady[provider] !== false : !meta.needsToken;
 
   const existingSuggestions = useMemo(
-    () => suggestExistingFollows(existingStations, stationId),
-    [existingStations, stationId],
+    () =>
+      suggestExistingFollows(existingStations, stationId).filter(
+        (f) => normalizeProvider(f.provider) === provider,
+      ),
+    [existingStations, stationId, provider],
   );
   const catalogSuggestions = useMemo(
-    () => suggestCatalogStations(catalogStations, existingStations, stationId),
-    [catalogStations, existingStations, stationId],
+    () => suggestCatalogStations(catalogStations, existingStations, stationId, 6, provider),
+    [catalogStations, existingStations, stationId, provider],
   );
 
   const reset = () => {
@@ -71,6 +127,9 @@ export function AddStationModal({
     setBusy(false);
     setLinkHint(null);
     setWarning(null);
+    setLocationPick(null);
+    setPendingMembers(null);
+    setPendingCatalog(null);
   };
 
   const close = () => {
@@ -84,24 +143,10 @@ export function AddStationModal({
     onReuse(follow.id);
   };
 
-  const pickCatalog = (entry: CatalogStation) => {
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const name =
-      nickname.trim() ||
-      entry.sourceName?.trim() ||
-      (entry.kind === 'spot' ? `Spot ${entry.stationId}` : `Station ${entry.stationId}`);
-    reset();
-    onSave(entry.stationId, name, entry.kind, {
-      sourceName: entry.sourceName ?? null,
-      liveStationId: entry.liveStationId ?? null,
-      linkedLiveStation: entry.linkedLiveStation ?? null,
-      liveLinkWarning: entry.liveLinkWarning ?? null,
-    });
-  };
-
   const catalogLabel = (entry: CatalogStation) =>
     windguruName({
-      id: `catalog_${entry.stationId}`,
+      id: `catalog_${entry.provider}_${entry.stationId}`,
+      provider: normalizeProvider(entry.provider),
       stationId: entry.stationId,
       kind: entry.kind,
       nickname: '',
@@ -113,19 +158,117 @@ export function AddStationModal({
       liveLinkWarning: entry.liveLinkWarning ?? null,
     });
 
+  /** Fill the form only — user nicknames, then taps Add to home. */
+  const pickCatalog = (entry: CatalogStation) => {
+    void Haptics.selectionAsync();
+    const entryProvider = normalizeProvider(entry.provider);
+    setProvider(entryProvider);
+    setStationId(entry.stationId);
+    setKind(entry.kind === 'spot' ? 'spot' : 'station');
+    setNickname('');
+    setPendingCatalog(entry);
+    setError(null);
+    setLinkHint(
+      `Selected ${catalogLabel(entry)}. Add a nickname, then tap Add to home.`,
+    );
+    setWarning(entry.liveLinkWarning ?? null);
+    setTimeout(() => nicknameInputRef.current?.focus(), 50);
+  };
+
   const applyIdText = (text: string) => {
     setStationId(text);
+    setPendingCatalog(null);
     setError(null);
     setLinkHint(null);
     setWarning(null);
-    const ref = parseWindguruRef(text);
-    if (ref?.kindHint) setKind(ref.kindHint);
+    const detected = detectProviderFromInput(text);
+    if (detected && detected !== provider) setProvider(detected);
+    if (provider === 'windguru' || detected === 'windguru') {
+      const ref = parseWindguruRef(text);
+      if (ref?.kindHint) setKind(ref.kindHint);
+    }
   };
 
   const submit = async () => {
-    const parsed = parseWindguruRef(stationId);
-    if (!parsed) {
-      setError('Paste a Windguru URL or number (spot or station)');
+    if (provider === 'location') {
+      if (!locationPick) {
+        setError('Search an address or tap the map to place a pin');
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      try {
+        const resolved = await resolveFollowInput('location', `${locationPick.lat},${locationPick.lon}`, {
+          address: locationPick.address,
+          lat: locationPick.lat,
+          lon: locationPick.lon,
+        });
+        const target = followTargetFromResolved('location', 'station', resolved);
+        const existing = findExistingFollow(existingStations, {
+          stationId: target.stationId,
+          provider: 'location',
+        });
+        if (existing) {
+          reset();
+          onReuse(existing.id);
+          return;
+        }
+        const blend = (resolved as { locationBlend?: LocationBlend }).locationBlend || null;
+        onSave(target.stationId, nickname.trim() || target.sourceName || locationPick.address, 'station', {
+          provider: 'location',
+          sourceName: target.sourceName || locationPick.address,
+          liveStationId: target.liveStationId,
+          liveLinkWarning: target.liveLinkWarning,
+          locationBlend: blend,
+        });
+        reset();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not resolve location');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Catalog pick: require nickname + explicit Add — no auto-create on select.
+    if (
+      pendingCatalog &&
+      pendingCatalog.stationId.trim() === stationId.trim() &&
+      normalizeProvider(pendingCatalog.provider) === provider
+    ) {
+      if (!nickname.trim()) {
+        setError('Add a nickname before following this station');
+        nicknameInputRef.current?.focus();
+        return;
+      }
+      const existing = findExistingFollow(existingStations, {
+        stationId: pendingCatalog.stationId,
+        provider,
+      });
+      if (existing) {
+        void Haptics.selectionAsync();
+        reset();
+        onReuse(existing.id);
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onSave(pendingCatalog.stationId, nickname.trim(), pendingCatalog.kind === 'spot' ? 'spot' : 'station', {
+        provider,
+        sourceName: pendingCatalog.sourceName ?? null,
+        liveStationId: pendingCatalog.liveStationId ?? null,
+        linkedLiveStation: pendingCatalog.linkedLiveStation ?? null,
+        liveLinkWarning: pendingCatalog.liveLinkWarning ?? null,
+      });
+      reset();
+      return;
+    }
+
+    if (!stationId.trim()) {
+      setError(`Paste a ${meta.label} id or URL`);
+      return;
+    }
+    if (!providerReady) {
+      setError(`${meta.label} needs a server API token — see Account / server env`);
       return;
     }
     setBusy(true);
@@ -133,11 +276,12 @@ export function AddStationModal({
     setLinkHint(null);
     setWarning(null);
     try {
-      const resolved = await normalizeWindguruFollowInput(stationId);
-      const target = followTargetForKind(kind, resolved);
+      const resolved = await resolveFollowInput(provider, stationId);
+      const target = followTargetFromResolved(provider, kind, resolved);
 
       const existing = findExistingFollow(existingStations, {
         stationId: target.stationId,
+        provider: target.provider,
       });
       if (existing) {
         void Haptics.selectionAsync();
@@ -146,24 +290,21 @@ export function AddStationModal({
         return;
       }
 
-      const sourceName =
-        target.spotName?.trim() ||
-        target.linkedLiveStation?.spotname?.trim() ||
-        target.linkedLiveStation?.name?.trim() ||
-        null;
+      const sourceName = target.sourceName;
       const name = nickname.trim() || sourceName || '';
-      if (kind === 'station' && resolved.kind === 'spot' && resolved.hasLiveStation) {
-        setLinkHint(
-          `Spot ${resolved.inputId} → live station ${resolved.liveStationId} (you chose Station)`,
-        );
-      } else if (kind === 'spot' && resolved.kind === 'station') {
-        setLinkHint(`#${resolved.inputId} is a live station — saved as Station`);
+      if (provider === 'windguru') {
+        if (kind === 'station' && resolved.kind === 'spot' && resolved.hasLiveStation) {
+          setLinkHint(
+            `Spot ${resolved.inputId} → live station ${resolved.liveStationId} (you chose Station)`,
+          );
+        } else if (kind === 'spot' && resolved.kind === 'station') {
+          setLinkHint(`#${resolved.inputId} is a live station — saved as Station`);
+        }
       }
-      if (target.liveLinkWarning) {
-        setWarning(target.liveLinkWarning);
-      }
+      if (target.liveLinkWarning) setWarning(target.liveLinkWarning);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSave(target.stationId, name, target.kind, {
+        provider: target.provider,
         liveStationId: target.liveStationId,
         linkedLiveStation: target.linkedLiveStation,
         liveLinkWarning: target.liveLinkWarning,
@@ -171,24 +312,28 @@ export function AddStationModal({
       });
       reset();
     } catch (e) {
-      if (kind === 'spot') {
-        const id = parsed.id;
-        const existing = findExistingFollow(existingStations, {
-          stationId: id,
-          inputId: id,
-        });
-        if (existing) {
-          void Haptics.selectionAsync();
+      if (provider === 'windguru' && kind === 'spot') {
+        const parsed = parseWindguruRef(stationId);
+        const id = parsed?.id;
+        if (id) {
+          const existing = findExistingFollow(existingStations, {
+            stationId: id,
+            provider: 'windguru',
+            inputId: id,
+          });
+          if (existing) {
+            void Haptics.selectionAsync();
+            reset();
+            onReuse(existing.id);
+            return;
+          }
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          onSave(id, nickname.trim() || `Spot ${id}`, 'spot', { provider: 'windguru' });
           reset();
-          onReuse(existing.id);
           return;
         }
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onSave(id, nickname.trim() || `Spot ${id}`, 'spot');
-        reset();
-        return;
       }
-      setError(e instanceof Error ? e.message : 'Could not resolve Windguru ID');
+      setError(e instanceof Error ? e.message : `Could not resolve ${meta.label}`);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setBusy(false);
@@ -199,67 +344,131 @@ export function AddStationModal({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.title}>Follow Windguru</Text>
+          <Text style={styles.title}>Follow a station</Text>
           <Text style={styles.hint}>
-            Choose spot or live station, then paste a Windguru URL or number. Matching follows you
-            already have open instead of duplicating. House catalog spots appear as suggestions
-            only — they are not added until you pick one.
+            Pick a data source, then paste an id or URL. Matching follows you already have open
+            instead of duplicating.
           </Text>
 
-          <Text style={styles.label}>Type</Text>
-          <View style={styles.segment}>
-            {([
-              { key: 'spot', label: 'Spot' },
-              { key: 'station', label: 'Station' },
-            ] as const).map((option) => {
-              const active = kind === option.key;
-              return (
-                <Pressable
-                  key={option.key}
-                  style={[styles.segmentItem, active && styles.segmentItemActive]}
-                  onPress={() => {
-                    void Haptics.selectionAsync();
-                    setKind(option.key);
-                    setLinkHint(null);
-                    setWarning(null);
-                  }}
-                  disabled={busy}
-                >
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Text style={styles.label}>Source</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerScroll}>
+            <View style={styles.providerRow}>
+              {STATION_PROVIDERS.map((key) => {
+                const active = provider === key;
+                const ready = sourceReady ? sourceReady[key] !== false : !PROVIDER_META[key].needsToken;
+                return (
+                  <Pressable
+                    key={key}
+                    style={[
+                      styles.providerChip,
+                      active && styles.providerChipActive,
+                      !ready && styles.providerChipMuted,
+                    ]}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      setProvider(key);
+                      setError(null);
+                      setLinkHint(null);
+                      setWarning(null);
+                      setPendingCatalog(null);
+                      if (key !== 'windguru') setKind('station');
+                    }}
+                    disabled={busy}
+                  >
+                    <Text
+                      style={[styles.providerChipText, active && styles.providerChipTextActive]}
+                    >
+                      {PROVIDER_META[key].short}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
+          <Text style={styles.sourceHint}>{meta.hint}</Text>
+          {!providerReady ? (
+            <Text style={styles.warning}>
+              {meta.label} needs a token on the Windsage server before it can poll.
+            </Text>
+          ) : null}
+
+          {provider === 'windguru' ? (
+            <>
+              <Text style={[styles.label, styles.spaced]}>Type</Text>
+              <View style={styles.segment}>
+                {([
+                  { key: 'spot', label: 'Spot' },
+                  { key: 'station', label: 'Station' },
+                ] as const).map((option) => {
+                  const active = kind === option.key;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      style={[styles.segmentItem, active && styles.segmentItemActive]}
+                      onPress={() => {
+                        void Haptics.selectionAsync();
+                        setKind(option.key);
+                        setLinkHint(null);
+                        setWarning(null);
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
 
           <Text style={[styles.label, styles.spaced]}>Nickname</Text>
           <TextInput
+            ref={nicknameInputRef}
             style={styles.input}
             value={nickname}
             onChangeText={setNickname}
-            placeholder="Home reef / Spot name"
-            placeholderTextColor={colors.muted}
-            autoFocus
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, styles.spaced]}>Windguru URL or number</Text>
-          <TextInput
-            style={styles.input}
-            value={stationId}
-            onChangeText={applyIdText}
             placeholder={
-              kind === 'spot'
-                ? 'https://www.windguru.cz/377929 or 910318'
-                : 'https://www.windguru.cz/station/2259 or 2259'
+              pendingCatalog
+                ? `Nickname for ${catalogLabel(pendingCatalog)}`
+                : 'Home reef / Spot name'
             }
             placeholderTextColor={colors.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
+            autoFocus={provider !== 'location'}
             editable={!busy}
           />
 
+          {provider === 'location' ? (
+            <LocationPicker
+              initial={locationPick}
+              onPicked={(pick) => {
+                setLocationPick(pick);
+                setError(null);
+                setPendingMembers(null);
+              }}
+            />
+          ) : (
+            <>
+              <Text style={[styles.label, styles.spaced]}>{meta.label} URL or id</Text>
+              <TextInput
+                style={styles.input}
+                value={stationId}
+                onChangeText={applyIdText}
+                placeholder={meta.placeholder}
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!busy}
+              />
+            </>
+          )}
+
+          {provider === 'location' && pendingMembers?.length ? (
+            <Text style={styles.linkHint}>
+              Nearby: {pendingMembers.slice(0, 4).map((m) => m.name).join(' · ')}
+            </Text>
+          ) : null}
           {existingSuggestions.length > 0 ? (
             <View style={styles.suggestions}>
               <Text style={styles.suggestLabel}>Already following</Text>
@@ -273,10 +482,8 @@ export function AddStationModal({
                   <View style={{ flex: 1 }}>
                     <Text style={styles.suggestName}>{windguruName(follow)}</Text>
                     <Text style={styles.suggestMeta}>
+                      {PROVIDER_META[normalizeProvider(follow.provider)].short} ·{' '}
                       {follow.kind === 'spot' ? 'Spot' : 'Station'} #{follow.stationId}
-                      {follow.liveStationId && follow.liveStationId !== follow.stationId
-                        ? ` · live #${follow.liveStationId}`
-                        : ''}
                     </Text>
                   </View>
                   <Text style={styles.suggestOpen}>Open</Text>
@@ -290,7 +497,7 @@ export function AddStationModal({
               <Text style={styles.suggestLabel}>Suggested from house catalog</Text>
               {catalogSuggestions.map((entry) => (
                 <Pressable
-                  key={`cat_${entry.stationId}`}
+                  key={`cat_${entry.provider}_${entry.stationId}`}
                   style={styles.suggestRow}
                   onPress={() => pickCatalog(entry)}
                   disabled={busy}
@@ -298,13 +505,11 @@ export function AddStationModal({
                   <View style={{ flex: 1 }}>
                     <Text style={styles.suggestName}>{catalogLabel(entry)}</Text>
                     <Text style={styles.suggestMeta}>
-                      {entry.kind === 'spot' ? 'Spot' : 'Station'} #{entry.stationId}
-                      {entry.liveStationId && entry.liveStationId !== entry.stationId
-                        ? ` · live #${entry.liveStationId}`
-                        : ''}
+                      {PROVIDER_META[normalizeProvider(entry.provider)].short} · #
+                      {entry.stationId}
                     </Text>
                   </View>
-                  <Text style={styles.suggestOpen}>Add</Text>
+                  <Text style={styles.suggestOpen}>Select</Text>
                 </Pressable>
               ))}
             </View>
@@ -351,6 +556,7 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: colors.line,
+    maxHeight: '92%',
   },
   title: {
     color: colors.text,
@@ -370,6 +576,42 @@ const styles = StyleSheet.create({
   },
   spaced: {
     marginTop: 8,
+  },
+  providerScroll: {
+    marginHorizontal: -4,
+  },
+  providerRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  providerChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  providerChipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  providerChipMuted: {
+    opacity: 0.55,
+  },
+  providerChipText: {
+    color: colors.muted,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  providerChipTextActive: {
+    color: '#042018',
+  },
+  sourceHint: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   segment: {
     flexDirection: 'row',

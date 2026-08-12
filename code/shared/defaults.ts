@@ -1,3 +1,4 @@
+import { normalizeProvider, type StationProvider } from './providers';
 import type {
   AlertRule,
   AlertState,
@@ -90,6 +91,10 @@ export const METRIC_OPTIONS = [
 
 export const BACKGROUND_TASK_NAME = 'WINDSAGE_POLL_TASK';
 
+export function stationProvider(station: Pick<FollowedStation, 'provider'> | null | undefined): StationProvider {
+  return normalizeProvider(station?.provider);
+}
+
 export function createFollowedStation(
   stationId: string,
   nickname = '',
@@ -101,24 +106,31 @@ export function createFollowedStation(
   const kind: WindguruKind = partial?.kind === 'spot' ? 'spot' : 'station';
   return {
     id,
+    provider: normalizeProvider(partial?.provider),
     stationId: stationId.trim(),
     kind,
-    nickname: nickname.trim(),
+    nickname: String(nickname ?? '').trim(),
     sourceName: partial?.sourceName?.trim() || null,
     enabled: partial?.enabled !== false,
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
     linkedLiveStation: partial?.linkedLiveStation ?? null,
     liveLinkWarning: partial?.liveLinkWarning ?? null,
+    locationBlend: partial?.locationBlend ?? null,
   };
 }
 
+export function stationNick(station: Pick<FollowedStation, 'nickname'> | null | undefined): string {
+  return String(station?.nickname ?? '').trim();
+}
+
 export function displayName(station: FollowedStation): string {
-  if (station.nickname.trim()) return station.nickname.trim();
+  const nick = stationNick(station);
+  if (nick) return nick;
   return windguruName(station);
 }
 
-/** Official Windguru name for a follow (ignores user nickname). */
+/** Official source name for a follow (ignores user nickname). */
 export function windguruName(station: FollowedStation): string {
   const source = (station.sourceName ?? '').trim();
   if (source) return source;
@@ -126,12 +138,19 @@ export function windguruName(station: FollowedStation): string {
     (station.linkedLiveStation?.spotname ?? '').trim() ||
     (station.linkedLiveStation?.name ?? '').trim();
   if (linked) return linked;
+  const provider = stationProvider(station);
+  if (provider === 'openmeteo') return `Open-Meteo ${station.stationId}`;
+  if (provider === 'location') return station.sourceName?.trim() || `Map pin ${station.stationId}`;
+  if (provider === 'ndbc') return `NDBC ${station.stationId}`;
+  if (provider === 'synoptic') return `Synoptic ${station.stationId}`;
+  if (provider === 'tempest') return `Tempest ${station.stationId}`;
+  if (provider === 'windfinder') return `Windfinder ${station.stationId}`;
   return station.kind === 'spot'
     ? `Spot ${station.stationId}`
     : `Station ${station.stationId}`;
 }
 
-/** Match a follow by the Windguru ID the user chose (`stationId` only).
+/** Match a follow by provider + external id (`stationId`).
 
  * Do not match on `liveStationId`: many spots share one live sensor, and after
  * editing a follow to a new location the old spot ID must be free to follow again.
@@ -140,6 +159,7 @@ export function findExistingFollow(
   stations: FollowedStation[],
   ids: {
     stationId?: string | null;
+    provider?: StationProvider | string | null;
     /** @deprecated Ignored — kept so older call sites keep typing. */
     inputId?: string | null;
     /** @deprecated Ignored — live link is not a follow identity. */
@@ -148,8 +168,11 @@ export function findExistingFollow(
 ): FollowedStation | null {
   const want = (ids.stationId ?? '').trim();
   if (!want) return null;
+  const wantProvider = normalizeProvider(ids.provider);
   for (const station of stations) {
-    if ((station.stationId ?? '').trim() === want) return station;
+    if ((station.stationId ?? '').trim() !== want) continue;
+    if (stationProvider(station) !== wantProvider) continue;
+    return station;
   }
   return null;
 }
@@ -184,6 +207,7 @@ export function suggestExistingFollows(
 
 export type CatalogStation = Pick<
   FollowedStation,
+  | 'provider'
   | 'stationId'
   | 'kind'
   | 'sourceName'
@@ -192,26 +216,35 @@ export type CatalogStation = Pick<
   | 'liveLinkWarning'
 >;
 
+function catalogKey(provider: StationProvider | string | null | undefined, stationId: string) {
+  return `${normalizeProvider(provider)}:${stationId.trim()}`;
+}
+
 /** Catalog suggestions excluding IDs already in the user's follow list. */
 export function suggestCatalogStations(
   catalog: CatalogStation[],
   existing: FollowedStation[],
   query: string,
   limit = 6,
+  providerFilter?: StationProvider | null,
 ): CatalogStation[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const digits = q.replace(/\D/g, '');
   const taken = new Set<string>();
   for (const s of existing) {
-    if (s.stationId?.trim()) taken.add(s.stationId.trim());
+    if (s.stationId?.trim()) taken.add(catalogKey(s.provider, s.stationId));
   }
+  const wantProvider = providerFilter ? normalizeProvider(providerFilter) : null;
   const out: CatalogStation[] = [];
   for (const entry of catalog) {
     const sid = entry.stationId.trim();
-    if (!sid || taken.has(sid)) continue;
+    const provider = normalizeProvider(entry.provider);
+    if (!sid || taken.has(catalogKey(provider, sid))) continue;
+    if (wantProvider && provider !== wantProvider) continue;
     const asFollow = {
-      id: `catalog_${sid}`,
+      id: `catalog_${provider}_${sid}`,
+      provider,
       stationId: sid,
       kind: entry.kind,
       nickname: '',

@@ -27,31 +27,36 @@ export function BrandHero({ hasStation }: { hasStation: boolean }) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.imageClip}>
-        <Animated.View style={[styles.imageShift, { transform: [{ translateX }] }]}>
-          <Image
-            source={brandImages.emptyHero}
-            style={styles.image}
-            contentFit="cover"
-            transition={400}
+      {!hasStation ? (
+        <View style={styles.imageClip}>
+          <Animated.View style={[styles.imageShift, { transform: [{ translateX }] }]}>
+            <Image
+              source={brandImages.emptyHero}
+              style={styles.image}
+              contentFit="cover"
+              transition={200}
+              recyclingKey="empty-hero"
+            />
+          </Animated.View>
+          <LinearGradient
+            colors={['rgba(6,24,33,0.15)', 'rgba(6,24,33,0.55)', colors.bg]}
+            locations={[0, 0.55, 1]}
+            style={StyleSheet.absoluteFill}
           />
-        </Animated.View>
-        <LinearGradient
-          colors={['rgba(6,24,33,0.15)', 'rgba(6,24,33,0.55)', colors.bg]}
-          locations={[0, 0.55, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
+        </View>
+      ) : (
+        <View style={styles.slimTop} />
+      )}
 
-      <View style={styles.copy}>
+      <View style={[styles.copy, hasStation && styles.copyCompact]}>
         <View style={styles.brandRow}>
           <Image source={brandImages.mark} style={styles.mark} contentFit="contain" />
           <Text style={styles.brand}>Windsage</Text>
         </View>
         <Text style={styles.tagline}>
           {hasStation
-            ? 'Your followed stations live here. Wald watches Windguru so your phone can sleep.'
-            : 'Follow Windguru stations, name them, and get notified when conditions hold.'}
+            ? 'Your followed stations live here. Wald watches so your phone can sleep.'
+            : 'Follow stations from Windguru and other sources — get notified when conditions hold.'}
         </Text>
       </View>
     </View>
@@ -68,6 +73,9 @@ const styles = StyleSheet.create({
     height: 210,
     overflow: 'hidden',
   },
+  slimTop: {
+    height: 12,
+  },
   imageShift: {
     width: '112%',
     height: '100%',
@@ -80,6 +88,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginTop: -54,
     gap: 8,
+  },
+  copyCompact: {
+    marginTop: 0,
   },
   brandRow: {
     flexDirection: 'row',

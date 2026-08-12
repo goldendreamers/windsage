@@ -15,14 +15,17 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.windsage.app",
+      "buildNumber": "1",
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
-        ]
+        ],
+        "NSUserNotificationsUsageDescription": "Windsage sends alerts when your wind rules are met."
       }
     },
     "android": {
       "package": "com.windsage.app",
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#061821",
         "foregroundImage": "./assets/store/android-icon-foreground.png",
@@ -40,7 +43,7 @@
       "bundler": "metro",
       "name": "Windsage",
       "shortName": "Windsage",
-      "description": "Watch Windguru stations from the Wald cloud",
+      "description": "Watch Windguru stations from the Wald cloud and get phone alerts when your wind rules are met.",
       "themeColor": "#061821",
       "backgroundColor": "#061821"
     },

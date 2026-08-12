@@ -47,6 +47,9 @@ export interface AlertRule {
 /** Windguru target: forecast spot page or live station page. */
 export type WindguruKind = 'spot' | 'station';
 
+/** Weather network the follow belongs to (defaults to windguru for older saves). */
+export type { StationProvider } from './providers';
+
 /** Nearest (or native) live station used for readings when following a spot. */
 export interface LinkedLiveStation {
   id: string;
@@ -55,20 +58,24 @@ export interface LinkedLiveStation {
   spotname?: string;
 }
 
-/** A Windguru spot or station you follow in Windsage. */
+/** A spot/station you follow in Windsage (any supported provider). */
 export interface FollowedStation {
   /** Local stable id for this follow entry. */
   id: string;
-  /** Windguru spot or station number the user chose (never auto-rewritten). */
+  /**
+   * Data source. Older saved follows omit this → treat as `windguru`.
+   */
+  provider?: import('./providers').StationProvider;
+  /** External id for that provider (Windguru #, NDBC id, lat,lon, …). */
   stationId: string;
   /**
    * Whether `stationId` is a forecast spot or a live station.
    * Readings for spots still resolve to a linked live station at fetch time
-   * without changing the stored ID.
+   * without changing the stored ID. Non-Windguru providers usually use `station`.
    */
   kind: WindguruKind;
   nickname: string;
-  /** Official Windguru spot/station name (not the user nickname). */
+  /** Official source name (not the user nickname). */
   sourceName?: string | null;
   enabled: boolean;
   rule: AlertRule;
@@ -78,6 +85,35 @@ export interface FollowedStation {
   linkedLiveStation?: LinkedLiveStation | null;
   /** User-facing warning when there is no native live sensor on the spot. */
   liveLinkWarning?: string | null;
+  /**
+   * Location-blend follow (provider === 'location'): pin + nearby members
+   * weighted by distance × historical accuracy × user rating.
+   */
+  locationBlend?: LocationBlend | null;
+}
+
+export interface LocationBlendMember {
+  provider: string;
+  stationId: string;
+  name: string;
+  distanceKm: number;
+  weight?: number;
+  weightNorm?: number;
+  rating?: number | null;
+  ok?: boolean;
+  lat?: number;
+  lon?: number;
+  virtual?: boolean;
+}
+
+export interface LocationBlend {
+  lat: number;
+  lon: number;
+  address?: string | null;
+  radiusKm: number;
+  maxStations: number;
+  members: LocationBlendMember[];
+  updatedAt?: number;
 }
 
 export interface AppSettings {
