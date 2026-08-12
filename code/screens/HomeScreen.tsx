@@ -33,7 +33,12 @@ type Props = {
   accountLabel?: string;
   onOpenAdd: () => void;
   onCloseAdd: () => void;
-  onAdd: (stationId: string, nickname: string, kind: FollowedStation['kind']) => void;
+  onAdd: (
+    stationId: string,
+    nickname: string,
+    kind: FollowedStation['kind'],
+    extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+  ) => void;
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
   onOpenAccount?: () => void;

@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
+import { useState } from 'react';
 import {
   Linking,
   Pressable,
@@ -66,6 +67,7 @@ export function StationDetailScreen({
   onResetAlert,
   onUnfollow,
 }: Props) {
+  const [saving, setSaving] = useState(false);
   const reading = result?.reading;
   const selectedMetric = METRIC_OPTIONS.find((m) => m.key === station.rule.metric);
   const windPrimary =
@@ -111,6 +113,24 @@ export function StationDetailScreen({
         </View>
       </View>
 
+      {station.liveLinkWarning && station.linkedLiveStation ? (
+        <View style={styles.warnBox}>
+          <Text style={styles.warnText}>{station.liveLinkWarning}</Text>
+          <Pressable
+            onPress={() =>
+              void Linking.openURL(
+                `https://www.windguru.cz/station/${station.linkedLiveStation!.id}`,
+              )
+            }
+            style={styles.linkBtn}
+          >
+            <Text style={styles.linkText}>
+              Open linked live station #{station.linkedLiveStation.id}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <Section title="Identity" icon="station" hint="Nickname appears on your home list">
         <Text style={styles.label}>Nickname</Text>
         <TextInput
@@ -144,13 +164,22 @@ export function StationDetailScreen({
                         ...station,
                         stationId: target.stationId,
                         kind: target.kind,
+                        liveStationId: target.liveStationId,
+                        linkedLiveStation: target.linkedLiveStation,
+                        liveLinkWarning: target.liveLinkWarning,
                         nickname:
                           station.nickname.trim() ||
                           target.spotName ||
                           station.nickname,
                       });
                     } catch {
-                      onPersist({ ...station, kind: option.key });
+                      onPersist({
+                        ...station,
+                        kind: option.key,
+                        liveStationId: null,
+                        linkedLiveStation: null,
+                        liveLinkWarning: null,
+                      });
                     }
                   })();
                 }}
@@ -167,7 +196,16 @@ export function StationDetailScreen({
         <TextInput
           style={styles.input}
           value={station.stationId}
-          onChangeText={(stationId) => onChange({ ...station, stationId })}
+          onChangeText={(stationId) =>
+            onChange({
+              ...station,
+              stationId,
+              // Clear stale nearest-link metadata until Save / blur re-resolves.
+              liveStationId: null,
+              linkedLiveStation: null,
+              liveLinkWarning: null,
+            })
+          }
           onEndEditing={(e) => {
             const raw = e.nativeEvent.text;
             void (async () => {
@@ -182,6 +220,9 @@ export function StationDetailScreen({
                   ...station,
                   stationId: target.stationId,
                   kind: target.kind,
+                  liveStationId: target.liveStationId,
+                  linkedLiveStation: target.linkedLiveStation,
+                  liveLinkWarning: target.liveLinkWarning,
                   nickname:
                     station.nickname.trim() ||
                     target.spotName ||
@@ -192,14 +233,17 @@ export function StationDetailScreen({
                   ...station,
                   stationId: parsed,
                   kind: preferred,
+                  liveStationId: null,
+                  linkedLiveStation: null,
+                  liveLinkWarning: null,
                 });
               }
             })();
           }}
           placeholder={
             station.kind === 'spot'
-              ? 'e.g. 910318 or https://www.windguru.cz/910318'
-              : 'e.g. 2259 or https://www.windguru.cz/station/2259'
+              ? 'https://www.windguru.cz/377929 or 910318'
+              : 'https://www.windguru.cz/station/2259 or 2259'
           }
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
@@ -613,14 +657,47 @@ export function StationDetailScreen({
       </View>
 
       <Pressable
-        style={styles.primaryBtn}
+        style={[styles.primaryBtn, saving && styles.primaryBtnDisabled]}
+        disabled={saving}
         onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onPollIntervalChange(pollIntervalMinutes);
-          onSave(station);
+          void (async () => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setSaving(true);
+            try {
+              onPollIntervalChange(pollIntervalMinutes);
+              const resolved = await normalizeWindguruFollowInput(station.stationId);
+              const target = followTargetForKind(station.kind, resolved);
+              const next = {
+                ...station,
+                stationId: target.stationId,
+                kind: target.kind,
+                liveStationId: target.liveStationId,
+                linkedLiveStation: target.linkedLiveStation,
+                liveLinkWarning: target.liveLinkWarning,
+                nickname:
+                  station.nickname.trim() ||
+                  target.spotName ||
+                  station.nickname,
+              };
+              onSave(next);
+            } catch (e) {
+              // Still save identity fields, but clear stale nearest-link warning.
+              onSave({
+                ...station,
+                liveStationId: null,
+                linkedLiveStation: null,
+                liveLinkWarning:
+                  e instanceof Error
+                    ? e.message
+                    : 'Could not resolve Windguru ID — warning cleared; check the ID',
+              });
+            } finally {
+              setSaving(false);
+            }
+          })();
         }}
       >
-        <Text style={styles.primaryBtnText}>Save station</Text>
+        <Text style={styles.primaryBtnText}>{saving ? 'Saving…' : 'Save station'}</Text>
       </Pressable>
 
       <Pressable style={styles.secondaryBtn} onPress={onResetAlert}>
@@ -667,6 +744,19 @@ const styles = StyleSheet.create({
   subtitle: {
     color: colors.muted,
     fontSize: 13,
+  },
+  warnBox: {
+    backgroundColor: 'rgba(232,184,74,0.12)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(232,184,74,0.35)',
+    padding: 12,
+    gap: 6,
+  },
+  warnText: {
+    color: '#E8B84A',
+    fontSize: 13,
+    lineHeight: 18,
   },
   block: {
     backgroundColor: colors.bgLift,
@@ -774,6 +864,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     backgroundColor: colors.accent,
+  },
+  primaryBtnDisabled: {
+    opacity: 0.7,
   },
   primaryBtnText: {
     color: '#042018',

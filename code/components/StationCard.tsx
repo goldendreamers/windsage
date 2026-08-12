@@ -40,14 +40,22 @@ export const StationCard = memo(function StationCard({
             <Text style={styles.nickname} numberOfLines={1}>
               {name}
             </Text>
-            <Text style={styles.meta} numberOfLines={1}>
+            <Text style={styles.meta} numberOfLines={2}>
               {hasNickname
                 ? `${station.kind === 'spot' ? 'Spot' : 'Station'} #${station.stationId}`
                 : station.kind === 'spot'
                   ? 'Windguru spot'
                   : 'Windguru station'}
               {station.enabled ? '' : ' · paused'}
+              {station.liveLinkWarning && station.linkedLiveStation
+                ? ` · via #${station.linkedLiveStation.id}`
+                : ''}
             </Text>
+            {station.liveLinkWarning && station.linkedLiveStation ? (
+              <Text style={styles.warn} numberOfLines={2}>
+                {station.liveLinkWarning}
+              </Text>
+            ) : null}
           </View>
         </View>
         <Text style={styles.chevron}>›</Text>
@@ -137,6 +145,12 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.muted,
     fontSize: 12,
+  },
+  warn: {
+    color: '#E8B84A',
+    fontSize: 11,
+    lineHeight: 14,
+    marginTop: 2,
   },
   chevron: {
     color: colors.muted,

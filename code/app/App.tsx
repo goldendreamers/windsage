@@ -279,8 +279,13 @@ export default function App() {
   );
 
   const addStation = useCallback(
-    async (stationId: string, nickname: string, kind: FollowedStation['kind'] = 'station') => {
-      const station = createFollowedStation(stationId, nickname, { kind });
+    async (
+      stationId: string,
+      nickname: string,
+      kind: FollowedStation['kind'] = 'station',
+      extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+    ) => {
+      const station = createFollowedStation(stationId, nickname, { kind, ...extras });
       const payload = {
         ...settingsRef.current,
         stations: [...settingsRef.current.stations, station],
@@ -288,8 +293,9 @@ export default function App() {
       await persistSettings(payload);
       setAddOpen(false);
       setActiveStationId(station.id);
+      const warn = extras?.liveLinkWarning ? ' · nearest live linked' : '';
       showToast(
-        `Following ${nickname || (kind === 'spot' ? `Spot ${stationId}` : `Station ${stationId}`)}`,
+        `Following ${nickname || (kind === 'spot' ? `Spot ${stationId}` : `Station ${stationId}`)}${warn}`,
       );
     },
     [persistSettings, showToast],
@@ -348,7 +354,18 @@ export default function App() {
           onSave={(next) => {
             void (async () => {
               await updateStation(next, true);
-              showToast(`Saved · ${displayName(next)}`);
+              // Drop stale live snapshot so Check/UI reflect the new location.
+              setLive((prev) => {
+                const copy = { ...prev };
+                delete copy[next.id];
+                return copy;
+              });
+              showToast(
+                next.liveLinkWarning
+                  ? `Saved · ${displayName(next)} · nearest live linked`
+                  : `Saved · ${displayName(next)}`,
+              );
+              void checkOne(next);
             })();
           }}
           onPollIntervalChange={(minutes) => {
@@ -373,7 +390,9 @@ export default function App() {
           addOpen={addOpen}
           onOpenAdd={() => setAddOpen(true)}
           onCloseAdd={() => setAddOpen(false)}
-          onAdd={(stationId, nickname, kind) => void addStation(stationId, nickname, kind)}
+          onAdd={(stationId, nickname, kind, extras) =>
+            void addStation(stationId, nickname, kind, extras)
+          }
           onRefresh={() => void refreshFromCloud('manual')}
           onOpenStation={setActiveStationId}
           onOpenAccount={() => setAccountOpen(true)}

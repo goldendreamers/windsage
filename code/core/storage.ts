@@ -19,6 +19,9 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     kind: raw.kind === 'spot' ? 'spot' : 'station',
     enabled: raw.enabled,
     rule: { ...DEFAULT_RULE, ...(raw.rule ?? {}) },
+    liveStationId: raw.liveStationId ?? null,
+    linkedLiveStation: raw.linkedLiveStation ?? null,
+    liveLinkWarning: raw.liveLinkWarning ?? null,
   });
 }
 

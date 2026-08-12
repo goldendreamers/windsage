@@ -15,25 +15,45 @@ async function resolve(input) {
 
 async function main() {
   const cases = [
-    { label: 'spot', input: '910318', expectKind: 'spot' },
-    { label: 'station', input: '2259', expectKind: 'station' },
-    { label: 'spot-url', input: 'https://www.windguru.cz/910318', expectKind: 'spot' },
+    {
+      label: 'forecast-only-url',
+      input: 'https://www.windguru.cz/377929',
+      expectKind: 'spot',
+      expectWarning: true,
+      expectNearest: '15077',
+    },
+    {
+      label: 'forecast-only-id',
+      input: '377929',
+      expectKind: 'spot',
+      expectWarning: true,
+    },
+    { label: 'spot', input: '910318', expectKind: 'spot', expectWarning: false },
+    { label: 'station', input: '2259', expectKind: 'station', expectWarning: false },
+    {
+      label: 'spot-url',
+      input: 'https://www.windguru.cz/910318',
+      expectKind: 'spot',
+      expectWarning: false,
+    },
     {
       label: 'station-url',
       input: 'https://www.windguru.cz/station/2259',
       expectKind: 'station',
+      expectWarning: false,
     },
   ];
   let failed = 0;
   for (const c of cases) {
     try {
       const data = await resolve(c.input);
-      const ok =
-        data.kind === c.expectKind &&
-        data.liveStationId &&
-        (c.expectKind === 'station'
-          ? data.liveStationId === data.inputId
-          : data.liveStationId !== data.inputId || true);
+      const hasWarn = !!(data.warning || data.linkedLiveStation);
+      const okKind = data.kind === c.expectKind && !!data.liveStationId;
+      const okWarn =
+        c.expectWarning === undefined ? true : c.expectWarning ? hasWarn : !data.warning;
+      const okNearest =
+        !c.expectNearest || data.liveStationId === c.expectNearest || data.linkedLiveStation?.id === c.expectNearest;
+      const ok = okKind && okWarn && okNearest;
       console.log(
         ok ? 'OK' : 'FAIL',
         c.label,
@@ -42,6 +62,9 @@ async function main() {
           inputId: data.inputId,
           liveStationId: data.liveStationId,
           spotName: data.spotName,
+          hasLiveStation: data.hasLiveStation,
+          linked: data.linkedLiveStation,
+          warning: data.warning,
         }),
       );
       if (!ok) failed += 1;

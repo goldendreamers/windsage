@@ -47,6 +47,14 @@ export interface AlertRule {
 /** Windguru target: forecast spot page or live station page. */
 export type WindguruKind = 'spot' | 'station';
 
+/** Nearest (or native) live station used for readings when following a spot. */
+export interface LinkedLiveStation {
+  id: string;
+  name: string;
+  distanceKm: number;
+  spotname?: string;
+}
+
 /** A Windguru spot or station you follow in Windsage. */
 export interface FollowedStation {
   /** Local stable id for this follow entry. */
@@ -62,6 +70,12 @@ export interface FollowedStation {
   nickname: string;
   enabled: boolean;
   rule: AlertRule;
+  /** Live station used for sensor readings (native link or nearest). */
+  liveStationId?: string | null;
+  /** Present when readings come from a nearest-station fallback. */
+  linkedLiveStation?: LinkedLiveStation | null;
+  /** User-facing warning when there is no native live sensor on the spot. */
+  liveLinkWarning?: string | null;
 }
 
 export interface AppSettings {

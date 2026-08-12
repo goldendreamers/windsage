@@ -10,13 +10,18 @@ import {
   View,
 } from 'react-native';
 import { colors } from '../shared/theme';
-import type { WindguruKind } from '../shared/types';
+import type { FollowedStation, WindguruKind } from '../shared/types';
 import { followTargetForKind, normalizeWindguruFollowInput, parseWindguruRef } from '../core/windguru';
 
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onSave: (stationId: string, nickname: string, kind: WindguruKind) => void;
+  onSave: (
+    stationId: string,
+    nickname: string,
+    kind: WindguruKind,
+    extras?: Pick<FollowedStation, 'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning'>,
+  ) => void;
   existingIds: string[];
 };
 
@@ -27,6 +32,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [linkHint, setLinkHint] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const reset = () => {
     setStationId('');
@@ -35,6 +41,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
     setError(null);
     setBusy(false);
     setLinkHint(null);
+    setWarning(null);
   };
 
   const close = () => {
@@ -46,6 +53,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
     setStationId(text);
     setError(null);
     setLinkHint(null);
+    setWarning(null);
     const ref = parseWindguruRef(text);
     if (ref?.kindHint) setKind(ref.kindHint);
   };
@@ -59,6 +67,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
     setBusy(true);
     setError(null);
     setLinkHint(null);
+    setWarning(null);
     try {
       const resolved = await normalizeWindguruFollowInput(stationId);
       const target = followTargetForKind(kind, resolved);
@@ -75,18 +84,24 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
         nickname.trim() ||
         target.spotName ||
         (target.kind === 'spot' ? `Spot ${target.stationId}` : '');
-      if (kind === 'station' && resolved.kind === 'spot') {
+      if (kind === 'station' && resolved.kind === 'spot' && resolved.hasLiveStation) {
         setLinkHint(
           `Spot ${resolved.inputId} → live station ${resolved.liveStationId} (you chose Station)`,
         );
       } else if (kind === 'spot' && resolved.kind === 'station') {
         setLinkHint(`#${resolved.inputId} is a live station — saved as Station`);
       }
+      if (target.liveLinkWarning) {
+        setWarning(target.liveLinkWarning);
+      }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSave(target.stationId, name, target.kind);
+      onSave(target.stationId, name, target.kind, {
+        liveStationId: target.liveStationId,
+        linkedLiveStation: target.linkedLiveStation,
+        liveLinkWarning: target.liveLinkWarning,
+      });
       reset();
     } catch (e) {
-      // If resolve fails but the user picked Spot, still allow following by ID.
       if (kind === 'spot') {
         const id = parsed.id;
         if (existingIds.includes(id)) {
@@ -111,8 +126,8 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
         <View style={styles.sheet}>
           <Text style={styles.title}>Follow Windguru</Text>
           <Text style={styles.hint}>
-            Choose spot or live station, then paste a Windguru URL or number. Your ID is kept as
-            entered — spots are not rewritten to a station unless you pick Station.
+            Choose spot or live station, then paste a Windguru URL or number. Forecast-only spots
+            are allowed and link to the nearest live station for readings.
           </Text>
 
           <Text style={styles.label}>Type</Text>
@@ -130,6 +145,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
                     void Haptics.selectionAsync();
                     setKind(option.key);
                     setLinkHint(null);
+                    setWarning(null);
                   }}
                   disabled={busy}
                 >
@@ -152,15 +168,15 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
             editable={!busy}
           />
 
-          <Text style={[styles.label, styles.spaced]}>Windguru ID or URL</Text>
+          <Text style={[styles.label, styles.spaced]}>Windguru URL or number</Text>
           <TextInput
             style={styles.input}
             value={stationId}
             onChangeText={applyIdText}
             placeholder={
               kind === 'spot'
-                ? 'e.g. 910318 or https://www.windguru.cz/910318'
-                : 'e.g. 2259 or https://www.windguru.cz/station/2259'
+                ? 'https://www.windguru.cz/377929 or 910318'
+                : 'https://www.windguru.cz/station/2259 or 2259'
             }
             placeholderTextColor={colors.muted}
             autoCapitalize="none"
@@ -168,6 +184,7 @@ export function AddStationModal({ visible, onClose, onSave, existingIds }: Props
             editable={!busy}
           />
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}
+          {warning ? <Text style={styles.warning}>{warning}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <View style={styles.actions}>
@@ -261,6 +278,11 @@ const styles = StyleSheet.create({
   },
   linkHint: {
     color: colors.accent,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  warning: {
+    color: '#E8B84A',
     fontSize: 12,
     lineHeight: 16,
   },

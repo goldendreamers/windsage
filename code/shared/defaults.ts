@@ -106,6 +106,9 @@ export function createFollowedStation(
     nickname: nickname.trim(),
     enabled: partial?.enabled ?? true,
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
+    liveStationId: partial?.liveStationId ?? null,
+    linkedLiveStation: partial?.linkedLiveStation ?? null,
+    liveLinkWarning: partial?.liveLinkWarning ?? null,
   };
 }
 

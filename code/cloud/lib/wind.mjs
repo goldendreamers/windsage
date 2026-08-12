@@ -1,20 +1,46 @@
 const BASE = 'https://www.windguru.cz/int/iapi.php';
 const RESOLVE_TTL_MS = 6 * 60 * 60 * 1000;
+const STATION_LIST_TTL_MS = 24 * 60 * 60 * 1000;
 const resolveCache = new Map();
+let stationListCache = null;
 
 /** Extract a numeric Windguru id from a bare number or full URL. */
 export function parseWindguruId(input) {
   return parseWindguruRef(input)?.id ?? null;
 }
 
-/** Parse ID and optional kind hint from `/station/2259` vs `/910318` URLs. */
+/**
+ * Parse ID and optional kind hint from Windguru URLs or bare numbers.
+ * Accepts www/m, http(s), trailing slash, and query strings.
+ */
 export function parseWindguruRef(input) {
   const trimmed = String(input || '').trim();
+  if (!trimmed) return null;
   if (/^\d+$/.test(trimmed)) return { id: trimmed };
-  const stationMatch = trimmed.match(/windguru\.cz\/station\/(\d+)/i);
+
+  let path = trimmed;
+  try {
+    if (/^https?:\/\//i.test(trimmed) || /^[\w.-]*windguru\.cz/i.test(trimmed)) {
+      const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+      path = url.pathname || '';
+    }
+  } catch {
+    path = trimmed;
+  }
+
+  const stationMatch = path.match(/\/station\/(\d+)/i);
   if (stationMatch) return { id: stationMatch[1], kindHint: 'station' };
-  const spotMatch = trimmed.match(/windguru\.cz\/(\d+)/i);
+  const spotMatch = path.match(/\/(\d+)\/?(?:$|\?)/) || path.match(/\/(\d+)$/);
   if (spotMatch) return { id: spotMatch[1], kindHint: 'spot' };
+
+  // Fallback: any windguru host + digits
+  const loose = trimmed.match(/windguru\.cz\/(?:station\/)?(\d+)/i);
+  if (loose) {
+    return {
+      id: loose[1],
+      kindHint: /\/station\//i.test(trimmed) ? 'station' : 'spot',
+    };
+  }
   return null;
 }
 
@@ -81,7 +107,65 @@ async function tryStationCurrent(liveStationId) {
   return normalizeReading(raw);
 }
 
-/** Spot IDs (e.g. 910318) resolve to linked live stations (e.g. 2259). */
+function haversineKm(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const toR = Math.PI / 180;
+  const dLat = (bLat - aLat) * toR;
+  const dLon = (bLon - aLon) * toR;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+async function getStationList() {
+  if (stationListCache && stationListCache.expires > Date.now()) {
+    return stationListCache.list;
+  }
+  const list = await fetchJson('https://www.windguru.cz/', { q: 'station_list' });
+  if (!Array.isArray(list)) throw new Error('Windguru station_list unavailable');
+  stationListCache = { list, expires: Date.now() + STATION_LIST_TTL_MS };
+  return list;
+}
+
+/** Nearest live station to a lat/lon from Windguru's public station_list. */
+export async function findNearestLiveStation(lat, lon) {
+  const latitude = asNumber(lat);
+  const longitude = asNumber(lon);
+  if (latitude == null || longitude == null) return null;
+
+  const list = await getStationList();
+  let best = null;
+  for (const row of list) {
+    const sLat = asNumber(row?.lat);
+    const sLon = asNumber(row?.lon);
+    const id = row?.id_station;
+    if (sLat == null || sLon == null || id == null) continue;
+    const d = haversineKm(latitude, longitude, sLat, sLon);
+    if (!best || d < best.distanceKm) {
+      const name = String(row.name || row.spotname || `Station ${id}`).trim();
+      best = {
+        id: String(Math.trunc(Number(id))),
+        name,
+        spotname: row.spotname ? String(row.spotname) : undefined,
+        distanceKm: d,
+        lat: sLat,
+        lon: sLon,
+      };
+    }
+  }
+  return best;
+}
+
+function formatLinkedWarning(linked) {
+  const km = linked.distanceKm.toFixed(1);
+  return `No live sensor on this spot — using nearest live station ${linked.name} (#${linked.id}, ${km} km)`;
+}
+
+/**
+ * Spot IDs resolve to a native live station when Windguru links one;
+ * otherwise attach the geographically nearest live station and warn.
+ */
 export async function resolveWindguruId(inputId) {
   const id = String(inputId).trim();
   if (!/^\d+$/.test(id)) throw new Error('Station/spot ID must be numeric');
@@ -91,7 +175,14 @@ export async function resolveWindguruId(inputId) {
 
   try {
     await tryStationCurrent(id);
-    const value = { inputId: id, liveStationId: id, kind: 'station' };
+    const value = {
+      inputId: id,
+      liveStationId: id,
+      kind: 'station',
+      hasLiveStation: true,
+      linkedLiveStation: null,
+      warning: null,
+    };
     resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
     return value;
   } catch (error) {
@@ -103,19 +194,53 @@ export async function resolveWindguruId(inputId) {
     q: 'spot',
     id_spot: id,
   });
+  const spotName =
+    (typeof spot?.spotname === 'string' && spot.spotname) ||
+    (typeof spot?.station?.name === 'string' && spot.station.name) ||
+    undefined;
   const live = asNumber(spot?.station?.id_station);
-  if (live == null) {
+
+  if (live != null) {
+    const liveStationId = String(Math.trunc(live));
+    await tryStationCurrent(liveStationId);
+    const value = {
+      inputId: id,
+      liveStationId,
+      kind: 'spot',
+      spotName,
+      hasLiveStation: true,
+      linkedLiveStation: null,
+      warning: null,
+      lat: asNumber(spot?.lat),
+      lon: asNumber(spot?.lon),
+    };
+    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
+    return value;
+  }
+
+  const linked = await findNearestLiveStation(spot?.lat, spot?.lon);
+  if (!linked) {
     throw new Error(
-      `Windguru #${id} is a forecast spot with no live station. Use a /station/… URL.`,
+      `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} has no live station nearby.`,
     );
   }
-  const liveStationId = String(Math.trunc(live));
-  await tryStationCurrent(liveStationId);
+  await tryStationCurrent(linked.id);
+  const warning = formatLinkedWarning(linked);
   const value = {
     inputId: id,
-    liveStationId,
+    liveStationId: linked.id,
     kind: 'spot',
-    spotName: spot.spotname || spot.station?.name,
+    spotName,
+    hasLiveStation: false,
+    linkedLiveStation: {
+      id: linked.id,
+      name: linked.name,
+      spotname: linked.spotname,
+      distanceKm: Number(linked.distanceKm.toFixed(2)),
+    },
+    warning,
+    lat: asNumber(spot?.lat),
+    lon: asNumber(spot?.lon),
   };
   resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
   return value;
@@ -136,13 +261,18 @@ export async function normalizeWindguruFollowInput(input) {
     liveStationId: resolved.liveStationId,
     kind: resolved.kind,
     spotName: resolved.spotName,
-    rewritten: resolved.kind === 'spot' && resolved.liveStationId !== resolved.inputId,
+    hasLiveStation: resolved.hasLiveStation !== false,
+    linkedLiveStation: resolved.linkedLiveStation || null,
+    warning: resolved.warning || null,
+    rewritten:
+      resolved.kind === 'spot' &&
+      resolved.hasLiveStation &&
+      resolved.liveStationId !== resolved.inputId,
   };
 }
 
 /**
- * Annotate kind when missing — never rewrite stored spot/station IDs.
- * Readings still resolve spot→live station at fetch time.
+ * Annotate kind / live-link fields when missing — never rewrite stored spot IDs.
  */
 export async function fixSpotStations(stations = []) {
   const out = [];
@@ -152,7 +282,11 @@ export async function fixSpotStations(stations = []) {
       out.push(station);
       continue;
     }
-    if (station.kind === 'spot' || station.kind === 'station') {
+    const needsEnrich =
+      !(station.kind === 'spot' || station.kind === 'station') ||
+      (station.kind === 'spot' &&
+        (!station.liveStationId || !!station.liveLinkWarning));
+    if (!needsEnrich) {
       out.push(station);
       continue;
     }
@@ -161,7 +295,10 @@ export async function fixSpotStations(stations = []) {
       changed += 1;
       out.push({
         ...station,
-        kind: resolved.kind,
+        kind: station.kind === 'spot' || station.kind === 'station' ? station.kind : resolved.kind,
+        liveStationId: resolved.liveStationId,
+        linkedLiveStation: resolved.linkedLiveStation || null,
+        liveLinkWarning: resolved.warning || null,
         nickname:
           (station.nickname || '').trim() ||
           resolved.spotName ||
@@ -169,7 +306,10 @@ export async function fixSpotStations(stations = []) {
           '',
       });
     } catch {
-      out.push({ ...station, kind: 'station' });
+      out.push({
+        ...station,
+        kind: station.kind === 'spot' ? 'spot' : 'station',
+      });
       changed += 1;
     }
   }
@@ -178,12 +318,16 @@ export async function fixSpotStations(stations = []) {
 
 export async function fetchCurrentReading(stationId) {
   const resolved = await resolveWindguruId(stationId);
+  if (!resolved.liveStationId) {
+    throw new Error('No live station available for readings');
+  }
   return tryStationCurrent(resolved.liveStationId);
 }
 
 export async function fetchRecentHistory(stationId, metric, hours, avgMinutes = 10) {
   const resolved = await resolveWindguruId(stationId);
   const id = resolved.liveStationId;
+  if (!id) throw new Error('No live station available for history');
   const vars =
     metric === 'wave_height'
       ? 'wind_avg,wave_height,wave,wvheight,swell_height'

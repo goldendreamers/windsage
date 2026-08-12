@@ -40,6 +40,14 @@ export type ResolvedWindguru = {
   liveStationId: string;
   kind: 'station' | 'spot';
   spotName?: string;
+  hasLiveStation?: boolean;
+  linkedLiveStation?: {
+    id: string;
+    name: string;
+    distanceKm: number;
+    spotname?: string;
+  } | null;
+  warning?: string | null;
 };
 
 const resolveCache = new Map<string, { expires: number; value: ResolvedWindguru }>();
@@ -49,16 +57,39 @@ export function parseWindguruId(input: string): string | null {
   return parseWindguruRef(input)?.id ?? null;
 }
 
-/** Parse ID and optional kind hint from `/station/2259` vs `/910318` URLs. */
+/**
+ * Parse ID and optional kind hint from Windguru URLs or bare numbers.
+ * Accepts www/m, http(s), trailing slash, and query strings.
+ */
 export function parseWindguruRef(
   input: string,
 ): { id: string; kindHint?: 'spot' | 'station' } | null {
   const trimmed = input.trim();
+  if (!trimmed) return null;
   if (/^\d+$/.test(trimmed)) return { id: trimmed };
-  const stationMatch = trimmed.match(/windguru\.cz\/station\/(\d+)/i);
+
+  let path = trimmed;
+  try {
+    if (/^https?:\/\//i.test(trimmed) || /^[\w.-]*windguru\.cz/i.test(trimmed)) {
+      const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+      path = url.pathname || '';
+    }
+  } catch {
+    path = trimmed;
+  }
+
+  const stationMatch = path.match(/\/station\/(\d+)/i);
   if (stationMatch) return { id: stationMatch[1], kindHint: 'station' };
-  const spotMatch = trimmed.match(/windguru\.cz\/(\d+)/i);
+  const spotMatch = path.match(/\/(\d+)\/?(?:$|\?)/) || path.match(/\/(\d+)$/);
   if (spotMatch) return { id: spotMatch[1], kindHint: 'spot' };
+
+  const loose = trimmed.match(/windguru\.cz\/(?:station\/)?(\d+)/i);
+  if (loose) {
+    return {
+      id: loose[1],
+      kindHint: /\/station\//i.test(trimmed) ? 'station' : 'spot',
+    };
+  }
   return null;
 }
 
@@ -201,7 +232,7 @@ async function tryStationCurrent(liveStationId: string): Promise<StationReading>
 
 /**
  * Resolve a user-entered Windguru ID (live station or forecast spot) to a live station.
- * Example: spot 910318 (Caesarea) → station 2259 (Freegull Sea Sports).
+ * Prefer Wald cloud so forecast-only spots get nearest-live linking + Referer.
  */
 export async function resolveWindguruId(inputId: string): Promise<ResolvedWindguru> {
   const id = inputId.trim();
@@ -213,14 +244,54 @@ export async function resolveWindguruId(inputId: string): Promise<ResolvedWindgu
   if (cached && cached.expires > Date.now()) return cached.value;
 
   try {
+    const response = await fetch(`${resolveCloudBaseUrl()}/v1/windguru/resolve`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input: id }),
+    });
+    const data = (await response.json().catch(() => ({}))) as Partial<ResolvedWindguru> & {
+      error?: string;
+      ok?: boolean;
+    };
+    if (response.ok && data.liveStationId && data.inputId && data.kind) {
+      const value: ResolvedWindguru = {
+        inputId: data.inputId,
+        liveStationId: data.liveStationId,
+        kind: data.kind,
+        spotName: data.spotName,
+        hasLiveStation: data.hasLiveStation !== false,
+        linkedLiveStation: data.linkedLiveStation ?? null,
+        warning: data.warning ?? null,
+      };
+      resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
+      return value;
+    }
+    if (!response.ok && data.error) {
+      throw new Error(data.error);
+    }
+  } catch (error) {
+    // Fall through to local resolve when cloud is unreachable (native).
+    if (isWebRuntime()) throw error;
+  }
+
+  try {
     await tryStationCurrent(id);
-    const value: ResolvedWindguru = { inputId: id, liveStationId: id, kind: 'station' };
+    const value: ResolvedWindguru = {
+      inputId: id,
+      liveStationId: id,
+      kind: 'station',
+      hasLiveStation: true,
+      linkedLiveStation: null,
+      warning: null,
+    };
     resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
     return value;
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (!/unknown station/i.test(message)) {
-      // Network / other errors: don't assume spot.
       throw error;
     }
   }
@@ -233,29 +304,30 @@ export async function resolveWindguruId(inputId: string): Promise<ResolvedWindgu
 
   const stationObj = spot.station as Record<string, unknown> | null | undefined;
   const live = asNumber(stationObj?.id_station);
-  if (live == null) {
-    throw new Error(
-      `Windguru #${id} is a forecast spot with no live station. Pick a /station/… URL instead.`,
-    );
-  }
-
-  const liveStationId = String(Math.trunc(live));
   const spotName =
     (typeof spot.spotname === 'string' && spot.spotname) ||
     (typeof stationObj?.name === 'string' && stationObj.name) ||
     undefined;
 
-  // Confirm live station answers.
-  await tryStationCurrent(liveStationId);
+  if (live != null) {
+    const liveStationId = String(Math.trunc(live));
+    await tryStationCurrent(liveStationId);
+    const value: ResolvedWindguru = {
+      inputId: id,
+      liveStationId,
+      kind: 'spot',
+      spotName,
+      hasLiveStation: true,
+      linkedLiveStation: null,
+      warning: null,
+    };
+    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
+    return value;
+  }
 
-  const value: ResolvedWindguru = {
-    inputId: id,
-    liveStationId,
-    kind: 'spot',
-    spotName,
-  };
-  resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-  return value;
+  throw new Error(
+    `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} needs cloud resolve to link a nearest live station.`,
+  );
 }
 
 /**
@@ -271,6 +343,9 @@ export async function normalizeWindguruFollowInput(input: string): Promise<{
   liveStationId: string;
   kind: 'station' | 'spot';
   spotName?: string;
+  hasLiveStation: boolean;
+  linkedLiveStation: ResolvedWindguru['linkedLiveStation'];
+  warning: string | null;
   rewritten: boolean;
 }> {
   const parsed = parseWindguruRef(input);
@@ -293,6 +368,9 @@ export async function normalizeWindguruFollowInput(input: string): Promise<{
       liveStationId?: string;
       kind?: 'station' | 'spot';
       spotName?: string;
+      hasLiveStation?: boolean;
+      linkedLiveStation?: ResolvedWindguru['linkedLiveStation'];
+      warning?: string | null;
       rewritten?: boolean;
     };
     if (!response.ok || !data.liveStationId || !data.inputId || !data.kind) {
@@ -303,6 +381,9 @@ export async function normalizeWindguruFollowInput(input: string): Promise<{
       liveStationId: data.liveStationId,
       kind: data.kind,
       spotName: data.spotName,
+      hasLiveStation: data.hasLiveStation !== false,
+      linkedLiveStation: data.linkedLiveStation ?? null,
+      warning: data.warning ?? null,
       rewritten: !!data.rewritten,
     };
   }
@@ -313,15 +394,20 @@ export async function normalizeWindguruFollowInput(input: string): Promise<{
     liveStationId: resolved.liveStationId,
     kind: resolved.kind,
     spotName: resolved.spotName,
-    rewritten: resolved.kind === 'spot' && resolved.liveStationId !== resolved.inputId,
+    hasLiveStation: resolved.hasLiveStation !== false,
+    linkedLiveStation: resolved.linkedLiveStation ?? null,
+    warning: resolved.warning ?? null,
+    rewritten:
+      resolved.kind === 'spot' &&
+      resolved.hasLiveStation !== false &&
+      resolved.liveStationId !== resolved.inputId,
   };
 }
 
 /**
  * Map a resolved Windguru ID to what we store for a user-chosen Spot vs Station.
- * - Station → always the live station ID.
- * - Spot → keep the spot ID when it is a forecast spot; if the ID is only a
- *   live station, store it as a station so readings and Windguru links work.
+ * - Station → always the live station ID (no warning).
+ * - Spot → keep the spot ID; attach liveStationId / nearest-link metadata.
  */
 export function followTargetForKind(
   preferred: WindguruKind,
@@ -330,26 +416,35 @@ export function followTargetForKind(
     liveStationId: string;
     kind: WindguruKind;
     spotName?: string;
+    hasLiveStation?: boolean;
+    linkedLiveStation?: ResolvedWindguru['linkedLiveStation'];
+    warning?: string | null;
   },
-): { stationId: string; kind: WindguruKind; spotName?: string } {
-  if (preferred === 'station') {
+): {
+  stationId: string;
+  kind: WindguruKind;
+  spotName?: string;
+  liveStationId: string;
+  linkedLiveStation: ResolvedWindguru['linkedLiveStation'];
+  liveLinkWarning: string | null;
+} {
+  if (preferred === 'station' || resolved.kind === 'station') {
     return {
       stationId: resolved.liveStationId,
       kind: 'station',
       spotName: resolved.spotName,
-    };
-  }
-  if (resolved.kind === 'station') {
-    return {
-      stationId: resolved.liveStationId,
-      kind: 'station',
-      spotName: resolved.spotName,
+      liveStationId: resolved.liveStationId,
+      linkedLiveStation: null,
+      liveLinkWarning: null,
     };
   }
   return {
     stationId: resolved.inputId,
     kind: 'spot',
     spotName: resolved.spotName,
+    liveStationId: resolved.liveStationId,
+    linkedLiveStation: resolved.linkedLiveStation ?? null,
+    liveLinkWarning: resolved.warning ?? null,
   };
 }
 
