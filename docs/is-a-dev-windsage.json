@@ -1,0 +1,13 @@
+{
+  "owner": {
+    "username": "REPLACE_WITH_YOUR_GITHUB_USERNAME",
+    "email": "shakedwald@gmail.com"
+  },
+  "records": {
+    "URL": "https://windsage.nimrod.bio"
+  },
+  "redirect_config": {
+    "custom_paths": [],
+    "redirect_paths": true
+  }
+}

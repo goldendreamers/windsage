@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Versioned web snapshots (large); keep locally if needed, don't commit
+releases/web/
+
 # Native
 .kotlin/
 *.orig.*
@@ -32,6 +35,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.env.smtp
 
 # typescript
 *.tsbuildinfo

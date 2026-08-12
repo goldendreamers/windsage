@@ -1,0 +1,22 @@
+---
+description: Email Nimrod on blockers and when a step finishes
+alwaysApply: true
+---
+
+# Email notify (Windsage) — MANDATORY
+
+Use `/Users/goldendreamers/windsage/scripts/notify-email.sh` (credentials in gitignored `.env.smtp`; default to `shakedwald@gmail.com`).
+
+**Never skip email.** Chat alone is not enough.
+
+Send an email when either:
+
+1. **Action needed** — you are blocked and need the user to do something (credentials, approval, CAPTCHA, choice, login, Tailscale admin toggle, etc.). Subject must start with `Windsage · ACTION NEEDED:`.
+2. **Step done** — a discrete task/step is finished (feature shipped, release deployed, fix verified, etc.). Subject must start with `Windsage · done:`.
+
+Guidelines:
+
+- Send the email in the same turn as the chat reply (before ending the turn).
+- Body: what happened / what you need, in a few lines; include URLs when relevant.
+- Prefer Resend/SMTP via the script; do not print secrets in the email body.
+- Still reply in chat; email is a required extra signal.

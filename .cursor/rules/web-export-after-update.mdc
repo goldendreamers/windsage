@@ -1,0 +1,29 @@
+---
+description: After each finished step, re-export web, deploy, and prune releases
+alwaysApply: true
+---
+
+# Windsage web export after every finished step
+
+When you finish a discrete work step (feature, fix, UI/cloud change, or other product update):
+
+1. Run the release script (export + version snapshot + prune + Wald deploy):
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd "/Users/goldendreamers/windsage"
+npm run release:web
+```
+
+2. Do **not** leave `dist/` stale — re-export and upload after every finished step.
+
+3. Email when the step (and deploy) is done, per the notify-email rule.
+
+## Prune rule (built into `scripts/release-web.py`)
+
+Under `releases/web/`, **keep** a snapshot only if:
+
+- it is among the **newest 3** versions, **or**
+- its age is **more than 1 day and less than 7 days**
+
+Delete everything else (extra same-day builds beyond the newest 3, and anything **≥ 7 days** old unless it is still in the newest 3).

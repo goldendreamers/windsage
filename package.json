@@ -1,12 +1,25 @@
 {
   "name": "windsage",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "code/app/entry.ts",
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.9",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.12",
+    "expo-background-fetch": "~57.0.9",
+    "expo-constants": "~57.0.10",
+    "expo-device": "~57.0.1",
+    "expo-haptics": "~57.0.1",
+    "expo-image": "~57.0.2",
+    "expo-linear-gradient": "~57.0.1",
+    "expo-notifications": "~57.0.10",
+    "expo-splash-screen": "~57.0.6",
     "expo-status-bar": "~57.0.1",
+    "expo-task-manager": "~57.0.9",
     "react": "19.2.3",
-    "react-native": "0.86.2"
+    "react-dom": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -16,7 +29,13 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "export:web": "expo export --platform web",
+    "release:web": "python3 scripts/release-web.py",
+    "release:web:local": "python3 scripts/release-web.py --no-deploy",
+    "prune:web": "python3 scripts/release-web.py --prune-only",
+    "assets:build": "python3 scripts/build-assets.py",
+    "check": "npx --yes tsx scripts/check-alerts.ts && node scripts/check-auth.mjs"
   },
   "private": true
 }

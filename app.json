@@ -1,25 +1,72 @@
 {
   "expo": {
-    "name": "windsage",
+    "name": "Windsage",
     "slug": "windsage",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/store/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "windsage",
+    "splash": {
+      "image": "./assets/store/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#061821"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.windsage.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
+      "package": "com.windsage.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#061821",
+        "foregroundImage": "./assets/store/android-icon-foreground.png",
+        "backgroundImage": "./assets/store/android-icon-background.png",
+        "monochromeImage": "./assets/store/android-icon-monochrome.png"
       },
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/store/favicon.png",
+      "bundler": "metro",
+      "name": "Windsage",
+      "shortName": "Windsage",
+      "description": "Watch Windguru stations from the Wald cloud",
+      "themeColor": "#061821",
+      "backgroundColor": "#061821"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/store/notification-icon.png",
+          "color": "#2EC4A8",
+          "defaultChannel": "windsage-alerts",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#061821",
+          "image": "./assets/store/splash-icon.png",
+          "imageWidth": 180
+        }
+      ],
+      "expo-image"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "windsage-wald-local"
+      },
+      "windsageCloudUrl": "https://windsage.nimrod.bio"
     }
   }
 }
