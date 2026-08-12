@@ -42,6 +42,7 @@ type Props = {
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
   onOpenAccount?: () => void;
+  onOpenDownload?: () => void;
 };
 
 export function HomeScreen({
@@ -57,6 +58,7 @@ export function HomeScreen({
   onRefresh,
   onOpenStation,
   onOpenAccount,
+  onOpenDownload,
 }: Props) {
   const hasStations = stations.length > 0;
 
@@ -136,6 +138,18 @@ export function HomeScreen({
             })}
           </View>
         )}
+
+        {onOpenDownload ? (
+          <Pressable
+            style={styles.downloadLink}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenDownload();
+            }}
+          >
+            <Text style={styles.downloadLinkText}>Get Windsage · Download</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <AddStationModal
@@ -238,5 +252,16 @@ const styles = StyleSheet.create({
   emptyCtaText: {
     color: '#042018',
     fontWeight: '800',
+  },
+  downloadLink: {
+    alignSelf: 'center',
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  downloadLinkText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

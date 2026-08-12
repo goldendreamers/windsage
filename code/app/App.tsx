@@ -2,9 +2,10 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { BootScreen } from '../components/BootScreen';
 import { AccountScreen } from '../screens/AccountScreen';
+import { DownloadScreen } from '../screens/DownloadScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { StationDetailScreen } from '../screens/StationDetailScreen';
 import {
@@ -68,6 +69,20 @@ type LiveEntry = {
   alertState?: AlertState;
 };
 
+function webPathIsDownload(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  return path === '/download';
+}
+
+function setWebPath(path: '/' | '/download') {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  const current = window.location.pathname.replace(/\/+$/, '') || '/';
+  const next = path === '/' ? '/' : '/download';
+  if (current === next) return;
+  window.history.pushState({ windsage: next }, '', next);
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [alertStates, setAlertStates] = useState<AlertStateMap>({});
@@ -81,6 +96,7 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
 
   const settingsRef = useRef(settings);
@@ -201,6 +217,25 @@ export default function App() {
     },
     [applySnapshots, showToast],
   );
+
+  const openDownload = useCallback(() => {
+    setAccountOpen(false);
+    setActiveStationId(null);
+    setDownloadOpen(true);
+    setWebPath('/download');
+  }, []);
+
+  const closeDownload = useCallback(() => {
+    setDownloadOpen(false);
+    setWebPath('/');
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onPopState = () => setDownloadOpen(webPathIsDownload());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -331,7 +366,14 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
-      {accountOpen ? (
+      {downloadOpen ? (
+        <DownloadScreen
+          onBack={closeDownload}
+          onOpenApp={() => {
+            closeDownload();
+          }}
+        />
+      ) : accountOpen ? (
         <AccountScreen
           onBack={() => setAccountOpen(false)}
           onAuthed={(payload) => void applyAccountPayload(payload)}
@@ -396,6 +438,7 @@ export default function App() {
           onRefresh={() => void refreshFromCloud('manual')}
           onOpenStation={setActiveStationId}
           onOpenAccount={() => setAccountOpen(true)}
+          onOpenDownload={openDownload}
           accountLabel={
             account
               ? account.username
