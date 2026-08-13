@@ -68,7 +68,6 @@ export function LocationPicker({ onPicked, initial }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pin, setPin] = useState<LocationPick | null>(initial || null);
-  const [geocodeProvider, setGeocodeProvider] = useState<string>('google-maps');
   const mapHostRef = useRef<View>(null);
   const leafletRef = useRef<{
     map: any;
@@ -76,19 +75,6 @@ export function LocationPicker({ onPicked, initial }: Props) {
     L: any;
   } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(`${getCloudBaseUrl()}/v1/maps/config`);
-        const data = (await res.json()) as { geocodeProvider?: string; searchVia?: string };
-        if (data.searchVia) setGeocodeProvider(data.searchVia);
-        else if (data.geocodeProvider) setGeocodeProvider(data.geocodeProvider);
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
