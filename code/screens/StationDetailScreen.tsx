@@ -450,7 +450,7 @@ export function StationDetailScreen({
           alertState={alertState}
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
-          ruleHint={formatAlertTrigger(station.rule, 'full')}
+          ruleHint={formatAlertTrigger(station.rule, 'short')}
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>

@@ -11,7 +11,7 @@ type Props = {
   alertState: AlertState | null;
   sustainedMinutes: number;
   progress: number;
-  /** Trigger point, e.g. "≥15 kt for 20 min" */
+  /** Alert threshold, e.g. "15 kt" */
   ruleHint?: string | null;
 };
 
@@ -43,18 +43,10 @@ export function StatusPanel({
   const paused = result?.message === 'Paused';
   const headline = paused
     ? `Paused · ${ruleHint || 'alerts off'}`
-    : ruleHint
-      ? `Alerts at ${ruleHint}`
-      : result?.message ?? 'Waiting for first check…';
-
-  const currentState =
-    result?.message && result.message !== 'Paused' && result.message !== headline
-      ? result.message
-      : null;
+    : ruleHint || result?.message || 'Waiting for first check…';
 
   const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
   const metaParts = [
-    currentState,
     result?.conditionMet
       ? `Held ${formatDuration(result.sustainedMs ?? 0)} of ${sustainedMinutes}m`
       : `Need ${sustainedMinutes}m steady`,
@@ -91,7 +83,7 @@ export function StatusPanel({
 
       <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
       {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
-        <Text style={styles.metaQuiet}>Fires when that target holds long enough</Text>
+        <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
       ) : null}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>

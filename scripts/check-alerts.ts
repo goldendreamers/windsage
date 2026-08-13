@@ -117,12 +117,9 @@ const tempOk = evaluateAlert(
 );
 assert.equal(tempOk.result.conditionMet, true);
 
-assert.equal(formatAlertTrigger(station.rule, 'short'), '≥15 kt · 20m');
+assert.equal(formatAlertTrigger(station.rule, 'short'), '15 kt');
 assert.equal(formatAlertTrigger(station.rule, 'full'), '≥15 kt for 20 min');
-assert.equal(
-  formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'),
-  'gust ≥20 kt · 20m',
-);
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'), '20 kt');
 assert.match(
   formatAlertTrigger(
     { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },

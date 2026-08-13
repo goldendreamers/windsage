@@ -106,8 +106,8 @@ export function formatThresholdNumber(value: number): string {
 }
 
 /**
- * The point at which a follow will fire — not the live reading.
- * short: "≥15 kt · 20m"   full: "≥15 kt for 20 min"
+ * The alert threshold — not the live reading.
+ * short: "15 kt"   full: "≥15 kt for 20 min"
  */
 export function formatAlertTrigger(
   rule: AlertRule,
@@ -117,6 +117,7 @@ export function formatAlertTrigger(
   const unit = metricUnitShort(rule.metric);
   const thr = formatThresholdNumber(Number(rule.threshold));
   const mins = Math.max(1, Number(rule.sustainedMinutes) || 1);
+  if (style === 'short') return `${thr} ${unit}`;
   const metricBit =
     rule.metric === 'wind_max'
       ? 'gust '
@@ -141,9 +142,6 @@ export function formatAlertTrigger(
   }
   if (rule.metric === 'wave_height' && rule.maxWindEnabled) {
     extras.push(`wind ≤${formatThresholdNumber(rule.maxWindKnots ?? 25)} kt`);
-  }
-  if (style === 'short') {
-    return extras.length ? `${core} · ${mins}m · ${extras[0]}` : `${core} · ${mins}m`;
   }
   const hold = `for ${mins} min`;
   return extras.length ? `${core} ${hold} · ${extras.join(' · ')}` : `${core} ${hold}`;
