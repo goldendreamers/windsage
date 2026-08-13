@@ -4,4 +4,5 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before 
 
 For a **new cloud agent session**, start with the repo root file  
 [`CLOUD_AGENT_CONTEXT.md`](../CLOUD_AGENT_CONTEXT.md)  
-(GitHub: https://github.com/goldendreamers/windsage — branch `main`).
+(GitHub: https://github.com/goldendreamers/windsage — branch `main`).  
+Shared product notes: [`CONTEXT.md`](../CONTEXT.md).
