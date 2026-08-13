@@ -241,9 +241,16 @@ export async function loginAccount(
 
 export async function logoutAccount(): Promise<void> {
   const token = await getSessionToken();
+  const creds = await getDeviceCreds().catch(() => null);
   if (token) {
     try {
-      await cloudFetch('/v1/auth/logout', { method: 'POST', token });
+      await cloudFetch('/v1/auth/logout', {
+        method: 'POST',
+        token,
+        body: JSON.stringify(
+          creds ? { deviceId: creds.deviceId, secret: creds.secret } : {},
+        ),
+      });
     } catch {
       // ignore
     }

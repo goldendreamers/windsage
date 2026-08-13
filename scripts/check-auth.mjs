@@ -15,6 +15,9 @@ import {
   getSession,
   mergeStations,
   publicUser,
+  ensureDevice,
+  linkDeviceToUser,
+  unlinkDeviceFromUser,
 } from '../code/cloud/lib/store.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
 
@@ -30,7 +33,7 @@ assert.equal(await verifyPassword('secret123', passwordHash, passwordSalt), true
 assert.equal(await verifyPassword('wrong', passwordHash, passwordSalt), false);
 
 let store = await loadStore(dir);
-assert.equal(store.version, 2);
+assert.equal(store.version, 3);
 const user = createUser(store, {
   username: 'nimrod',
   passwordHash,
@@ -58,5 +61,43 @@ const merged = mergeStations(
 assert.equal(merged.length, 2);
 assert.equal(merged.find((s) => s.stationId === '2259')?.nickname, 'User');
 assert.ok(publicUser(found)?.username === 'nimrod');
+
+// Shared-phone leak regression: login must NOT merge leftover guest follows
+// (e.g. "Test reef") into an existing account.
+const dad = createUser(store, {
+  username: 'dad',
+  passwordHash,
+  passwordSalt,
+  stations: [{ id: 'st_dad', stationId: '15077', nickname: 'לב כנרת', enabled: true, rule: {} }],
+});
+const guestDevice = ensureDevice(store, 'dev_shared', 'sec_shared');
+guestDevice.stations = [
+  { id: 'st_guest', stationId: '219', nickname: 'Test reef', enabled: true, rule: {} },
+  { id: 'st_caes', stationId: '2259', nickname: 'Caes', enabled: true, rule: {} },
+];
+linkDeviceToUser(store, dad, 'dev_shared', 'sec_shared', { mergeGuestStations: false });
+assert.equal(dad.stations.length, 1);
+assert.equal(dad.stations[0].stationId, '15077');
+assert.equal(store.devices.dev_shared.stations.length, 0);
+assert.equal(store.devices.dev_shared.userId, dad.id);
+
+// Register path may import guest follows into a brand-new empty account.
+const newbie = createUser(store, {
+  username: 'newbie',
+  passwordHash,
+  passwordSalt,
+  stations: [],
+});
+const guest2 = ensureDevice(store, 'dev_new', 'sec_new');
+guest2.stations = [
+  { id: 'st_g', stationId: '219', nickname: 'Test reef', enabled: true, rule: {} },
+];
+linkDeviceToUser(store, newbie, 'dev_new', 'sec_new', { mergeGuestStations: true });
+assert.equal(newbie.stations.length, 1);
+assert.equal(newbie.stations[0].stationId, '219');
+
+assert.equal(unlinkDeviceFromUser(store, 'dev_shared', 'sec_shared'), true);
+assert.equal(store.devices.dev_shared.userId, null);
+assert.equal(store.devices.dev_shared.stations.length, 0);
 
 console.log('check-auth: ok');

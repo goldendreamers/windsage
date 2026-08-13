@@ -279,20 +279,28 @@ export default function App() {
   );
 
   const applyAccountPayload = useCallback(
-    async (payload: {
-      user: CloudUser;
-      stations: FollowedStation[];
-      pollIntervalMinutes: number;
-    }) => {
+    async (
+      payload: {
+        user: CloudUser;
+        stations: FollowedStation[];
+        pollIntervalMinutes: number;
+      },
+      opts?: { importLocalGuestFollows?: boolean },
+    ) => {
       setAccount(payload.user);
       const cloudStations = withStationDefaults(payload.stations);
       const localStations = settingsRef.current.stations || [];
-      const stations =
-        cloudStations.length > 0
-          ? cloudStations
-          : localStations.length > 0
-            ? withStationDefaults(localStations)
-            : [];
+      // Only import leftover guest follows on REGISTER. Login on a shared phone
+      // must not push the previous person's local list into this account.
+      const importLocal =
+        opts?.importLocalGuestFollows === true &&
+        cloudStations.length === 0 &&
+        localStations.length > 0;
+      const stations = cloudStations.length > 0
+        ? cloudStations
+        : importLocal
+          ? withStationDefaults(localStations)
+          : cloudStations;
       const next: AppSettings = {
         stations,
         pollIntervalMinutes: Math.max(10, payload.pollIntervalMinutes || 10),
@@ -303,8 +311,7 @@ export default function App() {
       showToast(
         `Signed in · ${payload.user.username || payload.user.sso.google?.email || 'account'}`,
       );
-      // Push local follows up if cloud bag was empty.
-      if (cloudStations.length === 0 && localStations.length > 0) {
+      if (importLocal) {
         await persistSettings(next);
       } else {
         await refreshFromCloud('auto');
@@ -455,15 +462,9 @@ export default function App() {
                   const merged = { ...pulled, stations: cloudStations };
                   setSettings(merged);
                   await saveSettings(merged);
-                } else if (localStations.length > 0) {
-                  await persistSettings({
-                    ...settingsRef.current,
-                    pollIntervalMinutes: Math.max(
-                      10,
-                      pulled.pollIntervalMinutes || settingsRef.current.pollIntervalMinutes,
-                    ),
-                  });
                 } else {
+                  // Logged-in empty cloud bag: do NOT push leftover guest follows
+                  // from a previous person on this phone into the account.
                   const merged = { ...pulled, stations: cloudStations };
                   setSettings(merged);
                   await saveSettings(merged);
@@ -605,7 +606,14 @@ export default function App() {
           onAuthed={(payload) => void applyAccountPayload(payload)}
           onLoggedOut={() => {
             setAccount(null);
-            showToast('Signed out · this device stays as guest');
+            const cleared: AppSettings = {
+              stations: [],
+              pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
+            };
+            setSettings(cleared);
+            void saveSettings(cleared);
+            setLive({});
+            showToast('Signed out · follow list cleared on this device');
           }}
         />
       ) : activeStation ? (

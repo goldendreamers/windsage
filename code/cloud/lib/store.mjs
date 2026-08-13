@@ -307,6 +307,50 @@ export function revokeSession(store, token) {
   if (token && store.sessions[token]) delete store.sessions[token];
 }
 
+/**
+ * Link a device to a user.
+ * Guest-device follows are merged only when `mergeGuestStations` is true (register).
+ * Login must NOT merge — leftover guest bags on a shared phone would pollute
+ * another account (e.g. “Test reef” appearing for dad).
+ */
+export function linkDeviceToUser(
+  store,
+  user,
+  deviceId,
+  secret,
+  { mergeGuestStations = false, pushToken = null } = {},
+) {
+  if (!user || !deviceId || !secret) return null;
+  const existing = store.devices[deviceId];
+  if (existing && existing.secret !== secret) return null;
+  const device = ensureDevice(store, deviceId, secret);
+  device.userId = user.id;
+  if (pushToken) {
+    device.pushToken = pushToken;
+    if (!device.pushTokens.includes(pushToken)) device.pushTokens.push(pushToken);
+    if (!user.pushTokens.includes(pushToken)) user.pushTokens.push(pushToken);
+  }
+  if (mergeGuestStations && Array.isArray(device.stations) && device.stations.length) {
+    user.stations = mergeStations(user.stations || [], device.stations || []);
+  }
+  // Device bag is owned by the user while linked — never keep a second copy.
+  device.stations = [];
+  device.updatedAt = Date.now();
+  user.updatedAt = Date.now();
+  return device;
+}
+
+/** Detach device from any user and clear its guest bag (safe multi-user phones). */
+export function unlinkDeviceFromUser(store, deviceId, secret) {
+  if (!deviceId || !secret) return false;
+  const device = store.devices[deviceId];
+  if (!device || device.secret !== secret) return false;
+  device.userId = null;
+  device.stations = [];
+  device.updatedAt = Date.now();
+  return true;
+}
+
 /** Prefer existing user station rules; add guest stations that are new by Windguru id. */
 export function mergeStations(userStations = [], guestStations = []) {
   const keyOf = (s) => {

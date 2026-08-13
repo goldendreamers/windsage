@@ -37,10 +37,11 @@ import {
   createSession,
   getSession,
   revokeSession,
-  mergeStations,
   upsertSharedStations,
   publicUser,
   publicCatalogStations,
+  linkDeviceToUser,
+  unlinkDeviceFromUser,
 } from './lib/store.mjs';
 import {
   hashPassword,
@@ -594,31 +595,24 @@ function requireUser(store, req, res) {
   return { user, token, session };
 }
 
-async function attachDeviceToUser(store, user, deviceId, secret, pushToken, webPushSubscription) {
-  if (!deviceId || !secret) return;
-  const existing = store.devices[deviceId];
-  if (existing && existing.secret !== secret) return;
-  const device = ensureDevice(store, deviceId, secret);
-  device.userId = user.id;
-  if (pushToken) {
-    device.pushToken = pushToken;
-    if (!device.pushTokens.includes(pushToken)) device.pushTokens.push(pushToken);
-    if (!user.pushTokens.includes(pushToken)) user.pushTokens.push(pushToken);
-  }
+async function attachDeviceToUser(
+  store,
+  user,
+  deviceId,
+  secret,
+  pushToken,
+  webPushSubscription,
+  { mergeGuestStations = false } = {},
+) {
+  const device = linkDeviceToUser(store, user, deviceId, secret, {
+    mergeGuestStations,
+    pushToken,
+  });
+  if (!device) return;
   if (webPushSubscription) {
     upsertWebPushSubscription(device, webPushSubscription);
     upsertWebPushSubscription(user, webPushSubscription);
   }
-  // Merge guest stations into user once.
-  user.stations = mergeStations(user.stations || [], device.stations || []);
-  user.pollIntervalMinutes = Math.max(
-    10,
-    user.pollIntervalMinutes || 10,
-    device.pollIntervalMinutes || 10,
-  );
-  device.stations = []; // stations owned by user when linked
-  device.updatedAt = Date.now();
-  user.updatedAt = Date.now();
 }
 
 async function serveStatic(req, res, pathname) {
@@ -730,7 +724,15 @@ async function handleAuth(req, res, pathname, url) {
       passwordHash,
       passwordSalt,
     });
-    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
+    await attachDeviceToUser(
+      store,
+      user,
+      body.deviceId,
+      body.secret,
+      body.pushToken,
+      body.webPushSubscription,
+      { mergeGuestStations: true },
+    );
     const token = createSession(store, user.id);
     await saveStore(DATA_DIR, store);
     return json(res, 200, {
@@ -755,7 +757,16 @@ async function handleAuth(req, res, pathname, url) {
     if (!user) return json(res, 401, { error: 'Invalid username or password' });
     const ok = await verifyPassword(body.password, user.passwordHash, user.passwordSalt);
     if (!ok) return json(res, 401, { error: 'Invalid username or password' });
-    await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
+    // Never merge guest-device follows on login (shared-phone leak).
+    await attachDeviceToUser(
+      store,
+      user,
+      body.deviceId,
+      body.secret,
+      body.pushToken,
+      body.webPushSubscription,
+      { mergeGuestStations: false },
+    );
     const token = createSession(store, user.id);
     await saveStore(DATA_DIR, store);
     return json(res, 200, {
@@ -771,6 +782,10 @@ async function handleAuth(req, res, pathname, url) {
     const store = await loadStore(DATA_DIR);
     const token = parseBearer(req);
     revokeSession(store, token);
+    const body = await readBody(req).catch(() => ({}));
+    if (body?.deviceId && body?.secret) {
+      unlinkDeviceFromUser(store, body.deviceId, body.secret);
+    }
     await saveStore(DATA_DIR, store);
     return json(res, 200, { ok: true });
   }
@@ -806,6 +821,7 @@ async function handleAuth(req, res, pathname, url) {
       const linkToken = state.linkToken || '';
       const linkSession = linkToken ? getSession(store, linkToken) : null;
 
+      let created = false;
       if (state.mode === 'link' && linkSession) {
         user = store.users[linkSession.userId];
         if (!user) throw new Error('Account not found for linking');
@@ -821,12 +837,15 @@ async function handleAuth(req, res, pathname, url) {
           username: null,
           sso: { google: { sub: profile.sub, email: profile.email, name: profile.name } },
         });
+        created = true;
       } else {
         user.sso = user.sso || {};
         user.sso.google = { sub: profile.sub, email: profile.email, name: profile.name };
       }
 
-      await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null);
+      await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null, {
+        mergeGuestStations: created,
+      });
       const token = createSession(store, user.id);
       await saveStore(DATA_DIR, store);
       return redirect(
@@ -885,7 +904,15 @@ async function handleMe(req, res, pathname) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
     if (body.deviceId && body.secret) {
-      await attachDeviceToUser(store, user, body.deviceId, body.secret, body.pushToken, body.webPushSubscription);
+      await attachDeviceToUser(
+        store,
+        user,
+        body.deviceId,
+        body.secret,
+        body.pushToken,
+        body.webPushSubscription,
+        { mergeGuestStations: false },
+      );
     }
     user.updatedAt = Date.now();
     await saveStore(DATA_DIR, store);

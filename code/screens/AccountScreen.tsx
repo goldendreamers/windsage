@@ -28,11 +28,14 @@ import { isRunningAsInstalledApp } from '../core/pwaInstall';
 
 type Props = {
   onBack: () => void;
-  onAuthed: (payload: {
-    user: CloudUser;
-    stations: import('../shared/types').FollowedStation[];
-    pollIntervalMinutes: number;
-  }) => void;
+  onAuthed: (
+    payload: {
+      user: CloudUser;
+      stations: import('../shared/types').FollowedStation[];
+      pollIntervalMinutes: number;
+    },
+    opts?: { importLocalGuestFollows?: boolean },
+  ) => void;
   onLoggedOut: () => void;
 };
 
@@ -94,11 +97,16 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
       return;
     }
     const pulled = await pullMyStations();
-    onAuthed({
-      user: me,
-      stations: pulled?.stations || [],
-      pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
-    });
+    onAuthed(
+      {
+        user: me,
+        stations: pulled?.stations || [],
+        pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+      },
+      // Google "login" to a brand-new SSO user already merged guest follows server-side
+      // when created; never import leftover local guest lists for returning users.
+      { importLocalGuestFollows: false },
+    );
   }
 
   if (loading) {
@@ -210,7 +218,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
                   void run(async () => {
                     const data = await loginAccount(username.trim(), password);
                     setUser(data.user);
-                    onAuthed(data);
+                    onAuthed(data, { importLocalGuestFollows: false });
                   })
                 }
               >
@@ -225,7 +233,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
                     try {
                       const data = await registerAccount(username.trim(), password);
                       setUser(data.user);
-                      onAuthed(data);
+                      onAuthed(data, { importLocalGuestFollows: true });
                     } catch (e) {
                       if (e instanceof CloudError && e.suggestions?.length) {
                         setNameSuggestions(e.suggestions.slice(0, 2));
