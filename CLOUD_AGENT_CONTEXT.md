@@ -119,13 +119,14 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 
 ## Suggested first prompt for a new cloud agent
 
-> Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md` and `docs/OUTSTANDING.md`. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked.
+> Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md`, `docs/OUTSTANDING.md`, and **`docs/MAC_AGENT_PROMPTS.md`**. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. If Wald deploy or Mac-only work is left pending, **append an exact paste-ready prompt** to `docs/MAC_AGENT_PROMPTS.md` (Pending section).
 
 ## Related docs
 
 | File | Purpose |
 | --- | --- |
 | `README.md` | Product + ops overview |
+| **`docs/MAC_AGENT_PROMPTS.md`** | **Running paste-ready prompts for Mac Cursor (Wald deploy / Tailscale)** |
 | `docs/OUTSTANDING.md` | Blocked / needed from operator |
 | `docs/PROGRESS_REVIEW.md` | External review (partially superseded) |
 | `docs/SSO-SETUP.md` | Google/Facebook/Apple OAuth |

@@ -12,8 +12,19 @@ import {
   View,
 } from 'react-native';
 import { metricIcon, brandImages } from '../shared/assets';
-import { METRIC_OPTIONS, displayName, formatAlertTrigger, ruleForMetric } from '../shared/defaults';
-import { PROVIDER_META, normalizeProvider } from '../shared/providers';
+import {
+  METRIC_OPTIONS,
+  displayName,
+  followSourceRef,
+  formatAlertTrigger,
+  ruleForMetric,
+} from '../shared/defaults';
+import {
+  PROVIDER_META,
+  normalizeProvider,
+  providerAllowsSourceIdEdit,
+  providerHasSpotStationKinds,
+} from '../shared/providers';
 import { colors } from '../shared/theme';
 import type {
   AlertState,
@@ -206,6 +217,12 @@ export function StationDetailScreen({
     result?.conditionMet && station.rule.sustainedMinutes
       ? Math.min(1, result.sustainedMs / (station.rule.sustainedMinutes * 60 * 1000))
       : 0;
+  const provider = normalizeProvider(station.provider);
+  const providerMeta = PROVIDER_META[provider];
+  const showSpotStationType = providerHasSpotStationKinds(provider);
+  const allowSourceIdEdit = providerAllowsSourceIdEdit(provider);
+  const openOnLabel =
+    provider === 'location' ? 'Open in Google Maps' : `Open on ${providerMeta.label}`;
 
   return (
     <ScrollView
@@ -222,8 +239,7 @@ export function StationDetailScreen({
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>{displayName(station)}</Text>
           <Text style={styles.subtitle}>
-            {PROVIDER_META[normalizeProvider(station.provider)].label}{' '}
-            {station.kind === 'spot' ? 'spot' : 'station'} #{station.stationId}
+            {providerMeta.label} · {followSourceRef(station)}
           </Text>
         </View>
       </View>
@@ -308,26 +324,96 @@ export function StationDetailScreen({
           placeholderTextColor={colors.muted}
         />
 
-        <Text style={[styles.label, styles.spaced]}>Type</Text>
-        <View style={styles.segment}>
-          {([
-            { key: 'spot' as const, label: 'Spot' },
-            { key: 'station' as const, label: 'Station' },
-          ]).map((option) => {
-            const active = station.kind === option.key;
-            return (
-              <Pressable
-                key={option.key}
-                style={[styles.segmentItem, active && styles.segmentItemActive]}
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  if (option.key === station.kind) return;
-                  void (async () => {
-                    try {
-                      const resolved = await normalizeWindguruFollowInput(station.stationId);
-                      const target = followTargetForKind(option.key, resolved);
+        {showSpotStationType ? (
+          <>
+            <Text style={[styles.label, styles.spaced]}>Type</Text>
+            <View style={styles.segment}>
+              {([
+                { key: 'spot' as const, label: 'Spot' },
+                { key: 'station' as const, label: 'Station' },
+              ]).map((option) => {
+                const active = station.kind === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    style={[styles.segmentItem, active && styles.segmentItemActive]}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      if (option.key === station.kind) return;
+                      void (async () => {
+                        try {
+                          const resolved = await normalizeWindguruFollowInput(station.stationId);
+                          const target = followTargetForKind(option.key, resolved);
+                          onPersist({
+                            ...station,
+                            stationId: target.stationId,
+                            kind: target.kind,
+                            liveStationId: target.liveStationId,
+                            linkedLiveStation: target.linkedLiveStation,
+                            liveLinkWarning: target.liveLinkWarning,
+                            sourceName:
+                              target.spotName?.trim() ||
+                              target.linkedLiveStation?.spotname?.trim() ||
+                              target.linkedLiveStation?.name?.trim() ||
+                              station.sourceName ||
+                              null,
+                            nickname:
+                              (station.nickname || '').trim() ||
+                              target.spotName ||
+                              station.nickname ||
+                              '',
+                          });
+                        } catch {
+                          onPersist({
+                            ...station,
+                            kind: option.key,
+                            liveStationId: null,
+                            linkedLiveStation: null,
+                            liveLinkWarning: null,
+                          });
+                        }
+                      })();
+                    }}
+                  >
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        {allowSourceIdEdit ? (
+          <>
+            <Text style={[styles.label, styles.spaced]}>Source ID or URL</Text>
+            <TextInput
+              style={styles.input}
+              value={station.stationId}
+              onChangeText={(stationId) =>
+                onChange({
+                  ...station,
+                  stationId,
+                  // Clear stale nearest-link metadata until Save / blur re-resolves.
+                  liveStationId: null,
+                  linkedLiveStation: null,
+                  liveLinkWarning: null,
+                })
+              }
+              onEndEditing={(e) => {
+                const raw = e.nativeEvent.text;
+                void (async () => {
+                  const currentProvider = normalizeProvider(station.provider);
+                  try {
+                    if (currentProvider === 'windguru') {
+                      const ref = parseWindguruRef(raw);
+                      const preferred: WindguruKind = ref?.kindHint ?? station.kind;
+                      const resolved = await normalizeWindguruFollowInput(raw);
+                      const target = followTargetForKind(preferred, resolved);
                       onPersist({
                         ...station,
+                        provider: 'windguru',
                         stationId: target.stationId,
                         kind: target.kind,
                         liveStationId: target.liveStationId,
@@ -345,116 +431,60 @@ export function StationDetailScreen({
                           station.nickname ||
                           '',
                       });
-                    } catch {
-                      onPersist({
-                        ...station,
-                        kind: option.key,
-                        liveStationId: null,
-                        linkedLiveStation: null,
-                        liveLinkWarning: null,
-                      });
+                      return;
                     }
-                  })();
-                }}
-              >
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={[styles.label, styles.spaced]}>Source ID or URL</Text>
-        <TextInput
-          style={styles.input}
-          value={station.stationId}
-          onChangeText={(stationId) =>
-            onChange({
-              ...station,
-              stationId,
-              // Clear stale nearest-link metadata until Save / blur re-resolves.
-              liveStationId: null,
-              linkedLiveStation: null,
-              liveLinkWarning: null,
-            })
-          }
-          onEndEditing={(e) => {
-            const raw = e.nativeEvent.text;
-            void (async () => {
-              const provider = normalizeProvider(station.provider);
-              try {
-                if (provider === 'windguru') {
-                  const ref = parseWindguruRef(raw);
-                  const preferred: WindguruKind = ref?.kindHint ?? station.kind;
-                  const resolved = await normalizeWindguruFollowInput(raw);
-                  const target = followTargetForKind(preferred, resolved);
-                  onPersist({
-                    ...station,
-                    provider: 'windguru',
-                    stationId: target.stationId,
-                    kind: target.kind,
-                    liveStationId: target.liveStationId,
-                    linkedLiveStation: target.linkedLiveStation,
-                    liveLinkWarning: target.liveLinkWarning,
-                    sourceName:
-                      target.spotName?.trim() ||
-                      target.linkedLiveStation?.spotname?.trim() ||
-                      target.linkedLiveStation?.name?.trim() ||
-                      station.sourceName ||
-                      null,
-                    nickname:
-                      (station.nickname || '').trim() ||
-                      target.spotName ||
-                      station.nickname ||
-                      '',
-                  });
-                  return;
-                }
-                const resolved = await resolveFollowInput(provider, raw);
-                const target = followTargetFromResolved(provider, 'station', resolved);
-                onPersist({
-                  ...station,
-                  provider: target.provider,
-                  stationId: target.stationId,
-                  kind: target.kind,
-                  liveStationId: target.liveStationId,
-                  linkedLiveStation: target.linkedLiveStation,
-                  liveLinkWarning: target.liveLinkWarning,
-                  sourceName: target.sourceName || station.sourceName || null,
-                });
-              } catch {
-                const preferred =
-                  provider === 'windguru'
-                    ? parseWindguruRef(raw)?.kindHint ?? station.kind
-                    : 'station';
-                const parsed =
-                  provider === 'windguru'
-                    ? parseWindguruRef(raw)?.id || parseWindguruId(raw) || raw.trim()
-                    : raw.trim();
-                onPersist({
-                  ...station,
-                  stationId: parsed,
-                  kind: preferred,
-                  liveStationId: provider === 'windguru' ? null : parsed,
-                  linkedLiveStation: null,
-                  liveLinkWarning: null,
-                });
-              }
-            })();
-          }}
-          placeholder={PROVIDER_META[normalizeProvider(station.provider)].placeholder}
-          placeholderTextColor={colors.muted}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+                    const resolved = await resolveFollowInput(currentProvider, raw);
+                    const target = followTargetFromResolved(currentProvider, 'station', resolved);
+                    onPersist({
+                      ...station,
+                      provider: target.provider,
+                      stationId: target.stationId,
+                      kind: target.kind,
+                      liveStationId: target.liveStationId,
+                      linkedLiveStation: target.linkedLiveStation,
+                      liveLinkWarning: target.liveLinkWarning,
+                      sourceName: target.sourceName || station.sourceName || null,
+                    });
+                  } catch {
+                    const preferred =
+                      currentProvider === 'windguru'
+                        ? parseWindguruRef(raw)?.kindHint ?? station.kind
+                        : 'station';
+                    const parsed =
+                      currentProvider === 'windguru'
+                        ? parseWindguruRef(raw)?.id || parseWindguruId(raw) || raw.trim()
+                        : raw.trim();
+                    onPersist({
+                      ...station,
+                      stationId: parsed,
+                      kind: preferred,
+                      liveStationId: currentProvider === 'windguru' ? null : parsed,
+                      linkedLiveStation: null,
+                      liveLinkWarning: null,
+                    });
+                  }
+                })();
+              }}
+              placeholder={providerMeta.placeholder}
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </>
+        ) : (
+          <>
+            <Text style={[styles.label, styles.spaced]}>Location</Text>
+            <Text style={styles.readOnlyValue}>{followSourceRef(station)}</Text>
+            <Text style={styles.hint}>
+              Map pins keep their pin and blend — remove and re-add to move the pin.
+            </Text>
+          </>
+        )}
         <Pressable
           onPress={() => void Linking.openURL(stationPageUrl(station))}
           style={styles.linkBtn}
         >
-          <Text style={styles.linkText}>
-            Open on {PROVIDER_META[normalizeProvider(station.provider)].label}
-          </Text>
+          <Text style={styles.linkText}>{openOnLabel}</Text>
         </Pressable>
       </Section>
 
@@ -973,14 +1003,18 @@ export function StationDetailScreen({
           })();
         }}
       >
-        <Text style={styles.primaryBtnText}>{saving ? 'Saving…' : 'Save station'}</Text>
+        <Text style={styles.primaryBtnText}>
+          {saving ? 'Saving…' : provider === 'location' ? 'Save' : 'Save station'}
+        </Text>
       </Pressable>
 
       <Pressable style={styles.secondaryBtn} onPress={onResetAlert}>
         <Text style={styles.secondaryBtnText}>Reset alert memory</Text>
       </Pressable>
       <Pressable style={styles.dangerBtn} onPress={onUnfollow}>
-        <Text style={styles.dangerBtnText}>Unfollow station</Text>
+        <Text style={styles.dangerBtnText}>
+          {provider === 'location' ? 'Unfollow map pin' : 'Unfollow station'}
+        </Text>
       </Pressable>
     </ScrollView>
   );
@@ -1094,6 +1128,12 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  readOnlyValue: {
+    color: colors.text,
+    fontSize: 16,
+    lineHeight: 22,
+    marginTop: 2,
   },
   input: {
     backgroundColor: colors.input,

@@ -92,3 +92,17 @@ export function normalizeProvider(value: unknown): StationProvider {
 export function providerLabel(provider: StationProvider | string | null | undefined): string {
   return PROVIDER_META[normalizeProvider(provider)].label;
 }
+
+/** Only Windguru distinguishes forecast spots vs live stations. */
+export function providerHasSpotStationKinds(
+  provider: StationProvider | string | null | undefined,
+): boolean {
+  return normalizeProvider(provider) === 'windguru';
+}
+
+/** Map pins are lat/lon blends — not a pasteable station ID/URL. */
+export function providerAllowsSourceIdEdit(
+  provider: StationProvider | string | null | undefined,
+): boolean {
+  return normalizeProvider(provider) !== 'location';
+}

@@ -128,6 +128,17 @@ export function stationPageUrl(station: FollowedStation): string {
   const provider = normalizeProvider(station.provider);
   const id = String(station.stationId ?? '').trim();
   switch (provider) {
+    case 'location': {
+      const lat = station.locationBlend?.lat;
+      const lon = station.locationBlend?.lon;
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return `https://www.google.com/maps?q=${lat},${lon}`;
+      }
+      const q = String(station.sourceName || id || '').trim();
+      return q
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
+        : 'https://www.google.com/maps';
+    }
     case 'ndbc':
       return `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(id)}`;
     case 'openmeteo':
