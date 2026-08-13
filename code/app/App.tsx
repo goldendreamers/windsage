@@ -455,20 +455,12 @@ export default function App() {
               setAccount(me);
               const pulled = await pullMyStations().catch(() => null);
               if (pulled && !cancelled) {
-                // Never wipe a non-empty local follow list with an empty cloud bag.
+                // Always take the cloud bag when signed in — never push leftover
+                // guest follows from a previous person on this phone into the account.
                 const cloudStations = withStationDefaults(pulled.stations);
-                const localStations = settingsRef.current.stations || [];
-                if (cloudStations.length > 0) {
-                  const merged = { ...pulled, stations: cloudStations };
-                  setSettings(merged);
-                  await saveSettings(merged);
-                } else {
-                  // Logged-in empty cloud bag: do NOT push leftover guest follows
-                  // from a previous person on this phone into the account.
-                  const merged = { ...pulled, stations: cloudStations };
-                  setSettings(merged);
-                  await saveSettings(merged);
-                }
+                const merged = { ...pulled, stations: cloudStations };
+                setSettings(merged);
+                await saveSettings(merged);
               }
             }
 
