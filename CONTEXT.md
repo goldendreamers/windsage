@@ -1,6 +1,11 @@
 # Windsage — context (start here)
 
-Handoff for humans and agents. **Read this before changing the product.**
+| Audience | File |
+| --- | --- |
+| **New Cursor cloud agent** | **[`CLOUD_AGENT_CONTEXT.md`](./CLOUD_AGENT_CONTEXT.md)** ← use this |
+| Humans / general handoff | this file |
+
+Handoff for humans and agents. Cloud agents should prefer **`CLOUD_AGENT_CONTEXT.md`** (boot checklist + cloud constraints).
 
 | | |
 | --- | --- |
@@ -10,7 +15,7 @@ Handoff for humans and agents. **Read this before changing the product.**
 | **Health** | https://windsage.nimrod.bio/health |
 | **Tailnet** | https://windsage.taild8a1d4.ts.net/ |
 | **Operator** | Nimrod — prefer autonomous work; email when blocked or when a step finishes |
-| **Baseline** | Confirm with `git log -1 --oneline` (was `a4dac38` / `dbfd02e` when this note was last refreshed) |
+| **Baseline** | Confirm with `git log -1 --oneline` |
 
 ```bash
 git fetch origin && git checkout main && git pull
