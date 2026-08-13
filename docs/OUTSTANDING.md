@@ -4,7 +4,7 @@ What still needs a decision or secret from the operator, what already works, and
 
 ## Still needed from user (action list)
 
-1. **Optional provider tokens** — Synoptic / Tempest / Windfinder / Google Maps geocode stay env-gated. Free sources (Windguru, NDBC, Open-Meteo, location blend via Open-Meteo) already work without keys.
+1. **Optional provider tokens** — Synoptic / Tempest / Windfinder / Google Maps geocode stay env-gated. Free sources (Windguru, NDBC, Open-Meteo, location blend) already work without keys. Map/Address search uses OpenStreetMap (Photon) without a Google key; pasted Google Maps links are parsed even without a key.
 
 2. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
 

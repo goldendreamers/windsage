@@ -3,6 +3,7 @@
  * Weights: inverse-distance × trust(accuracy) × user rating.
  */
 import { asNumber, emptyHistory, historyFromPairs, reading } from './common.mjs';
+import { parseLatLon } from './mapsUrl.mjs';
 import { fetchNdbcCurrent } from './ndbc.mjs';
 import { fetchOpenMeteoCurrent } from './openmeteo.mjs';
 import { fetchCurrentReading as wgCurrent } from '../wind.mjs';
@@ -23,14 +24,9 @@ function haversineKm(aLat, aLon, bLat, bLon) {
 export function parseLocationId(input) {
   const trimmed = String(input || '').trim();
   if (!trimmed) return null;
-  const bare = trimmed.replace(/^loc:/i, '');
-  const m = bare.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-  const lat = Number(m[1]);
-  const lon = Number(m[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  return { lat, lon, id: `${lat.toFixed(4)},${lon.toFixed(4)}` };
+  const parsed = parseLatLon(trimmed.replace(/^loc:/i, ''));
+  if (!parsed) return null;
+  return { lat: parsed.lat, lon: parsed.lon, id: `${parsed.lat.toFixed(4)},${parsed.lon.toFixed(4)}` };
 }
 
 function trustKey(provider, stationId) {
@@ -328,7 +324,13 @@ export async function resolveLocation(input, extras = {}) {
   if (!coords && extras.lat != null && extras.lon != null) {
     coords = parseLocationId(`${extras.lat},${extras.lon}`);
   }
-  if (!coords) throw new Error('Provide lat,lon or pick a map pin / address');
+  if (!coords && String(input || '').trim()) {
+    const { geocodeAddress } = await import('./geo.mjs');
+    const hit = await geocodeAddress(input);
+    coords = parseLocationId(`${hit.lat},${hit.lon}`);
+    address = address || hit.address || null;
+  }
+  if (!coords) throw new Error('Provide lat,lon, a Google Maps link, or pick a map pin / address');
   const radiusKm = Math.max(5, Number(extras.radiusKm) || 50);
   const maxStations = Math.max(2, Math.min(12, Number(extras.maxStations) || 6));
   const members = await findNearbyStations(coords.lat, coords.lon, { radiusKm, maxStations });

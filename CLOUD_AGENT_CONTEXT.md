@@ -87,6 +87,7 @@ npm run release:web                 # export + snapshot + rsync cloud+web + rest
 - Alert Good/Meh feedback (signed-in)
 - SW v7; `/health` ETag; debounced persist→cloud sync
 - Google SSO live when secrets present on Wald
+- Map/Address: paste Google Maps links; Photon/OSM address search without a Google key
 
 ## Still open / optional
 

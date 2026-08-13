@@ -5,6 +5,7 @@ import {
   stationUrl as windguruStationUrl,
 } from './windguru';
 import { PROVIDER_META, normalizeProvider, type StationProvider } from '../shared/providers';
+import { looksLikeLatLon, looksLikeMapQuery } from '../shared/mapLinks';
 import type { FollowedStation, WindguruKind } from '../shared/types';
 
 export type ResolvedFollow = {
@@ -120,7 +121,7 @@ export function detectProviderFromInput(input: string): StationProvider | null {
   if (t.includes('tempest') || t.includes('weatherflow')) return 'tempest';
   if (t.includes('windfinder.com')) return 'windfinder';
   if (t.includes('synoptic') || t.includes('mesowest')) return 'synoptic';
-  if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(t)) return 'openmeteo';
+  if (looksLikeMapQuery(t) || looksLikeLatLon(t)) return 'location';
   return null;
 }
 
@@ -132,6 +133,13 @@ export function stationPageUrl(station: FollowedStation): string {
       return `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(id)}`;
     case 'openmeteo':
       return 'https://open-meteo.com/en/docs';
+    case 'location': {
+      const m = id.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+      if (m) {
+        return `https://www.openstreetmap.org/?mlat=${m[1]}&mlon=${m[2]}#map=12/${m[1]}/${m[2]}`;
+      }
+      return 'https://www.openstreetmap.org/';
+    }
     case 'synoptic':
       return 'https://www.synopticdata.com/';
     case 'tempest':

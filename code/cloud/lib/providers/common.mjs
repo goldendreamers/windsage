@@ -54,7 +54,7 @@ function coalesceKey(kind, url, headers) {
   return `${kind}:${url}:${h}`;
 }
 
-async function fetchWithTimeout(url, init = {}) {
+export async function fetchWithTimeout(url, init = {}) {
   try {
     return await fetch(url, {
       ...init,

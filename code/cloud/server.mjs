@@ -1240,7 +1240,7 @@ async function handleApi(req, res, pathname, url) {
       ok: true,
       googleMapsJs: maps.googleMapsJs,
       browserKey: maps.browserKey,
-      geocodeProvider: maps.googleGeocode ? 'google' : 'open-meteo',
+      geocodeProvider: maps.googleGeocode ? 'google' : 'photon',
     });
   }
 
