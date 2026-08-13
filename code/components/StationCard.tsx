@@ -5,8 +5,8 @@ import { brandImages } from '../shared/assets';
 import {
   alertThresholdDisplay,
   displayName,
+  followSourceRef,
   homeLiveStatColumns,
-  stationNick,
 } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
@@ -28,7 +28,6 @@ export const StationCard = memo(function StationCard({
   onPress,
 }: Props) {
   const name = displayName(station);
-  const hasNickname = !!stationNick(station);
   const provider = normalizeProvider(station.provider);
   const providerShort = PROVIDER_META[provider]?.short || 'WG';
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
@@ -77,12 +76,7 @@ export const StationCard = memo(function StationCard({
               {trend ? ` ${trend}` : ''}
             </Text>
             <Text style={styles.meta} numberOfLines={2}>
-              {providerShort} ·{' '}
-              {hasNickname
-                ? `${station.kind === 'spot' ? 'Spot' : 'Station'} #${station.stationId}`
-                : station.kind === 'spot'
-                  ? 'spot'
-                  : 'station'}
+              {providerShort} · {followSourceRef(station)}
               {station.enabled === false ? ' · paused' : ''}
               {showingForecast
                 ? ` · forecast${result?.forecastModel ? ` (${result.forecastModel})` : ''}`

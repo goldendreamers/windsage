@@ -532,11 +532,7 @@ export default function App() {
       setAddOpen(false);
       setActiveStationId(station.id);
       const warn = extras?.liveLinkWarning ? ' · nearest live linked' : '';
-      const label =
-        extras?.sourceName?.trim() ||
-        nickname ||
-        (kind === 'spot' ? `Spot ${stationId}` : `Station ${stationId}`);
-      showToast(`Following ${label}${warn}`);
+      showToast(`Following ${displayName(station)}${warn}`);
     },
     [persistSettings, showToast],
   );

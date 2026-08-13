@@ -283,6 +283,29 @@ export function windguruName(station: FollowedStation): string {
   return station.kind === 'spot' ? `Spot ${sid}` : `Station ${sid}`;
 }
 
+/**
+ * Short source reference for cards / detail subtitles (no provider prefix).
+ * Map pins show address or coords — never "Spot/Station #…".
+ */
+export function followSourceRef(station: FollowedStation): string {
+  const provider = stationProvider(station);
+  if (provider === 'location') {
+    const blend = station.locationBlend;
+    const address = String(blend?.address ?? station.sourceName ?? '').trim();
+    if (address) return address;
+    if (blend && Number.isFinite(blend.lat) && Number.isFinite(blend.lon)) {
+      return `${blend.lat.toFixed(3)}, ${blend.lon.toFixed(3)}`;
+    }
+    return 'Map pin';
+  }
+  const sid = String(station.stationId ?? '').trim() || '?';
+  if (provider === 'windguru') {
+    return `${station.kind === 'spot' ? 'Spot' : 'Station'} #${sid}`;
+  }
+  if (provider === 'openmeteo') return sid;
+  return `#${sid}`;
+}
+
 /** Match a follow by provider + external id (`stationId`).
 
  * Do not match on `liveStationId`: many spots share one live sensor, and after

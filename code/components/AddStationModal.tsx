@@ -14,6 +14,7 @@ import {
   DEFAULT_RULE,
   type CatalogStation,
   findExistingFollow,
+  followSourceRef,
   suggestCatalogStations,
   suggestExistingFollows,
   windguruName,
@@ -501,7 +502,7 @@ export function AddStationModal({
                     <Text style={styles.suggestName}>{windguruName(follow)}</Text>
                     <Text style={styles.suggestMeta}>
                       {PROVIDER_META[normalizeProvider(follow.provider)].short} ·{' '}
-                      {follow.kind === 'spot' ? 'Spot' : 'Station'} #{follow.stationId}
+                      {followSourceRef(follow)}
                     </Text>
                   </View>
                   <Text style={styles.suggestOpen}>Open</Text>
