@@ -34,6 +34,8 @@ import {
   findUserByUsername,
   suggestAvailableUsernames,
   findUserByGoogleSub,
+  findUserByFacebookId,
+  findUserByAppleSub,
   createSession,
   getSession,
   revokeSession,
@@ -53,6 +55,10 @@ import {
   providersStatus,
   googleAuthUrl,
   exchangeGoogleCode,
+  facebookAuthUrl,
+  exchangeFacebookCode,
+  appleAuthUrl,
+  exchangeAppleCode,
   encodeOAuthState,
   decodeOAuthState,
   oauthConfig,
@@ -179,6 +185,12 @@ async function readBody(req) {
   for await (const chunk of req) chunks.push(chunk);
   if (!chunks.length) return {};
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+async function readFormParams(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
 function displayName(station) {
@@ -676,6 +688,12 @@ async function serveStatic(req, res, pathname) {
   createReadStream(filePath).pipe(res);
 }
 
+const SSO_FINDERS = {
+  google: findUserByGoogleSub,
+  facebook: findUserByFacebookId,
+  apple: findUserByAppleSub,
+};
+
 function oauthReturnUrl(returnTo, pub, params) {
   const allowed =
     typeof returnTo === 'string' &&
@@ -695,6 +713,71 @@ function oauthReturnUrl(returnTo, pub, params) {
   } catch {
     const q = new URLSearchParams(params).toString();
     return `${pub}/?${q}`;
+  }
+}
+
+function startOAuthRedirect(res, url, makeAuthUrl, label) {
+  const mode = url.searchParams.get('mode') || 'login';
+  const deviceId = url.searchParams.get('deviceId') || '';
+  const secret = url.searchParams.get('secret') || '';
+  const linkToken = url.searchParams.get('token') || '';
+  const returnTo = url.searchParams.get('returnTo') || '';
+  try {
+    const state = encodeOAuthState({ mode, deviceId, secret, linkToken, returnTo });
+    return redirect(res, makeAuthUrl(state));
+  } catch (error) {
+    return json(res, 503, { error: error.message || `${label} not configured` });
+  }
+}
+
+async function finishSsoLogin(res, { provider, profileId, ssoRecord, state, failLabel }) {
+  const pub = oauthConfig().publicUrl;
+  const find = SSO_FINDERS[provider];
+  try {
+    if (!state?.iat) throw new Error('Invalid or expired sign-in. Try again.');
+    const store = await loadStore(DATA_DIR);
+    let user = find(store, profileId);
+    const linkToken = state.linkToken || '';
+    const linkSession = linkToken ? getSession(store, linkToken) : null;
+    const label = provider.charAt(0).toUpperCase() + provider.slice(1);
+
+    if (state.mode === 'link' && linkSession) {
+      user = store.users[linkSession.userId];
+      if (!user) throw new Error('Account not found for linking');
+      const other = find(store, profileId);
+      if (other && other.id !== user.id) {
+        throw new Error(`That ${label} account is already linked to another user`);
+      }
+      user.sso = user.sso || {};
+      user.sso[provider] = ssoRecord;
+      user.updatedAt = Date.now();
+    } else if (!user) {
+      user = createUser(store, {
+        username: null,
+        sso: { [provider]: ssoRecord },
+      });
+    } else {
+      user.sso = user.sso || {};
+      user.sso[provider] = ssoRecord;
+    }
+
+    await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null);
+    const token = createSession(store, user.id);
+    await saveStore(DATA_DIR, store);
+    return redirect(
+      res,
+      oauthReturnUrl(state.returnTo, pub, {
+        auth_token: token,
+        auth_mode: state.mode || 'login',
+      }),
+    );
+  } catch (error) {
+    return redirect(
+      res,
+      oauthReturnUrl(state?.returnTo, pub, {
+        auth_error: error.message || failLabel,
+      }),
+    );
   }
 }
 
@@ -776,23 +859,13 @@ async function handleAuth(req, res, pathname, url) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/auth/google/start') {
-    const mode = url.searchParams.get('mode') || 'login';
-    const deviceId = url.searchParams.get('deviceId') || '';
-    const secret = url.searchParams.get('secret') || '';
-    const linkToken = url.searchParams.get('token') || '';
-    const returnTo = url.searchParams.get('returnTo') || '';
-    try {
-      const state = encodeOAuthState({ mode, deviceId, secret, linkToken, returnTo });
-      return redirect(res, googleAuthUrl(state));
-    } catch (error) {
-      return json(res, 503, { error: error.message || 'Google not configured' });
-    }
+    return startOAuthRedirect(res, url, googleAuthUrl, 'Google');
   }
 
   if (req.method === 'GET' && pathname === '/v1/auth/google/callback') {
-    const code = url.searchParams.get('code');
     const state = decodeOAuthState(url.searchParams.get('state'));
     const pub = oauthConfig().publicUrl;
+    const code = url.searchParams.get('code');
     if (!code) {
       return redirect(
         res,
@@ -801,46 +874,100 @@ async function handleAuth(req, res, pathname, url) {
     }
     try {
       const profile = await exchangeGoogleCode(code);
-      const store = await loadStore(DATA_DIR);
-      let user = findUserByGoogleSub(store, profile.sub);
-      const linkToken = state.linkToken || '';
-      const linkSession = linkToken ? getSession(store, linkToken) : null;
-
-      if (state.mode === 'link' && linkSession) {
-        user = store.users[linkSession.userId];
-        if (!user) throw new Error('Account not found for linking');
-        const other = findUserByGoogleSub(store, profile.sub);
-        if (other && other.id !== user.id) {
-          throw new Error('That Google account is already linked to another user');
-        }
-        user.sso = user.sso || {};
-        user.sso.google = { sub: profile.sub, email: profile.email, name: profile.name };
-        user.updatedAt = Date.now();
-      } else if (!user) {
-        user = createUser(store, {
-          username: null,
-          sso: { google: { sub: profile.sub, email: profile.email, name: profile.name } },
-        });
-      } else {
-        user.sso = user.sso || {};
-        user.sso.google = { sub: profile.sub, email: profile.email, name: profile.name };
-      }
-
-      await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null);
-      const token = createSession(store, user.id);
-      await saveStore(DATA_DIR, store);
-      return redirect(
-        res,
-        oauthReturnUrl(state.returnTo, pub, {
-          auth_token: token,
-          auth_mode: state.mode || 'login',
-        }),
-      );
+      return await finishSsoLogin(res, {
+        provider: 'google',
+        profileId: profile.sub,
+        ssoRecord: { sub: profile.sub, email: profile.email, name: profile.name },
+        state,
+        failLabel: 'Google sign-in failed',
+      });
     } catch (error) {
       return redirect(
         res,
         oauthReturnUrl(state.returnTo, pub, {
           auth_error: error.message || 'Google sign-in failed',
+        }),
+      );
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/auth/facebook/start') {
+    return startOAuthRedirect(res, url, facebookAuthUrl, 'Facebook');
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/auth/facebook/callback') {
+    const state = decodeOAuthState(url.searchParams.get('state'));
+    const pub = oauthConfig().publicUrl;
+    const err = url.searchParams.get('error_description') || url.searchParams.get('error');
+    if (err) {
+      return redirect(res, oauthReturnUrl(state.returnTo, pub, { auth_error: err }));
+    }
+    const code = url.searchParams.get('code');
+    if (!code) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, { auth_error: 'Missing Facebook code' }),
+      );
+    }
+    try {
+      const profile = await exchangeFacebookCode(code);
+      return await finishSsoLogin(res, {
+        provider: 'facebook',
+        profileId: profile.id,
+        ssoRecord: { id: profile.id, email: profile.email, name: profile.name },
+        state,
+        failLabel: 'Facebook sign-in failed',
+      });
+    } catch (error) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_error: error.message || 'Facebook sign-in failed',
+        }),
+      );
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/auth/apple/start') {
+    return startOAuthRedirect(res, url, appleAuthUrl, 'Apple');
+  }
+
+  if (
+    (req.method === 'POST' || req.method === 'GET') &&
+    pathname === '/v1/auth/apple/callback'
+  ) {
+    const form = req.method === 'POST' ? await readFormParams(req) : url.searchParams;
+    const state = decodeOAuthState(form.get('state'));
+    const pub = oauthConfig().publicUrl;
+    const err = form.get('error_description') || form.get('error');
+    if (err) {
+      const nice =
+        err === 'user_cancelled_authorize' || err === 'access_denied'
+          ? 'Sign-in cancelled'
+          : err;
+      return redirect(res, oauthReturnUrl(state.returnTo, pub, { auth_error: nice }));
+    }
+    const code = form.get('code');
+    if (!code) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, { auth_error: 'Missing Apple code' }),
+      );
+    }
+    try {
+      const profile = await exchangeAppleCode(code, form.get('user'));
+      return await finishSsoLogin(res, {
+        provider: 'apple',
+        profileId: profile.sub,
+        ssoRecord: { sub: profile.sub, email: profile.email, name: profile.name },
+        state,
+        failLabel: 'Apple sign-in failed',
+      });
+    } catch (error) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_error: error.message || 'Apple sign-in failed',
         }),
       );
     }

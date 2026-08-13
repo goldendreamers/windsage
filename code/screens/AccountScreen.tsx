@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type { CloudUser } from '../core/cloud';
+import type { CloudUser, SsoProvider } from '../core/cloud';
 import {
   CloudError,
   fetchAuthProviders,
@@ -19,7 +19,8 @@ import {
   pullMyStations,
   registerAccount,
   sendTestPhoneAlert,
-  startGoogleSignIn,
+  ssoAccountLabel,
+  startSsoSignIn,
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
@@ -81,12 +82,13 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
     }
   }
 
-  async function finishGoogle(mode: 'login' | 'link') {
-    const result = await startGoogleSignIn(mode);
+  async function finishSso(provider: SsoProvider, mode: 'login' | 'link') {
+    const result = await startSsoSignIn(provider, mode);
     // Web navigates away; native AuthSession returns here.
     if (!result) return;
     if (result.error) throw new Error(result.error);
-    if (!result.token) throw new Error('Google sign-in returned no session');
+    const label = provider === 'google' ? 'Google' : provider === 'facebook' ? 'Facebook' : 'Apple';
+    if (!result.token) throw new Error(`${label} sign-in returned no session`);
     const me = await fetchMe();
     if (!me) throw new Error('Signed in but could not load account');
     if (mode === 'link') {
@@ -128,18 +130,42 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
       {user ? (
         <Section title="Signed in" icon="station">
           <Text style={styles.label}>
-            {user.username ? `@${user.username}` : user.sso.google?.email || 'SSO account'}
+            {user.username ? `@${user.username}` : ssoAccountLabel(user, 'SSO account')}
           </Text>
           <Text style={styles.hint}>
             Google: {user.sso.google?.linked ? user.sso.google.email || 'linked' : 'not linked'}
+          </Text>
+          <Text style={styles.hint}>
+            Facebook: {user.sso.facebook?.linked ? user.sso.facebook.email || 'linked' : 'not linked'}
+          </Text>
+          <Text style={styles.hint}>
+            Apple: {user.sso.apple?.linked ? user.sso.apple.email || 'linked' : 'not linked'}
           </Text>
           {providers.google && !user.sso.google?.linked ? (
             <Pressable
               style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
               disabled={busy}
-              onPress={() => void run(async () => finishGoogle('link'))}
+              onPress={() => void run(async () => finishSso('google', 'link'))}
             >
               <Text style={styles.btnSecondaryText}>Link Google</Text>
+            </Pressable>
+          ) : null}
+          {providers.facebook && !user.sso.facebook?.linked ? (
+            <Pressable
+              style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+              disabled={busy}
+              onPress={() => void run(async () => finishSso('facebook', 'link'))}
+            >
+              <Text style={styles.btnSecondaryText}>Link Facebook</Text>
+            </Pressable>
+          ) : null}
+          {providers.apple && !user.sso.apple?.linked ? (
+            <Pressable
+              style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+              disabled={busy}
+              onPress={() => void run(async () => finishSso('apple', 'link'))}
+            >
+              <Text style={styles.btnSecondaryText}>Link Apple</Text>
             </Pressable>
           ) : null}
           <Pressable
@@ -245,7 +271,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
               <Pressable
                 style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
                 disabled={busy}
-                onPress={() => void run(async () => finishGoogle('login'))}
+                onPress={() => void run(async () => finishSso('google', 'login'))}
               >
                 <Text style={styles.btnPrimaryText}>Continue with Google</Text>
               </Pressable>
@@ -256,10 +282,22 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
               </Text>
             )}
             {providers.facebook ? (
-              <Text style={styles.hint}>Facebook available when configured.</Text>
+              <Pressable
+                style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() => void run(async () => finishSso('facebook', 'login'))}
+              >
+                <Text style={styles.btnSecondaryText}>Continue with Facebook</Text>
+              </Pressable>
             ) : null}
             {providers.apple ? (
-              <Text style={styles.hint}>Apple available when configured.</Text>
+              <Pressable
+                style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() => void run(async () => finishSso('apple', 'login'))}
+              >
+                <Text style={styles.btnSecondaryText}>Continue with Apple</Text>
+              </Pressable>
             ) : null}
           </Section>
 

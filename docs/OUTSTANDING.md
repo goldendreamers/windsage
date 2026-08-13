@@ -10,13 +10,13 @@ What still needs a decision or secret from the operator, what already works, and
 
 **Done recently:** Multi-source follows (WG/NDBC/Open-Meteo/location + tokened sources). Map/address blend. Store wipe-proofing + daily backup cron. Login/register rate limits. Home “right now” glance + trend. Weather-source hiccup banner. Alert good/meh feedback. Google SSO live. Email notify. Shared catalog. Faster first load.
 
-**Also (same pattern, lower priority):** Facebook and Apple SSO are **env-gated** but need a short code pass for start/callback (see SSO-SETUP.md). They stay off until secrets + that wiring land.
+**Also (same pattern, lower priority):** Facebook and Apple SSO start/callback + Account buttons are **wired and env-gated**. They stay off until secrets land on Wald (`FACEBOOK_*` / `APPLE_*` + `.p8`). See SSO-SETUP.md.
 
 **Explicitly out of scope:** SMS / mobile OTP; “who’s out there” social check-ins (review idea — later).
 
 ## What works now (brief)
 
-- Guest mode + username/password accounts + multi-device sync + Google SSO
+- Guest mode + username/password accounts + multi-device sync + Google SSO (Facebook/Apple buttons when secrets are on Wald)
 - Multi-provider resolve + spot URL resolve via Wald
 - Metric-aware alert limits + per-metric defaults
 - Optional gust / wave / wind / direction limits
@@ -26,5 +26,4 @@ What still needs a decision or secret from the operator, what already works, and
 ## Deferred from progress review (not obsolete, not this pass)
 
 - SQLite only if concurrent users become real
-- GitHub Action wiring existing check scripts
 - Friend “who’s riding” layer

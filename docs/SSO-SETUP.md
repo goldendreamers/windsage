@@ -55,14 +55,14 @@ If Google shows `redirect_uri_mismatch`, the Console URI must match that HTTPS c
 
 ---
 
-## 2. Facebook (needs Meta app + a short code pass)
+## 2. Facebook (app code is ready — needs Meta app secrets)
 
-Env keys the server already looks for:
+Env keys:
 
 - `FACEBOOK_APP_ID`
 - `FACEBOOK_APP_SECRET`
 
-Redirect to register later:
+**Authorized redirect URI** (exact):
 
 - `https://windsage.nimrod.bio/v1/auth/facebook/callback`
 
@@ -74,21 +74,20 @@ Redirect to register later:
 4. Facebook Login → Settings → Valid OAuth Redirect URIs: add the callback above.
 5. Add App ID/Secret to `/data/windsage/oauth.env` and restart `windsage`.
 
-**Still needed in Windsage code** (not done yet): `/v1/auth/facebook/start` + callback + Account button (same pattern as Google). Say when you have the Meta app and want that wired.
+Health should then show `"facebook":true`. **Account → Continue with Facebook** appears only when that flag is on. Native uses the same in-app browser + `windsage://` return as Google.
 
 ---
 
-## 3. Apple (needs Apple Developer + a short code pass)
+## 3. Apple (app code is ready — needs Apple Developer identifiers + .p8)
 
-Env keys already checked:
+Env keys:
 
 - `APPLE_CLIENT_ID` (Services ID)
 - `APPLE_TEAM_ID`
 - `APPLE_KEY_ID`
+- `APPLE_PRIVATE_KEY_PATH` (path to the `.p8` on Wald) **or** `APPLE_PRIVATE_KEY` (PEM with `\n`)
 
-(Plus a `.p8` private key file on Wald — not committed.)
-
-Typical return URL:
+**Return URL** (exact):
 
 - `https://windsage.nimrod.bio/v1/auth/apple/callback`
 
@@ -98,9 +97,11 @@ Typical return URL:
 2. Enable Sign in with Apple; configure domain `windsage.nimrod.bio` and the return URL above.
 3. Create a **Key** with Sign in with Apple; note Key ID; download `.p8` once.
 4. Note Team ID (membership page).
-5. Place key + env on Wald; restart.
+5. Place the `.p8` on Wald (e.g. `/data/windsage/apple-auth-key.p8`, `chmod 600`) and set env; restart.
 
-**Still needed in Windsage code:** Apple start/callback (JWT client secret) + UI. Ask when the Apple identifiers/key are ready.
+Health should then show `"apple":true`. **Account → Continue with Apple** appears only when that flag is on. Apple posts the callback (`form_post`); the server then redirects to the app/web return URL.
+
+The server builds Apple's client-secret JWT (ES256) from the `.p8` — no extra npm packages.
 
 ---
 

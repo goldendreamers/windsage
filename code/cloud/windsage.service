@@ -19,6 +19,10 @@ Environment=WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 #   WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 # Google redirect URI (exact):
 #   https://windsage.nimrod.bio/v1/auth/google/callback
+# Facebook redirect URI (exact):
+#   https://windsage.nimrod.bio/v1/auth/facebook/callback
+# Apple return URL (exact, form_post):
+#   https://windsage.nimrod.bio/v1/auth/apple/callback
 # Tailscale MagicDNS (tailnet HTTP fallback):
 #   http://waldhomeserver.taild8a1d4.ts.net:8787
 EnvironmentFile=-/data/windsage/oauth.env

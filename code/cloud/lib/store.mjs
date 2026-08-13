@@ -282,6 +282,16 @@ export function findUserByGoogleSub(store, sub) {
   return Object.values(store.users).find((u) => u.sso?.google?.sub === sub) || null;
 }
 
+export function findUserByFacebookId(store, id) {
+  if (!id) return null;
+  return Object.values(store.users).find((u) => u.sso?.facebook?.id === id) || null;
+}
+
+export function findUserByAppleSub(store, sub) {
+  if (!sub) return null;
+  return Object.values(store.users).find((u) => u.sso?.apple?.sub === sub) || null;
+}
+
 export function createSession(store, userId, ttlMs = 90 * 24 * 60 * 60 * 1000) {
   const token = crypto.randomBytes(32).toString('hex');
   store.sessions[token] = {
@@ -410,8 +420,12 @@ export function publicUser(user) {
       google: user.sso?.google
         ? { email: user.sso.google.email || null, linked: true }
         : null,
-      facebook: user.sso?.facebook ? { linked: true } : null,
-      apple: user.sso?.apple ? { linked: true } : null,
+      facebook: user.sso?.facebook
+        ? { email: user.sso.facebook.email || null, linked: true }
+        : null,
+      apple: user.sso?.apple
+        ? { email: user.sso.apple.email || null, linked: true }
+        : null,
     },
     pollIntervalMinutes: user.pollIntervalMinutes || 10,
     stationCount: (user.stations || []).length,
