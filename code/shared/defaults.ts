@@ -194,6 +194,37 @@ export function formatAlertTrigger(
   return extras.length ? `${core} ${hold} · ${extras.join(' · ')}` : `${core} ${hold}`;
 }
 
+/**
+ * Home/detail Alert number — always the rule threshold.
+ * Never use CheckResult.message here: after a cloud check that string is the
+ * live reading (e.g. "10.2 kt") and would replace the threshold in the UI.
+ */
+export function alertThresholdDisplay(rule: AlertRule): { value: string; unit: string } {
+  return {
+    value: formatThresholdNumber(Number(rule.threshold)),
+    unit: metricUnitShort(rule.metric),
+  };
+}
+
+/** Short condition label with no live reading — safe next to the Alert threshold. */
+export function alertConditionLabel(message: string | null | undefined): string | null {
+  const raw = String(message ?? '').trim();
+  if (!raw) return null;
+  if (raw === 'Paused') return 'Paused';
+  if (raw === 'No reading') return 'No reading';
+  if (/^Holding\b/i.test(raw)) return 'Holding';
+  if (/^Alert\b/i.test(raw)) return 'Fired';
+  if (/^On target\b/i.test(raw)) return 'On target';
+  if (/too gusty/i.test(raw)) return 'Too gusty';
+  if (/waves too high/i.test(raw)) return 'Waves too high';
+  if (/wind too strong/i.test(raw)) return 'Wind too strong';
+  if (/wrong direction/i.test(raw)) return 'Wrong direction';
+  if (/need /i.test(raw)) return raw;
+  // Bare live reading like "10.2 kt" / "21 °C" — not a condition label.
+  if (/^-?\d+(\.\d+)?\s*(kt|m|°C)?$/i.test(raw)) return null;
+  return raw;
+}
+
 export function stationProvider(station: Pick<FollowedStation, 'provider'> | null | undefined): StationProvider {
   return normalizeProvider(station?.provider);
 }

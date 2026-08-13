@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -158,5 +158,18 @@ assert.equal(
   waveCols.some((c) => /avg|gust/i.test(c.label)),
   false,
 );
+
+// Regression: after a cloud check, result.message becomes the LIVE reading
+// (e.g. "10.2 kt"). Alert column must keep the threshold (15 kt), not swap.
+const below = evaluateAlert(reading(10.2, 12), history, station, prev, Date.now());
+assert.match(below.result.message, /10\.2/);
+assert.equal(below.result.metricValue, 10.2);
+const alertCol = alertThresholdDisplay(station.rule);
+assert.equal(alertCol.value, '15');
+assert.equal(alertCol.unit, 'kt');
+assert.notEqual(alertCol.value, String(below.result.metricValue));
+assert.equal(alertConditionLabel(below.result.message), null); // bare reading → not a status chip
+assert.equal(alertConditionLabel('Holding · 16 kt'), 'Holding');
+assert.equal(alertConditionLabel('Too gusty'), 'Too gusty');
 
 console.log('check-alerts: ok');

@@ -3,10 +3,9 @@ import { Fragment, memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
 import {
+  alertThresholdDisplay,
   displayName,
-  formatThresholdNumber,
   homeLiveStatColumns,
-  metricUnitShort,
   stationNick,
 } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
@@ -58,6 +57,7 @@ export const StationCard = memo(function StationCard({
       : '';
 
   const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, showingForecast);
+  const alertCol = alertThresholdDisplay(station.rule);
 
   return (
     <Pressable
@@ -121,9 +121,9 @@ export const StationCard = memo(function StationCard({
               holding ? styles.statusHold : errored ? styles.statusError : null,
             ]}
           >
-            {errored ? '—' : formatThresholdNumber(station.rule.threshold)}
+            {errored ? '—' : alertCol.value}
           </Text>
-          <Text style={styles.statUnit}>{metricUnitShort(station.rule.metric)}</Text>
+          <Text style={styles.statUnit}>{alertCol.unit}</Text>
         </View>
       </View>
     </Pressable>

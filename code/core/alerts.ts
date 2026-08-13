@@ -185,7 +185,8 @@ export function evaluateAlert(
   };
   const valueText = formatValue(value) ?? '—';
 
-  // Plain status for the home/detail alert line — lead with the live number, not metric keys.
+  // Status copy for toasts / logs. UI Alert column must NOT use this — it often
+  // embeds the live reading (e.g. "10.2 kt") which would replace the threshold.
   let message: string;
   if (!monitoringOn) {
     message = 'Paused';

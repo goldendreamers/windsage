@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
 import { formatDuration } from '../core/alerts';
+import { alertConditionLabel } from '../shared/defaults';
 import { colors } from '../shared/theme';
 import type { AlertState, CheckResult } from '../shared/types';
 
@@ -11,7 +12,7 @@ type Props = {
   alertState: AlertState | null;
   sustainedMinutes: number;
   progress: number;
-  /** Alert threshold, e.g. "15 kt" */
+  /** Alert threshold only, e.g. "15 kt" — never a live reading. */
   ruleHint?: string | null;
 };
 
@@ -40,13 +41,20 @@ export function StatusPanel({
         ? colors.accent
         : colors.muted;
 
+  const thresholdText = String(ruleHint ?? '').trim() || null;
+  const condition = alertConditionLabel(result?.message);
   const paused = result?.message === 'Paused';
+
+  // Threshold stays in the headline after a check. Live kt/°C/m never replace it.
   const headline = paused
-    ? `Paused · ${ruleHint || 'alerts off'}`
-    : ruleHint || result?.message || 'Waiting for first check…';
+    ? `Paused · ${thresholdText || 'alerts off'}`
+    : thresholdText
+      ? thresholdText
+      : condition || 'Waiting for first check…';
 
   const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
   const metaParts = [
+    !paused && thresholdText && condition ? condition : null,
     result?.conditionMet
       ? `Held ${formatDuration(result.sustainedMs ?? 0)} of ${sustainedMinutes}m`
       : `Need ${sustainedMinutes}m steady`,
@@ -61,9 +69,7 @@ export function StatusPanel({
           style={styles.icon}
           contentFit="contain"
         />
-        <Text style={[styles.statusLine, { color: tone }]}>
-          {headline}
-        </Text>
+        <Text style={[styles.statusLine, { color: tone }]}>{headline}</Text>
       </View>
 
       <View style={styles.progressTrack}>

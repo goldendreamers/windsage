@@ -676,7 +676,7 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
   };
   const valueText = formatValue(value) ?? '—';
 
-  let message;
+  let message; // status text; UI Alert column uses rule threshold, not this string
   if (!monitoringOn) message = 'Paused';
   else if (value == null) message = 'No reading';
   else if (!metricOk) message = valueText;
