@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, createFollowedStation, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, createFollowedStation, formatAlertTrigger, ruleForMetric } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -116,5 +116,19 @@ const tempOk = evaluateAlert(
   Date.now(),
 );
 assert.equal(tempOk.result.conditionMet, true);
+
+assert.equal(formatAlertTrigger(station.rule, 'short'), '≥15 kt · 20m');
+assert.equal(formatAlertTrigger(station.rule, 'full'), '≥15 kt for 20 min');
+assert.equal(
+  formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'),
+  'gust ≥20 kt · 20m',
+);
+assert.match(
+  formatAlertTrigger(
+    { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },
+    'full',
+  ),
+  /dir 270–20°/,
+);
 
 console.log('check-alerts: ok');

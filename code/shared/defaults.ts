@@ -91,6 +91,64 @@ export const METRIC_OPTIONS = [
 
 export const BACKGROUND_TASK_NAME = 'WINDSAGE_POLL_TASK';
 
+export function metricUnitShort(metric: MetricKey): string {
+  if (metric === 'temperature') return '°C';
+  if (metric === 'wave_height') return 'm';
+  return 'kt';
+}
+
+export function formatThresholdNumber(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  const rounded = Math.round(value * 10) / 10;
+  return Math.abs(rounded - Math.round(rounded)) < 0.05
+    ? String(Math.round(rounded))
+    : rounded.toFixed(1);
+}
+
+/**
+ * The point at which a follow will fire — not the live reading.
+ * short: "≥15 kt · 20m"   full: "≥15 kt for 20 min"
+ */
+export function formatAlertTrigger(
+  rule: AlertRule,
+  style: 'short' | 'full' = 'short',
+): string {
+  const cmp = rule.comparison === 'lte' ? '≤' : '≥';
+  const unit = metricUnitShort(rule.metric);
+  const thr = formatThresholdNumber(Number(rule.threshold));
+  const mins = Math.max(1, Number(rule.sustainedMinutes) || 1);
+  const metricBit =
+    rule.metric === 'wind_max'
+      ? 'gust '
+      : rule.metric === 'temperature'
+        ? 'temp '
+        : rule.metric === 'wave_height'
+          ? 'waves '
+          : '';
+  const core = `${metricBit}${cmp}${thr} ${unit}`;
+  const extras: string[] = [];
+  if (rule.maxGustSpreadEnabled) {
+    extras.push(`spread ≤${formatThresholdNumber(rule.maxGustSpreadKnots ?? 5)} kt`);
+  }
+  if (rule.windDirEnabled) {
+    const from = Math.round(Number(rule.windDirFromDeg) || 0);
+    const to = Math.round(Number(rule.windDirToDeg) || 0);
+    extras.push(`dir ${from}–${to}°`);
+  }
+  const windPrimary = rule.metric === 'wind_avg' || rule.metric === 'wind_max';
+  if (windPrimary && rule.maxWaveEnabled) {
+    extras.push(`waves ≤${formatThresholdNumber(rule.maxWaveHeightM ?? 1.5)} m`);
+  }
+  if (rule.metric === 'wave_height' && rule.maxWindEnabled) {
+    extras.push(`wind ≤${formatThresholdNumber(rule.maxWindKnots ?? 25)} kt`);
+  }
+  if (style === 'short') {
+    return extras.length ? `${core} · ${mins}m · ${extras[0]}` : `${core} · ${mins}m`;
+  }
+  const hold = `for ${mins} min`;
+  return extras.length ? `${core} ${hold} · ${extras.join(' · ')}` : `${core} ${hold}`;
+}
+
 export function stationProvider(station: Pick<FollowedStation, 'provider'> | null | undefined): StationProvider {
   return normalizeProvider(station?.provider);
 }

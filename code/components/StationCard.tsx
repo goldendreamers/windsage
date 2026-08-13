@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
-import { displayName, stationNick } from '../shared/defaults';
+import { displayName, formatAlertTrigger, stationNick } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
@@ -117,16 +117,7 @@ export const StationCard = memo(function StationCard({
             ]}
             numberOfLines={2}
           >
-            {errored
-              ? 'Check failed'
-              : result?.message ??
-                `${station.rule.comparison === 'gte' ? '≥' : '≤'}${station.rule.threshold} ${
-                  station.rule.metric === 'temperature'
-                    ? '°C'
-                    : station.rule.metric === 'wave_height'
-                      ? 'm'
-                      : 'kt'
-                }`}
+            {errored ? 'Check failed' : formatAlertTrigger(station.rule, 'short')}
           </Text>
         </View>
       </View>

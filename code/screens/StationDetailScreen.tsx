@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { metricIcon, brandImages } from '../shared/assets';
-import { METRIC_OPTIONS, displayName, ruleForMetric } from '../shared/defaults';
+import { METRIC_OPTIONS, displayName, formatAlertTrigger, ruleForMetric } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type {
@@ -450,17 +450,7 @@ export function StationDetailScreen({
           alertState={alertState}
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
-          ruleHint={`Target ${station.rule.comparison === 'gte' ? '≥' : '≤'}${
-            Number.isInteger(station.rule.threshold)
-              ? station.rule.threshold
-              : station.rule.threshold.toFixed(1)
-          } ${
-            station.rule.metric === 'temperature'
-              ? '°C'
-              : station.rule.metric === 'wave_height'
-                ? 'm'
-                : 'kt'
-          }`}
+          ruleHint={formatAlertTrigger(station.rule, 'full')}
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>
