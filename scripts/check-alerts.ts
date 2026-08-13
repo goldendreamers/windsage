@@ -120,6 +120,8 @@ assert.equal(tempOk.result.conditionMet, true);
 assert.equal(formatAlertTrigger(station.rule, 'short'), '15 kt');
 assert.equal(formatAlertTrigger(station.rule, 'full'), '≥15 kt for 20 min');
 assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'), '20 kt');
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wave_height'), 'short'), '1 m');
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'temperature'), 'short'), '22 °C');
 assert.match(
   formatAlertTrigger(
     { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },
