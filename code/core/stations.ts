@@ -121,8 +121,7 @@ export function detectProviderFromInput(input: string): StationProvider | null {
   if (t.includes('tempest') || t.includes('weatherflow')) return 'tempest';
   if (t.includes('windfinder.com')) return 'windfinder';
   if (t.includes('synoptic') || t.includes('mesowest')) return 'synoptic';
-  if (looksLikeMapQuery(t)) return 'location';
-  if (looksLikeLatLon(t)) return 'openmeteo';
+  if (looksLikeMapQuery(t) || looksLikeLatLon(t)) return 'location';
   return null;
 }
 

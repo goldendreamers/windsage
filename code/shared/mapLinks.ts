@@ -1,4 +1,4 @@
-/** Client-side detector for pasted map links (server does full parse + short-link follow). */
+/** Client-side detector for pasted map links and coordinates (server does full parse). */
 
 export function looksLikeMapQuery(text: string): boolean {
   const t = String(text || '').trim();
@@ -12,6 +12,21 @@ export function looksLikeMapQuery(text: string): boolean {
   );
 }
 
+/** True for pasted lat/lon (comma, space, N/E, DMS, lat:/lon:). Not a single Windguru id. */
 export function looksLikeLatLon(text: string): boolean {
-  return /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/.test(String(text || '').trim());
+  const t = String(text || '').trim();
+  if (!t || t.length > 160 || /^https?:\/\//i.test(t)) return false;
+  if (/lat(?:itude)?/i.test(t) && /lon(?:g(?:itude)?)?/i.test(t) && /-?\d/.test(t)) return true;
+  if (/\d\s*°/.test(t) && /[NSns]/.test(t) && /[EWew]/.test(t)) return true;
+  if (/^[\s(]*[+\-]?\d{1,3}(?:\.\d+)?\s*°?\s*[NSns]\s*[,;/\s]+[+\-]?\d{1,3}(?:\.\d+)?\s*°?\s*[EWew][\s)]*$/.test(t)) {
+    return true;
+  }
+  if (/^[NSns]\s*[+\-]?\d{1,3}(?:\.\d+)?\s*[,;/\s]+[EWew]\s*[+\-]?\d{1,3}(?:\.\d+)?$/.test(t)) {
+    return true;
+  }
+  if (/^[\s(]*[+\-]?\d{1,3}(?:\.\d+)?\s*[,;/]\s*[+\-]?\d{1,3}(?:\.\d+)?[\s)]*$/.test(t)) {
+    return true;
+  }
+  if (/^[+\-]?\d{1,3}\.\d+\s+[+\-]?\d{1,3}\.\d+$/.test(t)) return true;
+  return false;
 }

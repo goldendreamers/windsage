@@ -3,6 +3,7 @@
  * Weights: inverse-distance × trust(accuracy) × user rating.
  */
 import { asNumber, emptyHistory, historyFromPairs, reading } from './common.mjs';
+import { parseLatLon } from './mapsUrl.mjs';
 import { fetchNdbcCurrent } from './ndbc.mjs';
 import { fetchOpenMeteoCurrent } from './openmeteo.mjs';
 import { fetchCurrentReading as wgCurrent } from '../wind.mjs';
@@ -23,14 +24,9 @@ function haversineKm(aLat, aLon, bLat, bLon) {
 export function parseLocationId(input) {
   const trimmed = String(input || '').trim();
   if (!trimmed) return null;
-  const bare = trimmed.replace(/^loc:/i, '');
-  const m = bare.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-  const lat = Number(m[1]);
-  const lon = Number(m[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  return { lat, lon, id: `${lat.toFixed(4)},${lon.toFixed(4)}` };
+  const parsed = parseLatLon(trimmed.replace(/^loc:/i, ''));
+  if (!parsed) return null;
+  return { lat: parsed.lat, lon: parsed.lon, id: `${parsed.lat.toFixed(4)},${parsed.lon.toFixed(4)}` };
 }
 
 function trustKey(provider, stationId) {

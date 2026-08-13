@@ -40,8 +40,8 @@ export const PROVIDER_META: Record<
   location: {
     label: 'Map / Address',
     short: 'MAP',
-    hint: 'Paste a Google Maps link, search an address, or drop a pin — blends nearby stations.',
-    placeholder: 'Google Maps link, address, or tap the map',
+    hint: 'Paste coordinates, a Google Maps link, or an address — blends nearby stations.',
+    placeholder: '32.16, 34.80 or a Google Maps link',
     needsToken: false,
   },
   ndbc: {

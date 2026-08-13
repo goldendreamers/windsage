@@ -34,7 +34,7 @@ import {
 import { parseWindguruRef } from '../core/windguru';
 import { getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
-import { looksLikeMapQuery } from '../shared/mapLinks';
+import { looksLikeLatLon, looksLikeMapQuery } from '../shared/mapLinks';
 import type { LocationBlend } from '../shared/types';
 
 type Props = {
@@ -193,7 +193,7 @@ export function AddStationModal({
     setWarning(null);
     const detected = detectProviderFromInput(text);
     if (detected && detected !== provider) setProvider(detected);
-    if (looksLikeMapQuery(text)) {
+    if (looksLikeMapQuery(text) || looksLikeLatLon(text)) {
       setProvider('location');
       setMapSeed(text.trim());
     }
@@ -206,7 +206,7 @@ export function AddStationModal({
   const submit = async () => {
     if (provider === 'location') {
       if (!locationPick) {
-        setError('Search an address or tap the map to place a pin');
+        setError('Paste coordinates, search an address, or tap the map to place a pin');
         return;
       }
       setBusy(true);

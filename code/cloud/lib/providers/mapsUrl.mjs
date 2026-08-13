@@ -55,8 +55,79 @@ export function looksLikeShortMapUrl(text) {
 function validCoords(lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  // Reject 0,0 unless explicitly that (Google noise). Keep it — rare kite spot.
   return { lat, lon };
+}
+
+function applyHemi(value, hemi, negativeLetters) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const h = String(hemi || '').toUpperCase();
+  if (negativeLetters.includes(h)) return -Math.abs(n);
+  if (h) return Math.abs(n);
+  return n;
+}
+
+function dmsToDec(deg, min, sec, hemi, negativeLetters) {
+  const d = Number(deg);
+  const m = Number(min || 0);
+  const s = Number(sec || 0);
+  if (!Number.isFinite(d) || !Number.isFinite(m) || !Number.isFinite(s)) return null;
+  const signed = applyHemi(d + m / 60 + s / 3600, hemi, negativeLetters);
+  return signed;
+}
+
+/**
+ * Pasteable coordinates: "32.16, 34.80", "32.16 34.80", "32.16N 34.80E",
+ * "lat: 32.16 lon: 34.80", "32°09'52\"N 34°47'46\"E".
+ */
+export function parseLatLon(text) {
+  const t = String(text || '')
+    .trim()
+    .replace(/^loc:/i, '');
+  if (!t || t.length > 160) return null;
+  if (/^https?:\/\//i.test(t) || /^geo:/i.test(t)) return null;
+
+  const labeled = t.match(
+    /lat(?:itude)?\s*[:=]?\s*([+\-]?\d+(?:\.\d+)?)\s*[,;\s]+lon(?:g(?:itude)?)?\s*[:=]?\s*([+\-]?\d+(?:\.\d+)?)/i,
+  );
+  if (labeled) return validCoords(Number(labeled[1]), Number(labeled[2]));
+
+  const dms = t.match(
+    /^(\d{1,3})\s*°\s*(\d{1,2})?\s*['′]?\s*(\d{1,2}(?:\.\d+)?)?\s*["″]?\s*([NSns])\s*[,;/\s]+(\d{1,3})\s*°\s*(\d{1,2})?\s*['′]?\s*(\d{1,2}(?:\.\d+)?)?\s*["″]?\s*([EWew])$/,
+  );
+  if (dms) {
+    const lat = dmsToDec(dms[1], dms[2], dms[3], dms[4], 'S');
+    const lon = dmsToDec(dms[5], dms[6], dms[7], dms[8], 'W');
+    return validCoords(lat, lon);
+  }
+
+  const degHemi = t.match(
+    /^([+\-]?\d+(?:\.\d+)?)\s*°?\s*([NSns])\s*[,;/\s]+([+\-]?\d+(?:\.\d+)?)\s*°?\s*([EWew])$/,
+  );
+  if (degHemi) {
+    return validCoords(applyHemi(degHemi[1], degHemi[2], 'S'), applyHemi(degHemi[3], degHemi[4], 'W'));
+  }
+
+  const prefixHemi = t.match(
+    /^([NSns])\s*([+\-]?\d+(?:\.\d+)?)\s*[,;/\s]+([EWew])\s*([+\-]?\d+(?:\.\d+)?)$/,
+  );
+  if (prefixHemi) {
+    return validCoords(
+      applyHemi(prefixHemi[2], prefixHemi[1], 'S'),
+      applyHemi(prefixHemi[4], prefixHemi[3], 'W'),
+    );
+  }
+
+  const pair = t.match(
+    /^\(?\s*([+\-]?\d{1,3}(?:\.\d+)?)\s*[,;/\s]+\s*([+\-]?\d{1,3}(?:\.\d+)?)\s*\)?$/,
+  );
+  if (pair) {
+    const onlySpace = !/[,;/]/.test(t);
+    if (onlySpace && !t.includes('.')) return null;
+    return validCoords(Number(pair[1]), Number(pair[2]));
+  }
+
+  return null;
 }
 
 function decodePathPlace(raw) {
@@ -99,7 +170,7 @@ export function parseCoordsFromMapText(text) {
   const appleLl = t.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
   if (appleLl) return validCoords(Number(appleLl[1]), Number(appleLl[2]));
 
-  return null;
+  return parseLatLon(t);
 }
 
 /** Place name from a maps URL when coords are missing (e.g. /maps/place/Herzliya+Marina/). */

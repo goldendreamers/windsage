@@ -7,6 +7,7 @@ import {
   looksLikeMapUrl,
   looksLikeShortMapUrl,
   parseCoordsFromMapText,
+  parseLatLon,
 } from '../code/cloud/lib/providers/mapsUrl.mjs';
 import { geocodeAddress } from '../code/cloud/lib/providers/geo.mjs';
 
@@ -47,6 +48,27 @@ assert.equal(looksLikeMapUrl('https://www.google.co.il/maps/@32.1,34.8,12z'), tr
 assert.equal(looksLikeMapUrl('https://maps.app.goo.gl/abc123'), true);
 assert.equal(looksLikeShortMapUrl('https://maps.app.goo.gl/abc123'), true);
 assert.equal(looksLikeMapUrl('https://www.windguru.cz/2259'), false);
+
+const comma = parseLatLon('32.1645, 34.7961');
+assert.ok(comma);
+assert.equal(comma.lat.toFixed(4), '32.1645');
+assert.equal(comma.lon.toFixed(4), '34.7961');
+assert.equal(parseLatLon('32.164 34.796').lat.toFixed(3), '32.164');
+assert.equal(parseLatLon('(32.16, 34.80)').lon.toFixed(2), '34.80');
+assert.equal(parseLatLon('32.16N, 34.80E').lat.toFixed(2), '32.16');
+assert.equal(parseLatLon('N32.16 E34.80').lon.toFixed(2), '34.80');
+assert.equal(parseLatLon('lat: 32.16 lon: 34.80').lat.toFixed(2), '32.16');
+assert.equal(parseLatLon('32.164472° N, 34.796139° E').lat.toFixed(3), '32.164');
+const dms = parseLatLon('32°09\'52"N 34°47\'46"E');
+assert.ok(dms);
+assert.ok(dms.lat > 32.16 && dms.lat < 32.17);
+assert.equal(parseLatLon('15 20'), null);
+assert.equal(parseLatLon('Herzliya Marina'), null);
+assert.equal(parseLatLon('2259'), null);
+
+const fromBare = await geocodeAddress('32.1645, 34.7961');
+assert.equal(fromBare.provider, 'coords');
+assert.equal(fromBare.lat.toFixed(4), '32.1645');
 
 assert.equal(
   extractPlaceQueryFromMapUrl('https://www.google.com/maps/place/Herzliya+Marina/@32.1,34.8,15z'),

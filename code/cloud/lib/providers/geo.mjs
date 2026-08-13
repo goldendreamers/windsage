@@ -7,6 +7,7 @@ import {
   GEO_UA,
   looksLikeMapUrl,
   parseCoordsFromMapText,
+  parseLatLon,
   resolveMapInput,
 } from './mapsUrl.mjs';
 
@@ -194,21 +195,11 @@ function hitToResult(hit, fallbackQuery) {
   };
 }
 
-function parseBareCoords(q) {
-  const m = String(q || '').match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-  const lat = Number(m[1]);
-  const lon = Number(m[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  return { lat, lon };
-}
-
 export async function geocodeAddress(query) {
   const q = String(query || '').trim();
-  if (q.length < 2) throw new Error('Enter an address, place name, or Google Maps link');
+  if (q.length < 2) throw new Error('Enter an address, coordinates, or Google Maps link');
 
-  const fromText = parseCoordsFromMapText(q) || parseBareCoords(q);
+  const fromText = parseCoordsFromMapText(q) || parseLatLon(q);
 
   if (looksLikeMapUrl(q) || (!fromText && /^https?:\/\//i.test(q))) {
     const resolved = await resolveMapInput(q);
@@ -265,7 +256,7 @@ export async function geocodeAddress(query) {
   }
   if (!sawEmptyOk && lastErr) {
     throw new Error(
-      'Place search is unreachable right now. Paste a Google Maps link, or try again in a moment.',
+      'Place search is unreachable right now. Paste coordinates or a Google Maps link, or try again in a moment.',
     );
   }
 

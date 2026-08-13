@@ -177,7 +177,7 @@ export function LocationPicker({ onPicked, initial, seedQuery }: Props) {
       onPicked(next);
       setSuggestions([]);
     } catch (e) {
-      setError(friendlyGeoError(e, 'Couldn’t find that place. Try a fuller address or paste a Google Maps link.'));
+      setError(friendlyGeoError(e, 'Couldn’t find that place. Try coordinates, a Maps link, or a fuller address.'));
     } finally {
       setBusy(false);
     }
@@ -280,7 +280,7 @@ export function LocationPicker({ onPicked, initial, seedQuery }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.meta}>
-        Paste a Google Maps link, search an address, or tap the map. Address via{' '}
+        Paste coordinates (32.16, 34.80), a Google Maps link, or an address. Via{' '}
         {geocodeProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'} · pin blends nearby
         stations
       </Text>
@@ -291,7 +291,7 @@ export function LocationPicker({ onPicked, initial, seedQuery }: Props) {
           onChangeText={search}
           onSubmitEditing={() => void geocodeTyped()}
           returnKeyType="search"
-          placeholder="Google Maps link, address, or place"
+          placeholder="32.16, 34.80 · Maps link · address"
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -324,8 +324,8 @@ export function LocationPicker({ onPicked, initial, seedQuery }: Props) {
         />
       ) : (
         <Text style={styles.nativeHint}>
-          On phone, paste a Google Maps link or search an address above. Map pin is in the
-          browser / PWA.
+          On phone, paste coordinates or a Google Maps link, or search an address. Map pin is in
+          the browser / PWA.
         </Text>
       )}
       {pin ? (
