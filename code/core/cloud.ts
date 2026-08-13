@@ -44,12 +44,23 @@ export type CloudUser = {
   username: string | null;
   sso: {
     google: { email: string | null; linked: boolean } | null;
-    facebook: { linked: boolean } | null;
-    apple: { linked: boolean } | null;
+    facebook: { email: string | null; linked: boolean } | null;
+    apple: { email: string | null; linked: boolean } | null;
   };
   pollIntervalMinutes: number;
   stationCount: number;
 };
+
+export function ssoAccountLabel(user: CloudUser | null | undefined, fallback = 'account'): string {
+  if (!user) return fallback;
+  return (
+    user.username ||
+    user.sso.google?.email ||
+    user.sso.facebook?.email ||
+    user.sso.apple?.email ||
+    fallback
+  );
+}
 
 type DeviceCreds = { deviceId: string; secret: string };
 
@@ -276,12 +287,21 @@ export async function pullMyStations(): Promise<AppSettings | null> {
   };
 }
 
-export async function startGoogleSignIn(
+export type SsoProvider = 'google' | 'facebook' | 'apple';
+
+const SSO_LABEL: Record<SsoProvider, string> = {
+  google: 'Google',
+  facebook: 'Facebook',
+  apple: 'Apple',
+};
+
+export async function startSsoSignIn(
+  provider: SsoProvider,
   mode: 'login' | 'link' = 'login',
 ): Promise<{ token?: string; error?: string } | void> {
   const { creds } = await registerWithCloud();
   const token = mode === 'link' ? await getSessionToken() : null;
-  const url = new URL(`${getCloudBaseUrl()}/v1/auth/google/start`);
+  const url = new URL(`${getCloudBaseUrl()}/v1/auth/${provider}/start`);
   url.searchParams.set('mode', mode);
   url.searchParams.set('deviceId', creds.deviceId);
   url.searchParams.set('secret', creds.secret);
@@ -292,7 +312,6 @@ export async function startGoogleSignIn(
     return;
   }
 
-  // Native: AuthSession so Google returns into the app via windsage:// (or exp:// in Expo Go).
   const LinkingExpo = await import('expo-linking');
   const WebBrowser = await import('expo-web-browser');
   const returnTo = LinkingExpo.createURL('auth');
@@ -306,7 +325,13 @@ export async function startGoogleSignIn(
   if (result.type === 'cancel' || result.type === 'dismiss') {
     return { error: 'Sign-in cancelled' };
   }
-  return { error: 'Google sign-in failed' };
+  return { error: `${SSO_LABEL[provider]} sign-in failed` };
+}
+
+export async function startGoogleSignIn(
+  mode: 'login' | 'link' = 'login',
+): Promise<{ token?: string; error?: string } | void> {
+  return startSsoSignIn('google', mode);
 }
 
 /** Parse auth_token / auth_error from a web or deep-link URL. */
@@ -326,7 +351,7 @@ export async function consumeAuthRedirectParamsFromUrl(rawUrl: string): Promise<
   }
 }
 
-/** Consume ?auth_token= / ?auth_error= from Google redirect (web). */
+/** Consume ?auth_token= / ?auth_error= from SSO redirect (web). */
 export async function consumeAuthRedirectParams(): Promise<{
   token?: string;
   error?: string;

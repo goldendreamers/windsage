@@ -87,6 +87,8 @@ npm run release:web                 # export + snapshot + rsync cloud+web + rest
 - Alert Good/Meh feedback (signed-in)
 - SW v7; `/health` ETag; debounced persist→cloud sync
 - Google SSO live when secrets present on Wald
+- Facebook / Apple SSO start+callback + Account buttons (env-gated; off until secrets)
+- HMAC-signed OAuth `state`; GitHub Action runs `scripts/check-*.mjs` + alert checks
 
 ## Still open / optional
 
@@ -94,7 +96,7 @@ See `docs/OUTSTANDING.md`. Highlights:
 
 - Optional tokens: Synoptic / Tempest / Windfinder / Google Maps geocode
 - Optional paid apex domain
-- Deferred: “who’s out” social, SQLite, CI Actions
+- Deferred: “who’s out” social, SQLite
 
 External research notes: `docs/PROGRESS_REVIEW.md` (Windguru-only SPOF is **outdated** — multi-source exists).
 

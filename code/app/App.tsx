@@ -27,6 +27,7 @@ import {
   resetCloudAlert,
   sendAlertFeedback,
   snapshotsToLive,
+  ssoAccountLabel,
   syncStationsToCloud,
   type CloudAnnouncement,
 } from '../core/cloud';
@@ -301,7 +302,7 @@ export default function App() {
       await saveSettings(next);
       setAccountOpen(false);
       showToast(
-        `Signed in · ${payload.user.username || payload.user.sso.google?.email || 'account'}`,
+        `Signed in · ${ssoAccountLabel(payload.user)}`,
       );
       // Push local follows up if cloud bag was empty.
       if (cloudStations.length === 0 && localStations.length > 0) {
@@ -680,7 +681,7 @@ export default function App() {
             account
               ? account.username
                 ? `@${account.username}`
-                : account.sso.google?.email || 'Account'
+                : ssoAccountLabel(account, 'Account')
               : 'Account'
           }
           cloudStatus={cloudStatus}
