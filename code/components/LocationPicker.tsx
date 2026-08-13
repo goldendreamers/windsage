@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { getCloudBaseUrl } from '../core/cloud';
+import { looksLikeLatLon, looksLikeMapQuery } from '../shared/mapLinks';
 import { colors } from '../shared/theme';
 
 type Suggestion = {
@@ -27,6 +28,8 @@ export type LocationPick = {
 type Props = {
   onPicked: (pick: LocationPick) => void;
   initial?: LocationPick | null;
+  /** Pasted Maps URL / address from the Add Station field when switching to Map. */
+  seedQuery?: string | null;
 };
 
 function friendlyGeoError(raw: unknown, fallback: string): string {
@@ -50,8 +53,8 @@ function friendlyGeoError(raw: unknown, fallback: string): string {
   if (lower.includes('no coordinates')) {
     return 'Couldn’t find that place. Try a fuller address or tap the map.';
   }
-  if (lower.includes('geocode') || lower.includes('search failed')) {
-    return 'Place search didn’t work. Try a different address or tap the map.';
+  if (lower.includes('geocode') || lower.includes('search failed') || lower.includes('unreachable')) {
+    return 'Place search didn’t work. Paste a Google Maps link, or try a different address.';
   }
   return msg.trim() || fallback;
 }
@@ -61,7 +64,7 @@ function friendlyGeoError(raw: unknown, fallback: string): string {
  * Uses Google Geocoding/Places when the server has a key; otherwise Open-Meteo.
  * Map: Leaflet/OSM on web (no key). Native falls back to address-only.
  */
-export function LocationPicker({ onPicked, initial }: Props) {
+export function LocationPicker({ onPicked, initial, seedQuery }: Props) {
   const [query, setQuery] = useState(initial?.address || '');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [busy, setBusy] = useState(false);
@@ -75,6 +78,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
     L: any;
   } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seededRef = useRef<string>('');
 
   useEffect(() => {
     void (async () => {
@@ -145,22 +149,60 @@ export function LocationPicker({ onPicked, initial }: Props) {
     if (!leafletRef.current || !pin) return;
     const { map, marker } = leafletRef.current;
     marker.setLatLng([pin.lat, pin.lon]);
-    map.setView([pin.lat, pin.lon], Math.max(map.getZoom(), 11));
+    map.setView([pin.lat, pin.lon], Math.max(map.getZoom(), 14));
   }, [pin?.lat, pin?.lon]);
+
+  const geocodeTyped = async (raw?: string) => {
+    const text = (raw ?? query).trim();
+    if (!text) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ query: text }),
+      });
+      const data = (await res.json()) as {
+        lat?: number;
+        lon?: number;
+        address?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || 'Geocode failed');
+      if (data.lat == null || data.lon == null) throw new Error('No coordinates');
+      const next = { lat: data.lat, lon: data.lon, address: data.address || text };
+      setPin(next);
+      setQuery(next.address);
+      onPicked(next);
+      setSuggestions([]);
+    } catch (e) {
+      setError(friendlyGeoError(e, 'Couldn’t find that place. Try a fuller address or paste a Google Maps link.'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const search = (text: string) => {
     setQuery(text);
     setError(null);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.trim().length < 2) {
+    const trimmed = text.trim();
+    if (trimmed.length < 2) {
       setSuggestions([]);
       return;
     }
+    const instant = looksLikeMapQuery(trimmed) || looksLikeLatLon(trimmed);
     debounceRef.current = setTimeout(() => {
+      if (instant) {
+        setSuggestions([]);
+        void geocodeTyped(trimmed);
+        return;
+      }
       void (async () => {
         try {
           const res = await fetch(
-            `${getCloudBaseUrl()}/v1/geo/autocomplete?q=${encodeURIComponent(text.trim())}`,
+            `${getCloudBaseUrl()}/v1/geo/autocomplete?q=${encodeURIComponent(trimmed)}`,
           );
           const data = (await res.json()) as { suggestions?: Suggestion[]; error?: string };
           if (!res.ok) throw new Error(data.error || 'Search failed');
@@ -170,8 +212,17 @@ export function LocationPicker({ onPicked, initial }: Props) {
           setError(friendlyGeoError(e, 'Place search didn’t work. Try again in a moment.'));
         }
       })();
-    }, 280);
+    }, instant ? 160 : 280);
   };
+
+  useEffect(() => {
+    const seed = String(seedQuery || '').trim();
+    if (!seed || seed === seededRef.current) return;
+    seededRef.current = seed;
+    setQuery(seed);
+    void geocodeTyped(seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedQuery]);
 
   const pickSuggestion = async (s: Suggestion) => {
     setBusy(true);
@@ -226,48 +277,21 @@ export function LocationPicker({ onPicked, initial }: Props) {
     }
   };
 
-  const geocodeTyped = async () => {
-    if (!query.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: query.trim() }),
-      });
-      const data = (await res.json()) as {
-        lat?: number;
-        lon?: number;
-        address?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error || 'Geocode failed');
-      if (data.lat == null || data.lon == null) throw new Error('No coordinates');
-      const next = { lat: data.lat, lon: data.lon, address: data.address || query.trim() };
-      setPin(next);
-      setQuery(next.address);
-      onPicked(next);
-      setSuggestions([]);
-    } catch (e) {
-      setError(friendlyGeoError(e, 'Couldn’t find that place. Try a fuller address.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <View style={styles.wrap}>
       <Text style={styles.meta}>
-        Address via {geocodeProvider === 'google' ? 'Google Maps' : 'Open-Meteo'} · pin on map
-        blends nearby stations
+        Paste a Google Maps link, search an address, or tap the map. Address via{' '}
+        {geocodeProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'} · pin blends nearby
+        stations
       </Text>
       <View style={styles.row}>
         <TextInput
           style={styles.input}
           value={query}
           onChangeText={search}
-          placeholder="Address or place name"
+          onSubmitEditing={() => void geocodeTyped()}
+          returnKeyType="search"
+          placeholder="Google Maps link, address, or place"
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -300,7 +324,8 @@ export function LocationPicker({ onPicked, initial }: Props) {
         />
       ) : (
         <Text style={styles.nativeHint}>
-          On phone, search an address above. Map pin is available in the browser / PWA.
+          On phone, paste a Google Maps link or search an address above. Map pin is in the
+          browser / PWA.
         </Text>
       )}
       {pin ? (

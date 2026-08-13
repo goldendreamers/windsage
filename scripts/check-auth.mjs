@@ -30,7 +30,7 @@ assert.equal(await verifyPassword('secret123', passwordHash, passwordSalt), true
 assert.equal(await verifyPassword('wrong', passwordHash, passwordSalt), false);
 
 let store = await loadStore(dir);
-assert.equal(store.version, 2);
+assert.equal(store.version, 3);
 const user = createUser(store, {
   username: 'nimrod',
   passwordHash,

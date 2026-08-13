@@ -34,6 +34,7 @@ import {
 import { parseWindguruRef } from '../core/windguru';
 import { getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
+import { looksLikeMapQuery } from '../shared/mapLinks';
 import type { LocationBlend } from '../shared/types';
 
 type Props = {
@@ -76,6 +77,7 @@ export function AddStationModal({
   const [warning, setWarning] = useState<string | null>(null);
   const [sourceReady, setSourceReady] = useState<Record<string, boolean> | null>(null);
   const [locationPick, setLocationPick] = useState<LocationPick | null>(null);
+  const [mapSeed, setMapSeed] = useState<string | null>(null);
   const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
   const nicknameInputRef = useRef<TextInput>(null);
@@ -135,6 +137,7 @@ export function AddStationModal({
     setLinkHint(null);
     setWarning(null);
     setLocationPick(null);
+    setMapSeed(null);
     setPendingMembers(null);
     setPendingCatalog(null);
   };
@@ -190,6 +193,10 @@ export function AddStationModal({
     setWarning(null);
     const detected = detectProviderFromInput(text);
     if (detected && detected !== provider) setProvider(detected);
+    if (looksLikeMapQuery(text)) {
+      setProvider('location');
+      setMapSeed(text.trim());
+    }
     if (provider === 'windguru' || detected === 'windguru') {
       const ref = parseWindguruRef(text);
       if (ref?.kindHint) setKind(ref.kindHint);
@@ -384,6 +391,7 @@ export function AddStationModal({
                       setLinkHint(null);
                       setWarning(null);
                       setPendingCatalog(null);
+                      if (key !== 'location') setMapSeed(null);
                       if (key !== 'windguru') setKind('station');
                     }}
                     disabled={busy}
@@ -460,6 +468,7 @@ export function AddStationModal({
           {provider === 'location' ? (
             <LocationPicker
               initial={locationPick}
+              seedQuery={mapSeed}
               onPicked={(pick) => {
                 setLocationPick(pick);
                 setError(null);

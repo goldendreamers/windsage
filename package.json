@@ -37,7 +37,7 @@
     "release:web:local": "python3 scripts/release-web.py --no-deploy",
     "prune:web": "python3 scripts/release-web.py --prune-only",
     "assets:build": "python3 scripts/build-assets.py",
-    "check": "npx --yes tsx scripts/check-alerts.ts && node scripts/check-auth.mjs",
+    "check": "npx --yes tsx scripts/check-alerts.ts && node scripts/check-auth.mjs && node scripts/check-geo.mjs",
     "eas:android": "npx eas-cli build --platform android --profile production",
     "eas:ios": "npx eas-cli build --platform ios --profile production",
     "eas:submit:android": "npx eas-cli submit --platform android --profile production",

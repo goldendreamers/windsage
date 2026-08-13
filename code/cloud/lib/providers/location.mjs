@@ -328,7 +328,13 @@ export async function resolveLocation(input, extras = {}) {
   if (!coords && extras.lat != null && extras.lon != null) {
     coords = parseLocationId(`${extras.lat},${extras.lon}`);
   }
-  if (!coords) throw new Error('Provide lat,lon or pick a map pin / address');
+  if (!coords && String(input || '').trim()) {
+    const { geocodeAddress } = await import('./geo.mjs');
+    const hit = await geocodeAddress(input);
+    coords = parseLocationId(`${hit.lat},${hit.lon}`);
+    address = address || hit.address || null;
+  }
+  if (!coords) throw new Error('Provide lat,lon, a Google Maps link, or pick a map pin / address');
   const radiusKm = Math.max(5, Number(extras.radiusKm) || 50);
   const maxStations = Math.max(2, Math.min(12, Number(extras.maxStations) || 6));
   const members = await findNearbyStations(coords.lat, coords.lon, { radiusKm, maxStations });
