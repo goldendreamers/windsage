@@ -138,10 +138,17 @@ def build_downloadable_zip(dist: Path = DIST) -> Path:
     zip_path = dist / "windsage-web.zip"
     if zip_path.exists():
         zip_path.unlink()
+    # Some cloud VMs stamp checkout files at epoch 0; ZIP requires >= 1980-01-01.
+    min_ts = time.mktime((1980, 1, 1, 0, 0, 0, 0, 0, -1))
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(dist.rglob("*")):
             if not path.is_file() or path == zip_path:
                 continue
+            try:
+                if path.stat().st_mtime < min_ts:
+                    os.utime(path, (min_ts, min_ts))
+            except OSError:
+                pass
             zf.write(path, path.relative_to(dist).as_posix())
     print(f"downloadable zip: {zip_path} ({zip_path.stat().st_size} bytes)")
     return zip_path
