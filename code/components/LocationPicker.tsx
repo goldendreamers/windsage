@@ -259,12 +259,8 @@ export function LocationPicker({ onPicked, initial }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.meta}>
-        Search goes to Google Maps for coordinates
-        {geocodeProvider === 'google' || geocodeProvider === 'google-maps'
-          ? ''
-          : ' (fallback geocoder if Maps is unreachable)'}
-        {' · '}
-        pin blends nearby stations. Paste a Maps link or lat,lon too.
+        Search uses Google Maps for coordinates (no API key required). Paste a Maps
+        link or lat,lon too · pin blends nearby stations.
       </Text>
       <View style={styles.row}>
         <TextInput

@@ -92,7 +92,8 @@ npm run release:web                 # export + snapshot + rsync cloud+web + rest
 
 See `docs/OUTSTANDING.md`. Highlights:
 
-- Optional tokens: Synoptic / Tempest / Windfinder / Google Maps geocode
+- Optional tokens: Synoptic / Tempest / Windfinder
+- Optional `GOOGLE_MAPS_API_KEY` on Wald (Places autocomplete only — Map search works without it via Maps URLs)
 - Optional paid apex domain
 - Deferred: “who’s out” social, SQLite, CI Actions
 

@@ -4,7 +4,7 @@ What still needs a decision or secret from the operator, what already works, and
 
 ## Still needed from user (action list)
 
-1. **Optional provider tokens** — Synoptic / Tempest / Windfinder stay env-gated. Free sources (Windguru, NDBC, Open-Meteo, location blend) already work without keys. **Map search** now always tries Google Maps for coordinates (API key preferred; Maps search URL without a key; Photon/Open-Meteo fallback). Optional: set `GOOGLE_MAPS_API_KEY` on Wald for Places autocomplete + Geocoding API.
+1. **Optional provider tokens** — Synoptic / Tempest / Windfinder stay env-gated. Free sources already work. **Map search works without any Google key** (Maps search URL → coordinates; Photon/Open-Meteo fallback). Optional: `GOOGLE_MAPS_API_KEY` on Wald only improves Places autocomplete.
 
 2. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
 
