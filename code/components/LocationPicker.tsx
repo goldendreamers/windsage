@@ -58,8 +58,9 @@ function friendlyGeoError(raw: unknown, fallback: string): string {
 
 /**
  * Address search + map pin.
- * Uses Google Geocoding/Places when the server has a key; otherwise Open-Meteo.
- * Map: Leaflet/OSM on web (no key). Native falls back to address-only.
+ * Search always resolves through Google Maps for coordinates (API key on Wald,
+ * or Maps search URL). Autocomplete may use free suggestions; Go / pick re-geocodes.
+ * Map tiles: Leaflet/OSM on web (no key). Native falls back to address-only.
  */
 export function LocationPicker({ onPicked, initial }: Props) {
   const [query, setQuery] = useState(initial?.address || '');
@@ -67,7 +68,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pin, setPin] = useState<LocationPick | null>(initial || null);
-  const [geocodeProvider, setGeocodeProvider] = useState<string>('open-meteo');
+  const [geocodeProvider, setGeocodeProvider] = useState<string>('google-maps');
   const mapHostRef = useRef<View>(null);
   const leafletRef = useRef<{
     map: any;
@@ -80,8 +81,9 @@ export function LocationPicker({ onPicked, initial }: Props) {
     void (async () => {
       try {
         const res = await fetch(`${getCloudBaseUrl()}/v1/maps/config`);
-        const data = (await res.json()) as { geocodeProvider?: string };
-        if (data.geocodeProvider) setGeocodeProvider(data.geocodeProvider);
+        const data = (await res.json()) as { geocodeProvider?: string; searchVia?: string };
+        if (data.searchVia) setGeocodeProvider(data.searchVia);
+        else if (data.geocodeProvider) setGeocodeProvider(data.geocodeProvider);
       } catch {
         // ignore
       }
@@ -178,10 +180,9 @@ export function LocationPicker({ onPicked, initial }: Props) {
     setError(null);
     setSuggestions([]);
     try {
-      let lat = s.lat ?? null;
-      let lon = s.lon ?? null;
-      let address = s.description;
-      if ((lat == null || lon == null) && s.placeId) {
+      // Always resolve through the server geocoder (Google Maps → coords),
+      // even if autocomplete already had lat/lon from a free provider.
+      if (s.placeId) {
         const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -194,30 +195,29 @@ export function LocationPicker({ onPicked, initial }: Props) {
           error?: string;
         };
         if (!res.ok) throw new Error(data.error || 'Geocode failed');
-        lat = data.lat ?? null;
-        lon = data.lon ?? null;
-        address = data.address || address;
-      } else if (lat == null || lon == null) {
-        const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ query: s.description }),
-        });
-        const data = (await res.json()) as {
-          lat?: number;
-          lon?: number;
-          address?: string;
-          error?: string;
-        };
-        if (!res.ok) throw new Error(data.error || 'Geocode failed');
-        lat = data.lat ?? null;
-        lon = data.lon ?? null;
-        address = data.address || address;
+        if (data.lat == null || data.lon == null) throw new Error('No coordinates for that place');
+        const next = { lat: data.lat, lon: data.lon, address: data.address || s.description };
+        setPin(next);
+        setQuery(next.address);
+        onPicked(next);
+        return;
       }
-      if (lat == null || lon == null) throw new Error('No coordinates for that place');
-      const next = { lat, lon, address };
+      const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ query: s.description }),
+      });
+      const data = (await res.json()) as {
+        lat?: number;
+        lon?: number;
+        address?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || 'Geocode failed');
+      if (data.lat == null || data.lon == null) throw new Error('No coordinates for that place');
+      const next = { lat: data.lat, lon: data.lon, address: data.address || s.description };
       setPin(next);
-      setQuery(address);
+      setQuery(next.address);
       onPicked(next);
     } catch (e) {
       setError(friendlyGeoError(e, 'Couldn’t place that address. Try another search or tap the map.'));
@@ -259,18 +259,24 @@ export function LocationPicker({ onPicked, initial }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.meta}>
-        Address via {geocodeProvider === 'google' ? 'Google Maps' : 'Open-Meteo'} · pin on map
-        blends nearby stations
+        Search goes to Google Maps for coordinates
+        {geocodeProvider === 'google' || geocodeProvider === 'google-maps'
+          ? ''
+          : ' (fallback geocoder if Maps is unreachable)'}
+        {' · '}
+        pin blends nearby stations. Paste a Maps link or lat,lon too.
       </Text>
       <View style={styles.row}>
         <TextInput
           style={styles.input}
           value={query}
           onChangeText={search}
-          placeholder="Address or place name"
+          placeholder="Address, place, Maps link, or 32.16, 34.80"
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
+          onSubmitEditing={() => void geocodeTyped()}
+          returnKeyType="search"
         />
         <Pressable style={styles.go} onPress={() => void geocodeTyped()} disabled={busy}>
           {busy ? <ActivityIndicator color="#042018" /> : <Text style={styles.goText}>Go</Text>}

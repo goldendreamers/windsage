@@ -68,6 +68,8 @@ async function fetchWithTimeout(url, init = {}) {
   }
 }
 
+export { fetchWithTimeout };
+
 export async function fetchText(url, headers = {}) {
   const key = coalesceKey('text', String(url), headers);
   const pending = inflightGets.get(key);
