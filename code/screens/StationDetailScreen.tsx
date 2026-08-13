@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { metricIcon, brandImages } from '../shared/assets';
-import { METRIC_OPTIONS, displayName, ruleForMetric } from '../shared/defaults';
+import { METRIC_OPTIONS, displayName, formatAlertTrigger, ruleForMetric } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type {
@@ -34,6 +34,113 @@ import { MetricChooser } from '../components/MetricChooser';
 import { MetricPill } from '../components/MetricPill';
 import { Section } from '../components/Section';
 import { StatusPanel } from '../components/StatusPanel';
+
+type ReadingLike = {
+  wind_avg?: number | null;
+  wind_max?: number | null;
+  wind_direction?: number | null;
+  temperature?: number | null;
+  wave_height?: number | null;
+} | null;
+
+/** Pills for the active alert metric — wind rules keep avg/gust; temp/wave do not. */
+function metricReadingPills(
+  metric: MetricKey,
+  data: ReadingLike,
+  opts: {
+    emphasize: boolean;
+    windDirEnabled: boolean;
+    maxWindEnabled?: boolean;
+    maxWaveEnabled?: boolean;
+  },
+) {
+  const dir =
+    data?.wind_direction == null || !Number.isFinite(Number(data.wind_direction))
+      ? null
+      : Math.round(Number(data.wind_direction));
+
+  if (metric === 'temperature') {
+    return [
+      {
+        title: 'Temp',
+        value: data?.temperature,
+        unit: '°C',
+        icon: brandImages.temp,
+        emphasize: opts.emphasize,
+      },
+    ];
+  }
+
+  if (metric === 'wave_height') {
+    const pills = [
+      {
+        title: 'Wave',
+        value: data?.wave_height,
+        unit: 'm',
+        icon: brandImages.wave,
+        emphasize: opts.emphasize,
+      },
+      {
+        title: 'Dir',
+        value: dir,
+        unit: '°',
+        icon: brandImages.wind,
+        emphasize: opts.windDirEnabled,
+      },
+    ];
+    if (opts.maxWindEnabled) {
+      pills.push({
+        title: 'Avg',
+        value: data?.wind_avg,
+        unit: 'kt',
+        icon: brandImages.wind,
+        emphasize: false,
+      });
+    }
+    return pills;
+  }
+
+  const windPills = [
+    {
+      title: 'Avg',
+      value: data?.wind_avg,
+      unit: 'kt',
+      icon: brandImages.wind,
+      emphasize: opts.emphasize && metric === 'wind_avg',
+    },
+    {
+      title: 'Gust',
+      value: data?.wind_max,
+      unit: 'kt',
+      icon: brandImages.gust,
+      emphasize: opts.emphasize && metric === 'wind_max',
+    },
+    {
+      title: 'Dir',
+      value: dir,
+      unit: '°',
+      icon: brandImages.wind,
+      emphasize: opts.windDirEnabled,
+    },
+    {
+      title: 'Temp',
+      value: data?.temperature,
+      unit: '°C',
+      icon: brandImages.temp,
+      emphasize: false,
+    },
+  ];
+  if (opts.maxWaveEnabled || (data?.wave_height != null && Number.isFinite(Number(data.wave_height)))) {
+    windPills.push({
+      title: 'Wave',
+      value: data?.wave_height,
+      unit: 'm',
+      icon: brandImages.wave,
+      emphasize: !!opts.maxWaveEnabled,
+    });
+  }
+  return windPills;
+}
 
 type Props = {
   station: FollowedStation;
@@ -367,34 +474,21 @@ export function StationDetailScreen({
           }
         >
           <View style={styles.metricsRow}>
-            <MetricPill
-              title="Avg"
-              value={forecast?.wind_avg}
-              unit="kt"
-              icon={brandImages.wind}
-              emphasize={station.rule.metric === 'wind_avg'}
-            />
-            <MetricPill
-              title="Gust"
-              value={forecast?.wind_max}
-              unit="kt"
-              icon={brandImages.gust}
-              emphasize={station.rule.metric === 'wind_max'}
-            />
-            <MetricPill
-              title="Dir"
-              value={forecast?.wind_direction == null ? null : Math.round(forecast.wind_direction)}
-              unit="°"
-              icon={brandImages.wind}
-              emphasize={station.rule.windDirEnabled}
-            />
-            <MetricPill
-              title="Temp"
-              value={forecast?.temperature}
-              unit="°C"
-              icon={brandImages.temp}
-              emphasize={station.rule.metric === 'temperature'}
-            />
+            {metricReadingPills(station.rule.metric, forecast, {
+              emphasize: true,
+              windDirEnabled: !!station.rule.windDirEnabled,
+              maxWindEnabled: !!station.rule.maxWindEnabled,
+              maxWaveEnabled: !!station.rule.maxWaveEnabled,
+            }).map((pill) => (
+              <MetricPill
+                key={`fcst-${pill.title}`}
+                title={pill.title}
+                value={pill.value}
+                unit={pill.unit}
+                icon={pill.icon}
+                emphasize={pill.emphasize}
+              />
+            ))}
           </View>
         </Section>
       ) : null}
@@ -416,51 +510,28 @@ export function StationDetailScreen({
         }
       >
         <View style={styles.metricsRow}>
-          <MetricPill
-            title="Avg"
-            value={reading?.wind_avg}
-            unit="kt"
-            icon={brandImages.wind}
-            emphasize={!showForecast && station.rule.metric === 'wind_avg'}
-          />
-          <MetricPill
-            title="Gust"
-            value={reading?.wind_max}
-            unit="kt"
-            icon={brandImages.gust}
-            emphasize={!showForecast && station.rule.metric === 'wind_max'}
-          />
-          <MetricPill
-            title="Dir"
-            value={reading?.wind_direction == null ? null : Math.round(reading.wind_direction)}
-            unit="°"
-            icon={brandImages.wind}
-            emphasize={!showForecast && station.rule.windDirEnabled}
-          />
-          <MetricPill
-            title="Temp"
-            value={reading?.temperature}
-            unit="°C"
-            icon={brandImages.temp}
-            emphasize={!showForecast && station.rule.metric === 'temperature'}
-          />
+          {metricReadingPills(station.rule.metric, reading, {
+            emphasize: !showForecast,
+            windDirEnabled: !!station.rule.windDirEnabled,
+            maxWindEnabled: !!station.rule.maxWindEnabled,
+            maxWaveEnabled: !!station.rule.maxWaveEnabled,
+          }).map((pill) => (
+            <MetricPill
+              key={`live-${pill.title}`}
+              title={pill.title}
+              value={pill.value}
+              unit={pill.unit}
+              icon={pill.icon}
+              emphasize={pill.emphasize}
+            />
+          ))}
         </View>
         <StatusPanel
           result={result}
           alertState={alertState}
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
-          ruleHint={`Target ${station.rule.comparison === 'gte' ? '≥' : '≤'}${
-            Number.isInteger(station.rule.threshold)
-              ? station.rule.threshold
-              : station.rule.threshold.toFixed(1)
-          } ${
-            station.rule.metric === 'temperature'
-              ? '°C'
-              : station.rule.metric === 'wave_height'
-                ? 'm'
-                : 'kt'
-          }`}
+          ruleHint={formatAlertTrigger(station.rule, 'short')}
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>

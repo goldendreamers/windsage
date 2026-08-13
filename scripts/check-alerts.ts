@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, createFollowedStation, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -116,5 +116,47 @@ const tempOk = evaluateAlert(
   Date.now(),
 );
 assert.equal(tempOk.result.conditionMet, true);
+
+assert.equal(formatAlertTrigger(station.rule, 'short'), '15 kt');
+assert.equal(formatAlertTrigger(station.rule, 'full'), '≥15 kt for 20 min');
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'), '20 kt');
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wave_height'), 'short'), '1 m');
+assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'temperature'), 'short'), '22 °C');
+assert.match(
+  formatAlertTrigger(
+    { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },
+    'full',
+  ),
+  /dir 270–20°/,
+);
+
+const sampleReading = { wind_avg: 10.2, wind_max: 14.5, temperature: 21.4, wave_height: 1.35 };
+const windCols = homeLiveStatColumns('wind_avg', sampleReading);
+assert.deepEqual(
+  windCols.map((c) => c.label),
+  ['Avg', 'Gust'],
+);
+assert.equal(windCols[0].value, '10.2');
+assert.equal(windCols[1].value, '14.5');
+
+const tempCols = homeLiveStatColumns('temperature', sampleReading);
+assert.deepEqual(
+  tempCols.map((c) => `${c.label}:${c.value}:${c.unit}`),
+  ['Temp:21.4:°C'],
+);
+assert.equal(
+  tempCols.some((c) => /avg|gust/i.test(c.label)),
+  false,
+);
+
+const waveCols = homeLiveStatColumns('wave_height', sampleReading);
+assert.deepEqual(
+  waveCols.map((c) => `${c.label}:${c.value}:${c.unit}`),
+  ['Wave:1.4:m'],
+);
+assert.equal(
+  waveCols.some((c) => /avg|gust/i.test(c.label)),
+  false,
+);
 
 console.log('check-alerts: ok');

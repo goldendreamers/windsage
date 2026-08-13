@@ -1,8 +1,14 @@
 import { Image } from 'expo-image';
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
-import { displayName, stationNick } from '../shared/defaults';
+import {
+  displayName,
+  formatThresholdNumber,
+  homeLiveStatColumns,
+  metricUnitShort,
+  stationNick,
+} from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
@@ -30,8 +36,6 @@ export const StationCard = memo(function StationCard({
   const displayReading =
     forecastOnly && result?.forecast ? result.forecast : reading;
   const showingForecast = forecastOnly && !!result?.forecast;
-  const wind = displayReading?.wind_avg;
-  const gust = displayReading?.wind_max;
   const holding = !!result?.conditionMet;
   const errored = !!alertState?.lastError && !reading && !result?.forecast;
   const prev = alertState?.lastValue;
@@ -52,6 +56,8 @@ export const StationCard = memo(function StationCard({
           ? '↑'
           : '↓'
       : '';
+
+  const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, showingForecast);
 
   return (
     <Pressable
@@ -96,38 +102,28 @@ export const StationCard = memo(function StationCard({
       </View>
 
       <View style={styles.stats}>
-        <View style={styles.stat}>
-          <Text style={styles.statLabel}>{showingForecast ? 'Fcst avg' : 'Avg'}</Text>
-          <Text style={styles.statValue}>{wind == null ? '—' : wind.toFixed(1)}</Text>
-          <Text style={styles.statUnit}>kt</Text>
-        </View>
+        {liveCols.map((col, index) => (
+          <Fragment key={`${col.label}-${index}`}>
+            {index > 0 ? <View style={styles.divider} /> : null}
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>{col.label}</Text>
+              <Text style={styles.statValue}>{col.value}</Text>
+              <Text style={styles.statUnit}>{col.unit}</Text>
+            </View>
+          </Fragment>
+        ))}
         <View style={styles.divider} />
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>{showingForecast ? 'Fcst gust' : 'Gust'}</Text>
-          <Text style={styles.statValue}>{gust == null ? '—' : gust.toFixed(1)}</Text>
-          <Text style={styles.statUnit}>kt</Text>
-        </View>
-        <View style={styles.divider} />
-        <View style={[styles.stat, styles.statWide]}>
           <Text style={styles.statLabel}>Alert</Text>
           <Text
             style={[
-              styles.statusText,
-              holding ? styles.statusHold : errored ? styles.statusError : styles.statusIdle,
+              styles.statValue,
+              holding ? styles.statusHold : errored ? styles.statusError : null,
             ]}
-            numberOfLines={2}
           >
-            {errored
-              ? 'Check failed'
-              : result?.message ??
-                `${station.rule.comparison === 'gte' ? '≥' : '≤'}${station.rule.threshold} ${
-                  station.rule.metric === 'temperature'
-                    ? '°C'
-                    : station.rule.metric === 'wave_height'
-                      ? 'm'
-                      : 'kt'
-                }`}
+            {errored ? '—' : formatThresholdNumber(station.rule.threshold)}
           </Text>
+          <Text style={styles.statUnit}>{metricUnitShort(station.rule.metric)}</Text>
         </View>
       </View>
     </Pressable>
@@ -207,11 +203,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
-  statWide: {
-    flex: 1.6,
-    alignItems: 'flex-start',
-    paddingHorizontal: 6,
-  },
   divider: {
     width: 1,
     backgroundColor: colors.line,
@@ -230,15 +221,6 @@ const styles = StyleSheet.create({
   statUnit: {
     color: colors.muted,
     fontSize: 11,
-  },
-  statusText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  statusIdle: {
-    color: colors.muted,
   },
   statusHold: {
     color: colors.accent,
