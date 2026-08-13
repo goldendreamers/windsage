@@ -106,6 +106,13 @@ export function AddStationModal({
 
   const meta = PROVIDER_META[provider];
   const providerReady = sourceReady ? sourceReady[provider] !== false : !meta.needsToken;
+  const catalogPending =
+    !!pendingCatalog &&
+    pendingCatalog.stationId.trim() === stationId.trim() &&
+    normalizeProvider(pendingCatalog.provider) === provider;
+  const catalogNeedsNickname = catalogPending && !nickname.trim();
+  const addDisabled =
+    busy || catalogNeedsNickname || (provider === 'location' && !locationPick);
 
   const existingSuggestions = useMemo(
     () =>
@@ -223,7 +230,13 @@ export function AddStationModal({
         });
         reset();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not resolve location');
+        const raw = e instanceof Error ? e.message : '';
+        const lower = raw.toLowerCase();
+        if (lower.includes('failed to fetch') || lower.includes('network')) {
+          setError('Couldn’t reach cloud to resolve that pin. Try again in a moment.');
+        } else {
+          setError(raw || 'Could not resolve location');
+        }
       } finally {
         setBusy(false);
       }
@@ -423,12 +436,17 @@ export function AddStationModal({
             </>
           ) : null}
 
-          <Text style={[styles.label, styles.spaced]}>Nickname</Text>
+          <Text style={[styles.label, styles.spaced]}>
+            {catalogPending ? 'Nickname (required)' : 'Nickname'}
+          </Text>
           <TextInput
             ref={nicknameInputRef}
             style={styles.input}
             value={nickname}
-            onChangeText={setNickname}
+            onChangeText={(text) => {
+              setNickname(text);
+              if (error && text.trim()) setError(null);
+            }}
             placeholder={
               pendingCatalog
                 ? `Nickname for ${catalogLabel(pendingCatalog)}`
@@ -518,20 +536,25 @@ export function AddStationModal({
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}
           {warning ? <Text style={styles.warning}>{warning}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          {catalogNeedsNickname && !error ? (
+            <Text style={styles.linkHint}>Nickname required before Add to home</Text>
+          ) : null}
 
           <View style={styles.actions}>
             <Pressable style={styles.secondary} onPress={close} disabled={busy}>
               <Text style={styles.secondaryText}>Cancel</Text>
             </Pressable>
             <Pressable
-              style={[styles.primary, busy && styles.primaryDisabled]}
+              style={[styles.primary, addDisabled && styles.primaryDisabled]}
               onPress={() => void submit()}
-              disabled={busy}
+              disabled={addDisabled}
             >
               {busy ? (
                 <ActivityIndicator color="#042018" />
               ) : (
-                <Text style={styles.primaryText}>Add to home</Text>
+                <Text style={styles.primaryText}>
+                  {catalogNeedsNickname ? 'Nickname required' : 'Add to home'}
+                </Text>
               )}
             </Pressable>
           </View>

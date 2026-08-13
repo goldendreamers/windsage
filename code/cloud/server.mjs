@@ -15,6 +15,7 @@ import {
   fetchProviderHistory,
   fixSpotStations,
   isForecastOnlySpot,
+  needsAlertHistory,
   providerOf,
   providerStatus,
   resolveFollowInput,
@@ -65,6 +66,7 @@ import {
   sendWebPushMany,
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
+import { clientIp, takeToken } from './lib/rateLimit.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -72,6 +74,32 @@ const PORT = Number(process.env.WINDSAGE_PORT || 8787);
 const DATA_DIR = process.env.WINDSAGE_DATA || path.join(__dirname, 'data');
 const WEB_DIR = process.env.WINDSAGE_WEB || path.join(__dirname, 'web');
 const DEFAULT_POLL_MIN = 10;
+/** Reuse provider "current" across bags/checks within this window (shared sensors). */
+const READING_CACHE_TTL_MS = 90_000;
+/** Spot model forecast changes slowly — reuse prior snap / skip provider hit when fresh. */
+const FORECAST_REUSE_TTL_MS = 300_000;
+/** key → { at, reading } — process-wide; errors are never stored here. */
+const globalReadingCache = new Map();
+
+function getGlobalReading(key) {
+  const hit = globalReadingCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > READING_CACHE_TTL_MS) {
+    globalReadingCache.delete(key);
+    return null;
+  }
+  return hit.reading;
+}
+
+function setGlobalReading(key, reading) {
+  if (!reading || reading.error) return;
+  globalReadingCache.set(key, { at: Date.now(), reading });
+  if (globalReadingCache.size <= 256) return;
+  const now = Date.now();
+  for (const [k, v] of globalReadingCache) {
+    if (now - v.at > READING_CACHE_TTL_MS) globalReadingCache.delete(k);
+  }
+}
 
 const DEFAULT_ALERT = {
   conditionSinceMs: null,
@@ -110,15 +138,34 @@ function cors(res) {
   );
 }
 
-function json(res, status, body) {
+function json(res, status, body, headers = {}) {
   cors(res);
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(payload),
     'Cache-Control': 'no-store',
+    ...headers,
   });
   res.end(payload);
+}
+
+/** Bound-concurrency map (simple p-limit) — one slow provider must not stall the whole bag. */
+async function mapPool(items, concurrency, fn) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return [];
+  const limit = Math.max(1, Math.min(concurrency, list.length));
+  const out = new Array(list.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= list.length) return;
+      out[i] = await fn(list[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return out;
 }
 
 function redirect(res, location) {
@@ -135,11 +182,10 @@ async function readBody(req) {
 }
 
 function displayName(station) {
-  const nick = (station.nickname || '').trim();
+  const nick = String(station?.nickname ?? '').trim();
   if (nick) return nick;
-  return station.kind === 'spot'
-    ? `Spot ${station.stationId}`
-    : `Station ${station.stationId}`;
+  const sid = String(station?.stationId ?? '').trim() || '?';
+  return station?.kind === 'spot' ? `Spot ${sid}` : `Station ${sid}`;
 }
 
 function collectPushTokens(bag) {
@@ -188,14 +234,63 @@ function sensorCacheKey(station) {
   return cacheKey(providerOf(station), sensorPollId(station));
 }
 
-async function attachSpotForecast(station, result, forecastCache) {
+/**
+ * Apply a stations PUT safely.
+ * - Missing/non-array `stations` → leave bag unchanged (token/poll-only updates).
+ * - Explicit `[]` while bag non-empty → keep existing unless `clearStations: true`
+ *   (blocks boot-race / empty-local wipes; unfollow-all must opt in).
+ */
+async function resolveStationsPut(bag, body) {
+  const existing = Array.isArray(bag.stations) ? bag.stations : [];
+  if (!Array.isArray(body?.stations)) {
+    return { stations: existing, kept: true, annotatedKinds: 0 };
+  }
+  const incoming = body.stations;
+  if (incoming.length === 0 && existing.length > 0 && body.clearStations !== true) {
+    console.warn(
+      `[stations-put] refused empty wipe (kept ${existing.length} follows)`,
+    );
+    return { stations: existing, kept: true, annotatedKinds: 0 };
+  }
+  const fixed = await fixSpotStations(incoming);
+  const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
+  const stations = Array.isArray(nextStations) ? nextStations : existing;
+  return {
+    stations,
+    kept: false,
+    annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
+  };
+}
+
+/**
+ * Attach spot model forecast only when the follow is forecast-only AND we lack a
+ * fresh prior (bag snap or in-poll cache). Avoids duplicate Windguru model hits.
+ */
+async function attachSpotForecast(station, result, forecastCache, priorSnap) {
   if (!isForecastOnlySpot(station)) {
     return { ...result, forecast: null, forecastModel: null };
   }
-  const sid = String(station.stationId).trim();
+  const sid = String(station?.stationId ?? '').trim();
+  if (!sid) {
+    return { ...result, forecast: null, forecastModel: null };
+  }
   const key = `wg:${sid}`;
   if (forecastCache.has(key)) {
     return { ...result, ...forecastCache.get(key) };
+  }
+  const priorResult = priorSnap?.result;
+  const priorAt = priorSnap?.updatedAt;
+  if (
+    priorResult?.forecast &&
+    typeof priorAt === 'number' &&
+    Date.now() - priorAt < FORECAST_REUSE_TTL_MS
+  ) {
+    const hit = {
+      forecast: priorResult.forecast,
+      forecastModel: priorResult.forecastModel ?? null,
+    };
+    forecastCache.set(key, hit);
+    return { ...result, ...hit };
   }
   try {
     const fc = await fetchProviderForecast(station);
@@ -203,6 +298,15 @@ async function attachSpotForecast(station, result, forecastCache) {
     forecastCache.set(key, hit);
     return { ...result, ...hit };
   } catch {
+    // Prefer stale prior over wiping UI when the model endpoint blips.
+    if (priorResult?.forecast) {
+      const hit = {
+        forecast: priorResult.forecast,
+        forecastModel: priorResult.forecastModel ?? null,
+      };
+      forecastCache.set(key, hit);
+      return { ...result, ...hit };
+    }
     const hit = { forecast: null, forecastModel: null };
     forecastCache.set(key, hit);
     return { ...result, ...hit };
@@ -227,8 +331,15 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
     if (k && !stationByKey.has(k)) stationByKey.set(k, s);
   }
 
-  for (const key of uniqueKeys) {
+  // Cap parallel provider fetches so one slow source does not block the whole poll.
+  // Process-wide TTL cache avoids re-fetching the same sensor for every user bag.
+  await mapPool(uniqueKeys, 4, async (key) => {
     const sample = stationByKey.get(key);
+    const shared = getGlobalReading(key);
+    if (shared) {
+      readingCache.set(key, shared);
+      return;
+    }
     try {
       const raw = await fetchProviderCurrent(sample, { trustMap: store.stationTrust });
       if (raw && raw._locationBlend) {
@@ -239,6 +350,7 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
           ...reading
         } = raw;
         readingCache.set(key, reading);
+        setGlobalReading(key, reading);
         // Persist blend members + trust back onto matching follows in this bag.
         for (const s of stations) {
           if (sensorCacheKey(s) !== key) continue;
@@ -254,93 +366,142 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
         }
       } else {
         readingCache.set(key, raw);
+        setGlobalReading(key, raw);
       }
     } catch (error) {
       readingCache.set(key, { error: error.message || 'fetch failed' });
     }
-  }
+  });
 
   const results = [];
 
   for (const station of stations) {
-    const sid = station.stationId.trim();
-    const pollId = sensorPollId(station) || sid;
-    const key = sensorCacheKey(station);
-    const prev = { ...DEFAULT_ALERT, ...(bag.alertStates[station.id] || {}) };
-    const cached = readingCache.get(key);
+    const sid = String(station?.stationId ?? '').trim();
+    if (!sid) continue;
+    // Soft-fail one station: never abort the whole bag on a single bad follow.
+    try {
+      const key = sensorCacheKey(station);
+      const prev = { ...DEFAULT_ALERT, ...(bag.alertStates[station.id] || {}) };
+      const cached = readingCache.get(key);
+      const priorSnap = bag.snapshots[station.id];
 
-    if (!cached || cached.error) {
-      const message = cached?.error || 'No reading';
+      if (!cached || cached.error) {
+        const message = cached?.error || 'No reading';
+        const nextState = {
+          ...prev,
+          lastCheckMs: Date.now(),
+          lastError: message,
+          lastStationId: sid,
+        };
+        const baseResult = {
+          reading: null,
+          metricValue: null,
+          conditionMet: false,
+          sustainedMs: 0,
+          shouldNotify: false,
+          message,
+          forecast: null,
+          forecastModel: null,
+        };
+        const result = await attachSpotForecast(station, baseResult, forecastCache, priorSnap);
+        bag.alertStates[station.id] = nextState;
+        bag.snapshots[station.id] = {
+          reading: null,
+          result,
+          alertState: nextState,
+          updatedAt: Date.now(),
+        };
+        results.push({ station, result, nextState });
+        continue;
+      }
+
+      // Skip history when rule fails or alert clock is already hot — history only
+      // backfills sustained duration the first moment the condition becomes true.
+      const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
+      const histKey = `${key}:${station.rule.metric}:${hours}`;
+      const emptyHistory = { unixtime: [], values: [] };
+      if (!historyCache.has(histKey)) {
+        if (needsAlertHistory(cached, station, prev)) {
+          try {
+            historyCache.set(
+              histKey,
+              await fetchProviderHistory(station, station.rule.metric, hours, 10),
+            );
+          } catch {
+            historyCache.set(histKey, emptyHistory);
+          }
+        } else {
+          historyCache.set(histKey, emptyHistory);
+        }
+      }
+
+      const history = historyCache.get(histKey);
+      const evaluated = evaluateAlert(cached, history, station, prev);
+      const result = await attachSpotForecast(
+        station,
+        evaluated.result,
+        forecastCache,
+        priorSnap,
+      );
+      const { nextState } = evaluated;
+      bag.alertStates[station.id] = nextState;
+      bag.snapshots[station.id] = {
+        reading: cached,
+        result,
+        alertState: nextState,
+        updatedAt: Date.now(),
+      };
+      results.push({ station, result, nextState });
+
+      if (notify && result.shouldNotify && station.enabled !== false) {
+        const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
+        if (!delivered) {
+          const state = bag.alertStates[station.id] || nextState;
+          state.notifiedForRun = false;
+          bag.alertStates[station.id] = state;
+          if (bag.snapshots?.[station.id]) {
+            bag.snapshots[station.id].alertState = state;
+            bag.snapshots[station.id].result = {
+              ...result,
+              shouldNotify: true,
+              message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+            };
+          }
+          console.warn(`[notify] no delivery for ${station.id} — will retry`);
+        }
+      }
+    } catch (error) {
+      const message = error?.message || String(error) || 'poll failed';
+      console.error(`[poll] station soft-fail ${station.id}:`, message);
+      const prev = { ...DEFAULT_ALERT, ...(bag.alertStates[station.id] || {}) };
       const nextState = {
         ...prev,
         lastCheckMs: Date.now(),
         lastError: message,
         lastStationId: sid,
       };
-      const baseResult = {
-        reading: null,
-        metricValue: null,
-        conditionMet: false,
-        sustainedMs: 0,
-        shouldNotify: false,
-        message,
-        forecast: null,
-        forecastModel: null,
-      };
-      const result = await attachSpotForecast(station, baseResult, forecastCache);
       bag.alertStates[station.id] = nextState;
+      const prior = bag.snapshots[station.id];
       bag.snapshots[station.id] = {
-        reading: null,
-        result,
+        reading: prior?.reading ?? null,
+        result: prior?.result ?? {
+          reading: null,
+          metricValue: null,
+          conditionMet: false,
+          sustainedMs: 0,
+          shouldNotify: false,
+          message,
+          forecast: null,
+          forecastModel: null,
+        },
         alertState: nextState,
         updatedAt: Date.now(),
       };
-      results.push({ station, result, nextState });
-      continue;
-    }
-
-    const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
-    const histKey = `${key}:${station.rule.metric}:${hours}`;
-    if (!historyCache.has(histKey)) {
-      try {
-        historyCache.set(
-          histKey,
-          await fetchProviderHistory(station, station.rule.metric, hours, 10),
-        );
-      } catch {
-        historyCache.set(histKey, { unixtime: [], values: [] });
-      }
-    }
-
-    const history = historyCache.get(histKey);
-    const evaluated = evaluateAlert(cached, history, station, prev);
-    const result = await attachSpotForecast(station, evaluated.result, forecastCache);
-    const { nextState } = evaluated;
-    bag.alertStates[station.id] = nextState;
-    bag.snapshots[station.id] = {
-      reading: cached,
-      result,
-      alertState: nextState,
-      updatedAt: Date.now(),
-    };
-    results.push({ station, result, nextState });
-
-    if (notify && result.shouldNotify && station.enabled !== false) {
-      const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
-      if (!delivered) {
-        const state = bag.alertStates[station.id] || nextState;
-        state.notifiedForRun = false;
-        bag.alertStates[station.id] = state;
-        if (bag.snapshots?.[station.id]) {
-          bag.snapshots[station.id].alertState = state;
-          bag.snapshots[station.id].result = {
-            ...result,
-            shouldNotify: true,
-            message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
-          };
-        }
-        console.warn(`[notify] no delivery for ${station.id} — will retry`);
-      }
+      results.push({
+        station,
+        result: bag.snapshots[station.id].result,
+        nextState,
+      });
     }
   }
 
@@ -359,8 +520,10 @@ async function runDeviceChecks(store, deviceId, opts) {
 }
 
 async function pollAll() {
+  const t0 = Date.now();
   const store = await loadStore(DATA_DIR);
   let touched = false;
+  let bags = 0;
 
   for (const user of Object.values(store.users)) {
     const active = (user.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
@@ -380,6 +543,7 @@ async function pollAll() {
     try {
       await runBagChecks(store, user, { notify: true });
       touched = true;
+      bags += 1;
     } catch (error) {
       console.error('[poll] user', user.id, error.message || error);
     }
@@ -393,13 +557,16 @@ async function pollAll() {
     try {
       await runBagChecks(store, device, { notify: true });
       touched = true;
+      bags += 1;
     } catch (error) {
       console.error('[poll]', deviceId, error.message || error);
     }
   }
 
   if (touched) await saveStore(DATA_DIR, store);
-  console.log(`[poll] done ${new Date().toISOString()}`);
+  console.log(
+    `[poll] done durationMs=${Date.now() - t0} bags=${bags} readingCache=${globalReadingCache.size} ${new Date().toISOString()}`,
+  );
 }
 
 function getPollMs(store) {
@@ -537,6 +704,12 @@ async function handleAuth(req, res, pathname, url) {
   }
 
   if (req.method === 'POST' && pathname === '/v1/auth/register') {
+    const ip = clientIp(req);
+    const limited = takeToken(`register:${ip}`, { limit: 8, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many sign-ups from this network. Try again later.' });
+    }
     const body = await readBody(req);
     const u = validateUsername(body.username);
     const p = validatePassword(body.password);
@@ -570,6 +743,12 @@ async function handleAuth(req, res, pathname, url) {
   }
 
   if (req.method === 'POST' && pathname === '/v1/auth/login') {
+    const ip = clientIp(req);
+    const limited = takeToken(`login:${ip}`, { limit: 30, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many login attempts. Try again later.' });
+    }
     const body = await readBody(req);
     const store = await loadStore(DATA_DIR);
     const user = findUserByUsername(store, body.username);
@@ -696,11 +875,8 @@ async function handleMe(req, res, pathname) {
 
   if (req.method === 'PUT' && pathname === '/v1/me/stations') {
     const body = await readBody(req);
-    const incoming = Array.isArray(body.stations) ? body.stations : [];
-    const fixed = await fixSpotStations(incoming);
-    const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
-    // Guard: never replace a non-empty bag with undefined/null from a bad fix result.
-    user.stations = Array.isArray(nextStations) ? nextStations : user.stations || [];
+    const applied = await resolveStationsPut(user, body);
+    user.stations = applied.stations;
     upsertSharedStations(store, user.stations);
     if (body.pollIntervalMinutes) {
       user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
@@ -719,8 +895,9 @@ async function handleMe(req, res, pathname) {
       ok: true,
       snapshots: user.snapshots || {},
       stations: user.stations || [],
-      annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
+      annotatedKinds: applied.annotatedKinds,
       rewrittenSpots: 0,
+      keptStations: applied.kept || undefined,
     });
   }
 
@@ -745,6 +922,39 @@ async function handleMe(req, res, pathname) {
       snapshots: user.snapshots || {},
       notified: results.filter((r) => r.result.shouldNotify).length,
     });
+  }
+
+  if (req.method === 'POST' && pathname === '/v1/me/alert-feedback') {
+    const body = await readBody(req);
+    const followId = typeof body.followId === 'string' ? body.followId.trim() : '';
+    const rating = body.rating === 'good' || body.rating === 'meh' ? body.rating : null;
+    if (!followId || !rating) {
+      return json(res, 400, { error: 'followId and rating (good|meh) required' });
+    }
+    const station = (user.stations || []).find((s) => s.id === followId);
+    if (!station) return json(res, 404, { error: 'Follow not found' });
+    if (!Array.isArray(user.alertFeedback)) user.alertFeedback = [];
+    user.alertFeedback.push({
+      followId,
+      stationId: station.stationId,
+      provider: station.provider || 'windguru',
+      rating,
+      at: Date.now(),
+    });
+    if (user.alertFeedback.length > 80) {
+      user.alertFeedback = user.alertFeedback.slice(-80);
+    }
+    // Soft trust nudge for location blends / shared catalog.
+    const tk = `${String(station.provider || 'windguru').toLowerCase()}:${String(station.stationId ?? '').trim()}`;
+    if (!store.stationTrust[tk]) store.stationTrust[tk] = {};
+    const trust = store.stationTrust[tk];
+    const delta = rating === 'good' ? 0.05 : -0.05;
+    const prev = Number(trust.alertScore);
+    trust.alertScore = Math.max(0, Math.min(1, (Number.isFinite(prev) ? prev : 0.5) + delta));
+    trust.updatedAt = Date.now();
+    user.updatedAt = Date.now();
+    await saveStore(DATA_DIR, store);
+    return json(res, 200, { ok: true, rating });
   }
 
   if (req.method === 'POST' && pathname === '/v1/me/reset-alert') {
@@ -818,10 +1028,8 @@ async function handleDevices(req, res, pathname) {
 
   if (req.method === 'PUT' && rest === '/stations') {
     const body = await readBody(req);
-    const incoming = Array.isArray(body.stations) ? body.stations : [];
-    const fixed = await fixSpotStations(incoming);
-    const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
-    bag.stations = Array.isArray(nextStations) ? nextStations : bag.stations || [];
+    const applied = await resolveStationsPut(bag, body);
+    bag.stations = applied.stations;
     upsertSharedStations(store, bag.stations);
     if (body.pollIntervalMinutes) {
       bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
@@ -845,8 +1053,9 @@ async function handleDevices(req, res, pathname) {
       ok: true,
       snapshots: bag.snapshots || {},
       stations: bag.stations || [],
-      annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
+      annotatedKinds: applied.annotatedKinds,
       rewrittenSpots: 0,
+      keptStations: applied.kept || undefined,
     });
   }
 
@@ -931,7 +1140,7 @@ async function handleDevices(req, res, pathname) {
 async function handleApi(req, res, pathname, url) {
   if (req.method === 'GET' && pathname === '/health') {
     const store = await loadStore(DATA_DIR);
-    return json(res, 200, {
+    const body = {
       ok: true,
       service: 'windsage-cloud',
       web: true,
@@ -941,7 +1150,22 @@ async function handleApi(req, res, pathname, url) {
       maps: mapsStatus(),
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
-      ts: Date.now(),
+      // Stable-ish second bucket for short CDN/browser revalidation (not live ts).
+      ts: Math.floor(Date.now() / 1000) * 1000,
+    };
+    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}"`;
+    const inm = req.headers['if-none-match'];
+    if (inm && inm === etag) {
+      cors(res);
+      res.writeHead(304, {
+        ETag: etag,
+        'Cache-Control': 'public, max-age=5, stale-while-revalidate=15',
+      });
+      return res.end();
+    }
+    return json(res, 200, body, {
+      ETag: etag,
+      'Cache-Control': 'public, max-age=5, stale-while-revalidate=15',
     });
   }
 
@@ -959,6 +1183,12 @@ async function handleApi(req, res, pathname, url) {
 
   // Public: browsers cannot set Windguru Referer, so spot/station resolve must run server-side.
   if (req.method === 'POST' && pathname === '/v1/windguru/resolve') {
+    const ip = clientIp(req);
+    const limited = takeToken(`wg-resolve:${ip}`, { limit: 60, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many resolve requests. Try again later.' });
+    }
     const body = await readBody(req);
     const input = typeof body.input === 'string' ? body.input : '';
     try {
@@ -971,6 +1201,12 @@ async function handleApi(req, res, pathname, url) {
 
   // Public: resolve a follow target for any weather source.
   if (req.method === 'POST' && pathname === '/v1/stations/resolve') {
+    const ip = clientIp(req);
+    const limited = takeToken(`resolve:${ip}`, { limit: 60, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many resolve requests. Try again later.' });
+    }
     const body = await readBody(req);
     const input = typeof body.input === 'string' ? body.input : '';
     const provider =
@@ -1009,6 +1245,12 @@ async function handleApi(req, res, pathname, url) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/geo/autocomplete') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-auto:${ip}`, { limit: 90, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many autocomplete requests. Try again later.' });
+    }
     const q = String(url.searchParams.get('q') || '').trim();
     try {
       const suggestions = await autocompletePlaces(q);
@@ -1019,6 +1261,12 @@ async function handleApi(req, res, pathname, url) {
   }
 
   if (req.method === 'POST' && pathname === '/v1/geo/geocode') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-code:${ip}`, { limit: 60, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many geocode requests. Try again later.' });
+    }
     const body = await readBody(req);
     try {
       if (body.placeId) {
@@ -1119,9 +1367,12 @@ server.listen(PORT, HOST, async () => {
     .catch((e) => console.error('[windsage-cloud] webPush init failed', e));
   try {
     const store = await loadStore(DATA_DIR);
-    await saveStore(DATA_DIR, store); // persist migrate (sharedStations rebuild)
+    // Persist migrate / bak recovery, but never force-write an empty bag.
+    if (Object.keys(store.users || {}).length > 0 || (store.sharedStations || []).length > 0) {
+      await saveStore(DATA_DIR, store);
+    }
     console.log(
-      `[windsage-cloud] sharedStations=${(store.sharedStations || []).length}`,
+      `[windsage-cloud] users=${Object.keys(store.users || {}).length} sharedStations=${(store.sharedStations || []).length}`,
     );
   } catch (e) {
     console.error('[windsage-cloud] store migrate failed', e);

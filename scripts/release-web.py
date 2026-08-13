@@ -166,6 +166,9 @@ def deploy(remote: str = "wald-mc", remote_web: str = "/data/windsage/web") -> N
             "oauth.env",
             "--exclude",
             "*.env",
+            # Host-only ops scripts (backups etc.) live under /data/windsage/scripts
+            "--exclude",
+            "scripts",
             str(ROOT / "code" / "cloud") + "/",
             f"{remote}:/data/windsage/",
         ],

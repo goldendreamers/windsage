@@ -107,10 +107,10 @@ export function createFollowedStation(
   return {
     id,
     provider: normalizeProvider(partial?.provider),
-    stationId: stationId.trim(),
+    stationId: String(stationId ?? '').trim(),
     kind,
     nickname: String(nickname ?? '').trim(),
-    sourceName: partial?.sourceName?.trim() || null,
+    sourceName: String(partial?.sourceName ?? '').trim() || null,
     enabled: partial?.enabled !== false,
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
@@ -132,22 +132,21 @@ export function displayName(station: FollowedStation): string {
 
 /** Official source name for a follow (ignores user nickname). */
 export function windguruName(station: FollowedStation): string {
-  const source = (station.sourceName ?? '').trim();
+  const source = String(station.sourceName ?? '').trim();
   if (source) return source;
   const linked =
-    (station.linkedLiveStation?.spotname ?? '').trim() ||
-    (station.linkedLiveStation?.name ?? '').trim();
+    String(station.linkedLiveStation?.spotname ?? '').trim() ||
+    String(station.linkedLiveStation?.name ?? '').trim();
   if (linked) return linked;
+  const sid = String(station.stationId ?? '').trim() || '?';
   const provider = stationProvider(station);
-  if (provider === 'openmeteo') return `Open-Meteo ${station.stationId}`;
-  if (provider === 'location') return station.sourceName?.trim() || `Map pin ${station.stationId}`;
-  if (provider === 'ndbc') return `NDBC ${station.stationId}`;
-  if (provider === 'synoptic') return `Synoptic ${station.stationId}`;
-  if (provider === 'tempest') return `Tempest ${station.stationId}`;
-  if (provider === 'windfinder') return `Windfinder ${station.stationId}`;
-  return station.kind === 'spot'
-    ? `Spot ${station.stationId}`
-    : `Station ${station.stationId}`;
+  if (provider === 'openmeteo') return `Open-Meteo ${sid}`;
+  if (provider === 'location') return String(station.sourceName ?? '').trim() || `Map pin ${sid}`;
+  if (provider === 'ndbc') return `NDBC ${sid}`;
+  if (provider === 'synoptic') return `Synoptic ${sid}`;
+  if (provider === 'tempest') return `Tempest ${sid}`;
+  if (provider === 'windfinder') return `Windfinder ${sid}`;
+  return station.kind === 'spot' ? `Spot ${sid}` : `Station ${sid}`;
 }
 
 /** Match a follow by provider + external id (`stationId`).
@@ -189,8 +188,8 @@ export function suggestExistingFollows(
   const out: FollowedStation[] = [];
   for (const station of stations) {
     const label = windguruName(station).toLowerCase();
-    const sid = station.stationId.trim().toLowerCase();
-    const live = (station.liveStationId ?? '').trim().toLowerCase();
+    const sid = String(station.stationId ?? '').trim().toLowerCase();
+    const live = String(station.liveStationId ?? '').trim().toLowerCase();
     const hit =
       label.includes(q) ||
       sid.includes(q) ||
@@ -217,7 +216,7 @@ export type CatalogStation = Pick<
 >;
 
 function catalogKey(provider: StationProvider | string | null | undefined, stationId: string) {
-  return `${normalizeProvider(provider)}:${stationId.trim()}`;
+  return `${normalizeProvider(provider)}:${String(stationId ?? '').trim()}`;
 }
 
 /** Catalog suggestions excluding IDs already in the user's follow list. */
@@ -238,7 +237,7 @@ export function suggestCatalogStations(
   const wantProvider = providerFilter ? normalizeProvider(providerFilter) : null;
   const out: CatalogStation[] = [];
   for (const entry of catalog) {
-    const sid = entry.stationId.trim();
+    const sid = String(entry.stationId ?? '').trim();
     const provider = normalizeProvider(entry.provider);
     if (!sid || taken.has(catalogKey(provider, sid))) continue;
     if (wantProvider && provider !== wantProvider) continue;
@@ -256,7 +255,7 @@ export function suggestCatalogStations(
       liveLinkWarning: entry.liveLinkWarning ?? null,
     } satisfies FollowedStation;
     const label = windguruName(asFollow).toLowerCase();
-    const live = (entry.liveStationId ?? '').trim().toLowerCase();
+    const live = String(entry.liveStationId ?? '').trim().toLowerCase();
     const hit =
       label.includes(q) ||
       sid.toLowerCase().includes(q) ||

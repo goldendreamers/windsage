@@ -29,6 +29,33 @@ type Props = {
   initial?: LocationPick | null;
 };
 
+function friendlyGeoError(raw: unknown, fallback: string): string {
+  const msg =
+    raw instanceof Error
+      ? raw.message
+      : typeof raw === 'string'
+        ? raw
+        : fallback;
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('network') ||
+    lower.includes('load failed')
+  ) {
+    return 'Couldn’t reach the map server. Check your connection and try again.';
+  }
+  if (lower.includes('could not load map') || lower.includes('map library')) {
+    return 'Map couldn’t load. You can still search an address above.';
+  }
+  if (lower.includes('no coordinates')) {
+    return 'Couldn’t find that place. Try a fuller address or tap the map.';
+  }
+  if (lower.includes('geocode') || lower.includes('search failed')) {
+    return 'Place search didn’t work. Try a different address or tap the map.';
+  }
+  return msg.trim() || fallback;
+}
+
 /**
  * Address search + map pin.
  * Uses Google Geocoding/Places when the server has a key; otherwise Open-Meteo.
@@ -101,7 +128,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
         leafletRef.current = { map, marker, L };
         setTimeout(() => map.invalidateSize(), 80);
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Map failed to load');
+        setError(friendlyGeoError(e, 'Map couldn’t load. You can still search an address above.'));
       }
     })();
     return () => {
@@ -140,7 +167,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
           setSuggestions(data.suggestions || []);
         } catch (e) {
           setSuggestions([]);
-          setError(e instanceof Error ? e.message : 'Search failed');
+          setError(friendlyGeoError(e, 'Place search didn’t work. Try again in a moment.'));
         }
       })();
     }, 280);
@@ -193,7 +220,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
       setQuery(address);
       onPicked(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not resolve place');
+      setError(friendlyGeoError(e, 'Couldn’t place that address. Try another search or tap the map.'));
     } finally {
       setBusy(false);
     }
@@ -223,7 +250,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
       onPicked(next);
       setSuggestions([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Geocode failed');
+      setError(friendlyGeoError(e, 'Couldn’t find that place. Try a fuller address.'));
     } finally {
       setBusy(false);
     }

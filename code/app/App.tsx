@@ -25,12 +25,14 @@ import {
   registerWithCloud,
   requestCloudCheck,
   resetCloudAlert,
+  sendAlertFeedback,
   snapshotsToLive,
   syncStationsToCloud,
   type CloudAnnouncement,
 } from '../core/cloud';
 import { DEFAULT_SETTINGS, createFollowedStation, displayName, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
+import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
 import { initPwaInstallCapture } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
@@ -44,6 +46,15 @@ import type {
   FollowedStation,
   StationReading,
 } from '../shared/types';
+
+/** Ensure cloud/local stations always have provider + safe nickname before setSettings. */
+function withStationDefaults(stations: FollowedStation[] | null | undefined): FollowedStation[] {
+  return (stations || []).map((s) => ({
+    ...s,
+    provider: normalizeProvider(s?.provider || 'windguru'),
+    nickname: s?.nickname ?? '',
+  }));
+}
 
 async function hapticLight() {
   try {
@@ -145,7 +156,12 @@ export default function App() {
   }, [announcement]);
 
   const applySnapshots = useCallback((snapshots: Record<string, LiveEntry>) => {
-    setLive(snapshots);
+    setLive((prev) => {
+      const keys = Object.keys(snapshots);
+      // Keep prior readings if cloud returns an empty bag (avoids blank cards mid-refresh).
+      if (keys.length === 0) return prev;
+      return { ...prev, ...snapshots };
+    });
     const nextStates: AlertStateMap = {};
     for (const [id, entry] of Object.entries(snapshots)) {
       if (entry.alertState) nextStates[id] = entry.alertState;
@@ -160,31 +176,38 @@ export default function App() {
         const online = await pingCloud();
         if (!online) {
           setCloudStatus('offline');
-          if (source === 'manual') showToast('Cloud unreachable (Tailscale?)');
+          if (source === 'manual') showToast('Cloud unreachable — list kept as-is');
           return;
         }
         const sync = await syncStationsToCloud(settingsRef.current);
         applySnapshots(snapshotsToLive(sync.snapshots));
         if (sync.stations) {
-          const next = {
-            ...settingsRef.current,
-            stations: sync.stations,
-          };
-          setSettings(next);
-          await saveSettings(next);
+          const incoming = withStationDefaults(sync.stations);
+          const local = settingsRef.current.stations || [];
+          // Never blank a non-empty home list with an empty cloud reply.
+          if (incoming.length > 0 || local.length === 0) {
+            const next = {
+              ...settingsRef.current,
+              stations: incoming,
+            };
+            setSettings(next);
+            await saveSettings(next);
+          }
         }
-        const snap = await fetchCloudSnapshot();
+        const [snap] = await Promise.all([
+          fetchCloudSnapshot(),
+          loadCatalog().catch(() => undefined),
+          loadAnnouncement().catch(() => undefined),
+        ]);
         setLastPollAt(snap.lastPollAt);
         setCloudStatus(`cloud · ${formatCloudAge(snap.lastPollAt)}`);
-        void loadCatalog();
-        void loadAnnouncement();
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
         }
       } catch (error) {
         setCloudStatus('error');
-        showToast(error instanceof Error ? error.message : 'Cloud refresh failed');
+        showToast(error instanceof Error ? error.message : 'Cloud refresh failed — list kept');
       } finally {
         setRefreshing(false);
       }
@@ -192,25 +215,67 @@ export default function App() {
     [applySnapshots, loadAnnouncement, loadCatalog, showToast],
   );
 
-  const persistSettings = useCallback(
-    async (next: AppSettings) => {
-      setSettings(next);
-      await saveSettings(next);
-      try {
-        const sync = await syncStationsToCloud(next);
-        applySnapshots(snapshotsToLive(sync.snapshots));
-        if (sync.stations) {
-          const fixed = { ...next, stations: sync.stations };
+  // Coalesce rapid persistSettings → one cloud sync (trailing debounce).
+  const persistSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistSyncPending = useRef<{
+    next: AppSettings;
+    opts?: { clearStations?: boolean };
+    waiters: Array<{ resolve: () => void; reject: (e: unknown) => void }>;
+  } | null>(null);
+
+  const flushPersistSync = useCallback(async () => {
+    const pending = persistSyncPending.current;
+    persistSyncPending.current = null;
+    if (persistSyncTimer.current) {
+      clearTimeout(persistSyncTimer.current);
+      persistSyncTimer.current = null;
+    }
+    if (!pending) return;
+    try {
+      const sync = await syncStationsToCloud(pending.next, undefined, pending.opts);
+      applySnapshots(snapshotsToLive(sync.snapshots));
+      if (sync.stations) {
+        const incoming = withStationDefaults(sync.stations);
+        const local = pending.next.stations || [];
+        if (incoming.length > 0 || local.length === 0) {
+          const fixed = { ...pending.next, stations: incoming };
           setSettings(fixed);
           await saveSettings(fixed);
         }
-        setCloudStatus(`cloud · ${formatCloudAge(Date.now())}`);
-      } catch (error) {
-        setCloudStatus('sync failed');
-        showToast(error instanceof Error ? error.message : 'Cloud sync failed');
       }
+      setCloudStatus(`cloud · ${formatCloudAge(Date.now())}`);
+      for (const w of pending.waiters) w.resolve();
+    } catch (error) {
+      setCloudStatus('sync failed');
+      showToast(error instanceof Error ? error.message : 'Cloud sync failed');
+      for (const w of pending.waiters) w.reject(error);
+    }
+  }, [applySnapshots, showToast]);
+
+  const persistSettings = useCallback(
+    async (next: AppSettings, opts?: { clearStations?: boolean }) => {
+      setSettings(next);
+      await saveSettings(next);
+      return new Promise<void>((resolve, reject) => {
+        const prev = persistSyncPending.current;
+        if (persistSyncTimer.current) clearTimeout(persistSyncTimer.current);
+        persistSyncPending.current = {
+          next,
+          opts: {
+            ...prev?.opts,
+            ...opts,
+            // Once any waiter opts into clearStations, keep it for the flush.
+            clearStations: !!(prev?.opts?.clearStations || opts?.clearStations),
+          },
+          waiters: [...(prev?.waiters || []), { resolve, reject }],
+        };
+        const delay = opts?.clearStations ? 0 : 450;
+        persistSyncTimer.current = setTimeout(() => {
+          void flushPersistSync();
+        }, delay);
+      });
     },
-    [applySnapshots, showToast],
+    [flushPersistSync],
   );
 
   const applyAccountPayload = useCallback(
@@ -220,13 +285,13 @@ export default function App() {
       pollIntervalMinutes: number;
     }) => {
       setAccount(payload.user);
-      const cloudStations = payload.stations || [];
+      const cloudStations = withStationDefaults(payload.stations);
       const localStations = settingsRef.current.stations || [];
       const stations =
         cloudStations.length > 0
           ? cloudStations
           : localStations.length > 0
-            ? localStations
+            ? withStationDefaults(localStations)
             : [];
       const next: AppSettings = {
         stations,
@@ -384,11 +449,12 @@ export default function App() {
               const pulled = await pullMyStations().catch(() => null);
               if (pulled && !cancelled) {
                 // Never wipe a non-empty local follow list with an empty cloud bag.
-                const cloudStations = pulled.stations || [];
+                const cloudStations = withStationDefaults(pulled.stations);
                 const localStations = settingsRef.current.stations || [];
                 if (cloudStations.length > 0) {
-                  setSettings(pulled);
-                  await saveSettings(pulled);
+                  const merged = { ...pulled, stations: cloudStations };
+                  setSettings(merged);
+                  await saveSettings(merged);
                 } else if (localStations.length > 0) {
                   await persistSettings({
                     ...settingsRef.current,
@@ -398,8 +464,9 @@ export default function App() {
                     ),
                   });
                 } else {
-                  setSettings(pulled);
-                  await saveSettings(pulled);
+                  const merged = { ...pulled, stations: cloudStations };
+                  setSettings(merged);
+                  await saveSettings(merged);
                 }
               }
             }
@@ -498,7 +565,10 @@ export default function App() {
         ...settingsRef.current,
         stations: settingsRef.current.stations.filter((s) => s.id !== station.id),
       };
-      await persistSettings(payload);
+      await persistSettings(payload, {
+        // Only intentional unfollow-to-empty may clear the cloud bag.
+        clearStations: payload.stations.length === 0,
+      });
       setLive((prev) => {
         const next = { ...prev };
         delete next[station.id];
@@ -577,6 +647,10 @@ export default function App() {
             await hapticMedium();
             showToast('Alert memory cleared on cloud');
             void refreshFromCloud('auto');
+          }}
+          onAlertFeedback={async (rating) => {
+            const ok = await sendAlertFeedback(activeStation.id, rating);
+            showToast(ok ? `Thanks — alert marked ${rating}` : 'Sign in to save feedback');
           }}
           onUnfollow={() => void unfollow(activeStation)}
         />

@@ -196,19 +196,23 @@ export async function fetchLocationCurrent(station, trustMap = {}) {
   let members = Array.isArray(station.locationBlend?.members)
     ? station.locationBlend.members.map((m) => ({ ...m }))
     : [];
-  if (!members.length) {
-    members = await findNearbyStations(coords.lat, coords.lon, { radiusKm, maxStations });
-  }
 
-  // Refresh distances; keep user ratings
-  const ratingByKey = new Map(
-    members.map((m) => [trustKey(m.provider, m.stationId), m.rating]),
-  );
-  const fresh = await findNearbyStations(coords.lat, coords.lon, { radiusKm, maxStations });
-  members = fresh.map((m) => ({
-    ...m,
-    rating: ratingByKey.get(trustKey(m.provider, m.stationId)) ?? m.rating ?? null,
-  }));
+  const blendUpdatedAt = Number(station.locationBlend?.updatedAt) || 0;
+  const membersFresh =
+    members.length > 0 && blendUpdatedAt > 0 && Date.now() - blendUpdatedAt < 30 * 60 * 1000;
+
+  if (!membersFresh) {
+    // Full nearby re-search when members missing or cache older than 30 min.
+    const ratingByKey = new Map(
+      members.map((m) => [trustKey(m.provider, m.stationId), m.rating]),
+    );
+    const fresh = await findNearbyStations(coords.lat, coords.lon, { radiusKm, maxStations });
+    members = fresh.map((m) => ({
+      ...m,
+      rating: ratingByKey.get(trustKey(m.provider, m.stationId)) ?? m.rating ?? null,
+    }));
+  }
+  // else: reuse cached members; still fetch readings below.
 
   const readings = [];
   const weights = [];

@@ -71,27 +71,52 @@ function normalizeReading(raw) {
   };
 }
 
+const FETCH_TIMEOUT_MS = 12_000;
+
+/** Concurrent identical Windguru iapi calls share one upstream response. */
+const inflightWg = new Map();
+
 async function fetchJson(refererUrl, query) {
   const url = new URL(BASE);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
-  const response = await fetch(url, {
-    headers: {
-      Referer: refererUrl,
-      Accept: 'application/json',
-    },
-  });
-  let data = null;
+  const key = `${refererUrl}|${url.searchParams.toString()}`;
+  const pending = inflightWg.get(key);
+  if (pending) return pending;
+  const work = (async () => {
+    let response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          Referer: refererUrl,
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+    } catch (e) {
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        throw new Error('Windguru timed out — try again in a moment');
+      }
+      throw e;
+    }
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+    // Windguru returns HTTP 400 with JSON { return: "error", message: "Unknown station!" }
+    if (data?.return === 'error') {
+      throw new Error(data.message || data.error_details || 'Windguru API error');
+    }
+    if (!response.ok) throw new Error(`Windguru HTTP ${response.status}`);
+    return data;
+  })();
+  inflightWg.set(key, work);
   try {
-    data = await response.json();
-  } catch {
-    data = null;
+    return await work;
+  } finally {
+    inflightWg.delete(key);
   }
-  // Windguru returns HTTP 400 with JSON { return: "error", message: "Unknown station!" }
-  if (data?.return === 'error') {
-    throw new Error(data.message || data.error_details || 'Windguru API error');
-  }
-  if (!response.ok) throw new Error(`Windguru HTTP ${response.status}`);
-  return data;
 }
 
 export function metricValue(reading, metric) {
@@ -563,6 +588,37 @@ export function sustainedDurationMs(history, rule) {
   return Math.max(0, (points[0].ts - oldestOk) * 1000);
 }
 
+/** True when the current reading fully satisfies the station alert rule. */
+export function alertConditionMet(reading, station) {
+  if (!reading || reading.error) return false;
+  const metric = station.rule?.metric;
+  if (!metric || !station.rule) return false;
+  const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
+  const wavePrimary = metric === 'wave_height';
+  const dirApplicable = windPrimary || wavePrimary;
+  const value = metricValue(reading, metric);
+  const metricOk = meetsRule(value, station.rule);
+  const spreadEnabled = windPrimary && !!station.rule.maxGustSpreadEnabled;
+  const maxSpread = station.rule.maxGustSpreadKnots ?? 5;
+  const spreadOk = gustSpreadOk(reading, maxSpread, spreadEnabled);
+  const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
+  const waveCapOk = maxWaveOk(reading, station.rule);
+  const windCapOk = maxWindOk(reading, station.rule);
+  return metricOk && spreadOk && dirOk && waveCapOk && windCapOk;
+}
+
+/**
+ * History is only needed to backfill sustained duration when the rule just became
+ * true (no hot conditionSinceMs yet). Skip when the rule fails or the clock is hot.
+ */
+export function needsAlertHistory(reading, station, prev) {
+  if (!alertConditionMet(reading, station)) return false;
+  const sid = String(station.stationId || '').trim();
+  if (prev?.lastStationId && prev.lastStationId !== sid) return true;
+  if (prev?.conditionSinceMs != null) return false;
+  return true;
+}
+
 export function evaluateAlert(reading, history, station, prev, nowMs = Date.now()) {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
@@ -578,7 +634,7 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
   const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
   const waveCapOk = maxWaveOk(reading, station.rule);
   const windCapOk = maxWindOk(reading, station.rule);
-  const conditionMet = metricOk && spreadOk && dirOk && waveCapOk && windCapOk;
+  const conditionMet = alertConditionMet(reading, station);
   const historySustainedMs = sustainedDurationMs(history, station.rule);
 
   let conditionSinceMs = prev.conditionSinceMs;
@@ -608,64 +664,31 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
 
   const unit =
     metric === 'temperature' ? '°C' : metric === 'wave_height' ? 'm' : 'kt';
-  const cmp = station.rule.comparison === 'gte' ? '≥' : '≤';
-  const valueText = value == null ? 'n/a' : `${value.toFixed(1)} ${unit}`;
-  const label = metric;
-  const spreadText = spread == null ? 'n/a' : `${spread.toFixed(1)} kt`;
-  const dirText =
-    reading.wind_direction == null ? 'n/a' : `${Math.round(reading.wind_direction)}°`;
-  const sectorText = formatDirectionSector(
-    station.rule.windDirFromDeg ?? 0,
-    station.rule.windDirToDeg ?? 360,
-  );
-  const maxWave = station.rule.maxWaveHeightM ?? 1.5;
-  const maxWind = station.rule.maxWindKnots ?? 25;
-  const waveText =
-    reading.wave_height == null ? 'n/a' : `${reading.wave_height.toFixed(1)} m`;
-  const windAvgText =
-    reading.wind_avg == null ? 'n/a' : `${reading.wind_avg.toFixed(1)} kt`;
+  const formatValue = (v) => {
+    if (v == null || !Number.isFinite(Number(v))) return null;
+    const n = Number(v);
+    const rounded = Math.round(n * 10) / 10;
+    const text =
+      Math.abs(rounded - Math.round(rounded)) < 0.05
+        ? String(Math.round(rounded))
+        : rounded.toFixed(1);
+    return `${text} ${unit}`;
+  };
+  const valueText = formatValue(value) ?? '—';
 
   let message;
-  if (!monitoringOn) message = 'Monitoring paused';
-  else if (value == null) message = `${label} is not reported by this station`;
-  else if (!metricOk)
-    message = `Waiting — ${label} ${valueText} (need ${cmp}${station.rule.threshold} ${unit})`;
-  else if (!spreadOk) {
-    message =
-      spread == null
-        ? `Waiting — need gust + avg to check spread (limit ≤${maxSpread} kt)`
-        : `Too gusty — spread ${spreadText} (limit ≤${maxSpread} kt)`;
-  } else if (!waveCapOk) {
-    message =
-      reading.wave_height == null
-        ? `Waiting — need wave height (max ≤${maxWave} m)`
-        : `Waves too big — ${waveText} (max ≤${maxWave} m)`;
-  } else if (!windCapOk) {
-    message =
-      reading.wind_avg == null
-        ? `Waiting — need wind avg (max ≤${maxWind} kt)`
-        : `Wind too strong — ${windAvgText} (max ≤${maxWind} kt)`;
-  } else if (!dirOk) {
-    message =
-      reading.wind_direction == null
-        ? `Waiting — need wind direction (limit ${sectorText})`
-        : `Wrong direction — ${dirText} (need ${sectorText})`;
-  } else if (sustainedMs < requiredMs) {
-    const heldMin = Math.floor(sustainedMs / 60000);
-    message = spreadEnabled
-      ? `Holding ${valueText} · spread ${spreadText} for ${heldMin}/${station.rule.sustainedMinutes} min`
-      : `Holding ${valueText} for ${heldMin}/${station.rule.sustainedMinutes} min`;
-  } else if (shouldNotify) {
-    const extras = [
-      spreadEnabled ? `spread ≤${maxSpread} kt` : null,
-      station.rule.maxWaveEnabled && windPrimary ? `wave ≤${maxWave} m` : null,
-      station.rule.maxWindEnabled && wavePrimary ? `wind ≤${maxWind} kt` : null,
-      station.rule.windDirEnabled && dirApplicable ? `dir ${dirText}` : null,
-    ].filter(Boolean);
-    message = `Alert — ${label} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${valueText}${extras.length ? `, ${extras.join(', ')}` : ''})`;
-  } else {
-    message = `Condition still met (${valueText}${spreadEnabled ? `, spread ${spreadText}` : ''}). Already notified for this run.`;
-  }
+  if (!monitoringOn) message = 'Paused';
+  else if (value == null) message = 'No reading';
+  else if (!metricOk) message = valueText;
+  else if (!spreadOk) message = spread == null ? 'Need gust reading' : 'Too gusty';
+  else if (!waveCapOk)
+    message = reading.wave_height == null ? 'Need wave reading' : 'Waves too high';
+  else if (!windCapOk) message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too strong';
+  else if (!dirOk)
+    message = reading.wind_direction == null ? 'Need direction' : 'Wrong direction';
+  else if (sustainedMs < requiredMs) message = `Holding · ${valueText}`;
+  else if (shouldNotify) message = `Alert · ${valueText}`;
+  else message = `On target · ${valueText}`;
 
   return {
     result: {

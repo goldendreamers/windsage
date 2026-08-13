@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
@@ -20,6 +20,7 @@ import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
 import { StationCard } from '../components/StationCard';
+import { buildGlanceRows, glanceHeadline } from '../shared/glance';
 
 type LiveMap = Record<
   string,
@@ -45,7 +46,12 @@ type Props = {
     kind: FollowedStation['kind'],
     extras?: Pick<
       FollowedStation,
-      'liveStationId' | 'linkedLiveStation' | 'liveLinkWarning' | 'sourceName'
+      | 'provider'
+      | 'liveStationId'
+      | 'linkedLiveStation'
+      | 'liveLinkWarning'
+      | 'sourceName'
+      | 'locationBlend'
     >,
   ) => void;
   onReuse: (followId: string) => void;
@@ -94,6 +100,31 @@ export function HomeScreen({
   }, []);
 
   const showInstall = !!onOpenDownload && !installedApp;
+  const glanceRows = hasStations ? buildGlanceRows(stations, live) : [];
+  const headline = glanceHeadline(glanceRows);
+  const sourceFails = stations.filter((s) => {
+    const err = live[s.id]?.alertState?.lastError;
+    const hasData = !!(live[s.id]?.reading || live[s.id]?.result?.forecast);
+    return !!err && !hasData;
+  }).length;
+  // Don't flash “source hiccup” for brief transient fetch gaps (<2s).
+  const [stableSourceFails, setStableSourceFails] = useState(0);
+  const failSinceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (sourceFails <= 0) {
+      failSinceRef.current = null;
+      setStableSourceFails(0);
+      return;
+    }
+    if (failSinceRef.current == null) failSinceRef.current = Date.now();
+    const elapsed = Date.now() - failSinceRef.current;
+    if (elapsed >= 2000) {
+      setStableSourceFails(sourceFails);
+      return;
+    }
+    const id = setTimeout(() => setStableSourceFails(sourceFails), 2000 - elapsed);
+    return () => clearTimeout(id);
+  }, [sourceFails]);
 
   return (
     <View style={styles.root}>
@@ -143,13 +174,25 @@ export function HomeScreen({
           </View>
         ) : null}
 
+        {stableSourceFails > 0 ? (
+          <View style={styles.sourceBanner}>
+            <Text style={styles.sourceTitle}>Weather source hiccup</Text>
+            <Text style={styles.sourceBody}>
+              {stableSourceFails} follow{stableSourceFails === 1 ? '' : 's'} could not fetch a
+              reading. Pull to refresh — other sources still work.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.heading}>Your follows</Text>
             <Text style={styles.sub}>
               {hasStations
                 ? `${stations.length} followed · ${cloudStatus || 'cloud'}`
-                : 'Follow spots or stations you care about'}
+                : cloudStatus === 'offline' || cloudStatus === 'error'
+                  ? 'Cloud hiccup — you can still follow stations'
+                  : 'Follow spots or stations you care about'}
             </Text>
           </View>
           {onOpenAccount ? (
@@ -173,6 +216,39 @@ export function HomeScreen({
             <Text style={styles.addBtnText}>+ Follow</Text>
           </Pressable>
         </View>
+
+        {hasStations && headline ? (
+          <Pressable
+            style={styles.glance}
+            onPress={() => {
+              const top = glanceRows[0];
+              if (top) onOpenStation(top.id);
+            }}
+          >
+            <Text style={styles.glanceLabel}>Right now</Text>
+            <Text style={styles.glanceHeadline} numberOfLines={2}>
+              {headline}
+            </Text>
+            {glanceRows.length > 1 ? (
+              <Text style={styles.glanceSub} numberOfLines={2}>
+                {glanceRows
+                  .slice(1, 3)
+                  .map((r) => r.line)
+                  .join(' · ')}
+              </Text>
+            ) : null}
+          </Pressable>
+        ) : hasStations ? (
+          <View style={styles.glance}>
+            <Text style={styles.glanceLabel}>Right now</Text>
+            <Text style={styles.glanceHeadline} numberOfLines={2}>
+              Waiting for first readings…
+            </Text>
+            <Text style={styles.glanceSub} numberOfLines={2}>
+              Cloud is fetching your follows — pull to refresh if this sticks.
+            </Text>
+          </View>
+        ) : null}
 
         {!hasStations ? (
           <View style={styles.empty}>
@@ -366,5 +442,52 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     fontWeight: '600',
+  },
+  glance: {
+    backgroundColor: colors.bgLift,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  glanceLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  glanceHeadline: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  glanceSub: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  sourceBanner: {
+    backgroundColor: colors.warnDim,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.warn,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  sourceTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  sourceBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

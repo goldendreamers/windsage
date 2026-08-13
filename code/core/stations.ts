@@ -126,7 +126,7 @@ export function detectProviderFromInput(input: string): StationProvider | null {
 
 export function stationPageUrl(station: FollowedStation): string {
   const provider = normalizeProvider(station.provider);
-  const id = station.stationId.trim();
+  const id = String(station.stationId ?? '').trim();
   switch (provider) {
     case 'ndbc':
       return `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(id)}`;

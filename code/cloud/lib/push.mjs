@@ -15,15 +15,23 @@ export async function sendExpoPush({ to, title, body, data }) {
   for (let i = 0; i < messages.length; i += 100) chunks.push(messages.slice(i, i + 100));
   const results = [];
   for (const chunk of chunks) {
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(chunk),
-    });
+    let response;
+    try {
+      response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chunk),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (e) {
+      console.error('[push] fetch failed', e?.message || e);
+      results.push({ ok: false, error: e?.message || String(e) });
+      continue;
+    }
     const json = await response.json().catch(() => ({}));
     if (!response.ok) {
       console.error('[push] failed', response.status, json);

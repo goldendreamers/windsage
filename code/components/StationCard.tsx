@@ -34,6 +34,24 @@ export const StationCard = memo(function StationCard({
   const gust = displayReading?.wind_max;
   const holding = !!result?.conditionMet;
   const errored = !!alertState?.lastError && !reading && !result?.forecast;
+  const prev = alertState?.lastValue;
+  const cur =
+    result?.metricValue ??
+    (station.rule.metric === 'wind_max'
+      ? displayReading?.wind_max
+      : station.rule.metric === 'temperature'
+        ? displayReading?.temperature
+        : station.rule.metric === 'wave_height'
+          ? displayReading?.wave_height
+          : displayReading?.wind_avg);
+  const trend =
+    prev != null && cur != null && Number.isFinite(prev) && Number.isFinite(cur)
+      ? Math.abs(cur - prev) < 0.3
+        ? '→'
+        : cur > prev
+          ? '↑'
+          : '↓'
+      : '';
 
   return (
     <Pressable
@@ -50,6 +68,7 @@ export const StationCard = memo(function StationCard({
           <View style={styles.titles}>
             <Text style={styles.nickname} numberOfLines={1}>
               {name}
+              {trend ? ` ${trend}` : ''}
             </Text>
             <Text style={styles.meta} numberOfLines={2}>
               {providerShort} ·{' '}
@@ -99,7 +118,7 @@ export const StationCard = memo(function StationCard({
             numberOfLines={2}
           >
             {errored
-              ? alertState?.lastError
+              ? 'Check failed'
               : result?.message ??
                 `${station.rule.comparison === 'gte' ? '≥' : '≤'}${station.rule.threshold} ${
                   station.rule.metric === 'temperature'
@@ -107,7 +126,7 @@ export const StationCard = memo(function StationCard({
                     : station.rule.metric === 'wave_height'
                       ? 'm'
                       : 'kt'
-                } / ${station.rule.sustainedMinutes}m`}
+                }`}
           </Text>
         </View>
       </View>

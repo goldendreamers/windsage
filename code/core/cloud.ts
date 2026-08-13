@@ -103,6 +103,17 @@ export class CloudError extends Error {
   }
 }
 
+const CLOUD_FETCH_TIMEOUT_MS = 20_000;
+
+function abortSignalTimeout(ms: number): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
 async function cloudFetch<T>(
   path: string,
   options: RequestInit & { secret?: string; token?: string | null } = {},
@@ -115,10 +126,20 @@ async function cloudFetch<T>(
   if (options.secret) headers['x-windsage-secret'] = options.secret;
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
 
-  const response = await fetch(`${getCloudBaseUrl()}${path}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getCloudBaseUrl()}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal || abortSignalTimeout(CLOUD_FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new CloudError('Cloud request timed out — check connection and retry', 408);
+    }
+    throw new CloudError(e instanceof Error ? e.message : 'Cloud network error', 0);
+  }
   const data = (await response.json().catch(() => ({}))) as T & {
     error?: string;
     suggestions?: string[];
@@ -324,6 +345,7 @@ export async function consumeAuthRedirectParams(): Promise<{
 export async function syncStationsToCloud(
   settings: AppSettings,
   pushToken?: string | null,
+  opts?: { clearStations?: boolean },
 ): Promise<{
   snapshots: Record<string, CloudSnapshot>;
   stations?: FollowedStation[];
@@ -339,6 +361,7 @@ export async function syncStationsToCloud(
   } catch {
     // ignore
   }
+  const clearStations = opts?.clearStations === true ? true : undefined;
 
   if (session) {
     const data = await cloudFetch<{
@@ -350,6 +373,7 @@ export async function syncStationsToCloud(
       token: session,
       body: JSON.stringify({
         stations: settings.stations,
+        clearStations,
         pollIntervalMinutes: settings.pollIntervalMinutes,
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
@@ -373,6 +397,7 @@ export async function syncStationsToCloud(
     secret: creds.secret,
     body: JSON.stringify({
       stations: settings.stations,
+      clearStations,
       pollIntervalMinutes: settings.pollIntervalMinutes,
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
@@ -543,6 +568,25 @@ export async function resetCloudAlert(followId: string): Promise<void> {
   });
 }
 
+/** Mark whether a recent alert felt right (good) or off (meh). */
+export async function sendAlertFeedback(
+  followId: string,
+  rating: 'good' | 'meh',
+): Promise<boolean> {
+  const session = await getSessionToken();
+  if (!session) return false;
+  try {
+    await cloudFetch('/v1/me/alert-feedback', {
+      method: 'POST',
+      token: session,
+      body: JSON.stringify({ followId, rating }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Register web push (if needed) and ask the cloud to send a Discord-style test alert. */
 export async function sendTestPhoneAlert(): Promise<{ delivered: number }> {
   const { registerWebPushSubscription, getCachedWebPushSubscription } = await import(
@@ -588,7 +632,7 @@ export async function pingCloud(): Promise<boolean> {
 }
 
 export function snapshotsToLive(
-  snapshots: Record<string, CloudSnapshot>,
+  snapshots: Record<string, CloudSnapshot> | null | undefined,
 ): Record<
   string,
   { reading: StationReading | null; result: CheckResult | null; alertState?: AlertState }
@@ -597,12 +641,18 @@ export function snapshotsToLive(
     string,
     { reading: StationReading | null; result: CheckResult | null; alertState?: AlertState }
   > = {};
+  if (!snapshots || typeof snapshots !== 'object') return live;
   for (const [id, snap] of Object.entries(snapshots)) {
-    live[id] = {
-      reading: snap.reading ?? null,
-      result: snap.result ?? null,
-      alertState: snap.alertState,
-    };
+    if (!id || !snap || typeof snap !== 'object') continue;
+    try {
+      live[id] = {
+        reading: snap.reading ?? null,
+        result: snap.result ?? null,
+        alertState: snap.alertState,
+      };
+    } catch {
+      // Skip corrupt snapshot rows — never blank the whole live map.
+    }
   }
   return live;
 }

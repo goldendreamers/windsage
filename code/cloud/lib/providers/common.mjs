@@ -44,33 +44,79 @@ export function historyFromPairs(pairs, metric) {
   return { unixtime, values };
 }
 
+const FETCH_TIMEOUT_MS = 12_000;
+
+/** Concurrent identical GETs share one upstream call (NDBC latest, Open-Meteo, etc.). */
+const inflightGets = new Map();
+
+function coalesceKey(kind, url, headers) {
+  const h = headers && Object.keys(headers).length ? JSON.stringify(headers) : '';
+  return `${kind}:${url}:${h}`;
+}
+
+async function fetchWithTimeout(url, init = {}) {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init.signal || AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      throw new Error(`Timed out fetching ${url}`);
+    }
+    throw e;
+  }
+}
+
 export async function fetchText(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: { Accept: 'text/plain,*/*', ...headers },
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-  return response.text();
+  const key = coalesceKey('text', String(url), headers);
+  const pending = inflightGets.get(key);
+  if (pending) return pending;
+  const work = (async () => {
+    const response = await fetchWithTimeout(url, {
+      headers: { Accept: 'text/plain,*/*', ...headers },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+    return response.text();
+  })();
+  inflightGets.set(key, work);
+  try {
+    return await work;
+  } finally {
+    inflightGets.delete(key);
+  }
 }
 
 export async function fetchJson(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: { Accept: 'application/json', ...headers },
-  });
-  let data = null;
+  const key = coalesceKey('json', String(url), headers);
+  const pending = inflightGets.get(key);
+  if (pending) return pending;
+  const work = (async () => {
+    const response = await fetchWithTimeout(url, {
+      headers: { Accept: 'application/json', ...headers },
+    });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+    if (!response.ok) {
+      const msg =
+        data?.status?.status_message ||
+        data?.message ||
+        data?.error ||
+        `HTTP ${response.status}`;
+      throw new Error(String(msg));
+    }
+    return data;
+  })();
+  inflightGets.set(key, work);
   try {
-    data = await response.json();
-  } catch {
-    data = null;
+    return await work;
+  } finally {
+    inflightGets.delete(key);
   }
-  if (!response.ok) {
-    const msg =
-      data?.status?.status_message ||
-      data?.message ||
-      data?.error ||
-      `HTTP ${response.status}`;
-    throw new Error(String(msg));
-  }
-  return data;
 }
 
 export function providerOf(station) {

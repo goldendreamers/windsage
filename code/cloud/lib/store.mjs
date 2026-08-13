@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const STORE_FILE = 'store.json';
+const STORE_BAK = 'store.json.bak';
 
 const empty = () => ({
   version: 3,
@@ -16,6 +17,10 @@ const empty = () => ({
   /** Global station trust / accuracy scores for location blends. */
   stationTrust: {},
 });
+
+function userCount(store) {
+  return Object.keys(store?.users || {}).length;
+}
 
 function migrate(store) {
   if (!store.devices) store.devices = {};
@@ -54,22 +59,131 @@ function migrate(store) {
   return store;
 }
 
+async function readStoreFile(file) {
+  const raw = await fs.readFile(file, 'utf8');
+  return migrate(JSON.parse(raw));
+}
+
+/** Process-wide store cache — avoids load/modify/save races that wiped users. */
+let cachedStore = null;
+let cachedDir = null;
+
 export async function loadStore(dataDir) {
+  const key = path.resolve(dataDir);
+  if (cachedStore && cachedDir === key) return cachedStore;
+
   const file = path.join(dataDir, STORE_FILE);
+  const bak = path.join(dataDir, STORE_BAK);
+  let primary = null;
+  let primaryErr = null;
   try {
-    const raw = await fs.readFile(file, 'utf8');
-    return migrate(JSON.parse(raw));
+    primary = await readStoreFile(file);
+  } catch (e) {
+    primaryErr = e;
+  }
+
+  let backup = null;
+  try {
+    backup = await readStoreFile(bak);
   } catch {
-    return empty();
+    backup = null;
+  }
+
+  // Prefer bak when primary is missing/corrupt OR looks wiped while bak still has users.
+  let loaded;
+  if (primary && userCount(primary) === 0 && backup && userCount(backup) > 0) {
+    console.error(
+      `[store] primary looks wiped (users=0); recovering from ${STORE_BAK} (users=${userCount(backup)})`,
+    );
+    loaded = backup;
+  } else if (primary) {
+    loaded = primary;
+  } else if (backup) {
+    console.error(
+      `[store] primary unreadable (${primaryErr?.code || primaryErr?.message}); recovered from ${STORE_BAK} (users=${userCount(backup)})`,
+    );
+    loaded = backup;
+  } else {
+    console.error(
+      `[store] load failed; starting empty (${primaryErr?.code || primaryErr?.message || 'no file'})`,
+    );
+    loaded = empty();
+  }
+  cachedStore = loaded;
+  cachedDir = key;
+  return cachedStore;
+}
+
+/** Serialize all store writes per dataDir (concurrent fixed-.tmp rename raced and wiped). */
+const saveQueues = new Map();
+
+async function saveStoreUnlocked(dataDir, store) {
+  const file = path.join(dataDir, STORE_FILE);
+  const bak = path.join(dataDir, STORE_BAK);
+  const migrated = migrate(store);
+  await fs.mkdir(dataDir, { recursive: true });
+
+  // Refuse catastrophic wipe: never replace a non-empty users bag with empty.
+  let onDiskUsers = 0;
+  try {
+    const disk = await readStoreFile(file);
+    onDiskUsers = userCount(disk);
+  } catch {
+    try {
+      const diskBak = await readStoreFile(bak);
+      onDiskUsers = userCount(diskBak);
+    } catch {
+      onDiskUsers = 0;
+    }
+  }
+  if (onDiskUsers > 0 && userCount(migrated) === 0) {
+    const err = new Error(
+      `[store] refused wipe: on-disk users=${onDiskUsers}, incoming users=0`,
+    );
+    console.error(err.message);
+    throw err;
+  }
+
+  // Unique tmp avoids ENOENT when two writers share store.json.tmp.
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+  const payload = JSON.stringify(migrated, null, 2);
+  await fs.writeFile(tmp, payload);
+  try {
+    // Rolling bak of previous good file (best-effort).
+    try {
+      await fs.copyFile(file, bak);
+    } catch {
+      /* no prior file */
+    }
+    await fs.rename(tmp, file);
+  } catch (e) {
+    await fs.unlink(tmp).catch(() => {});
+    throw e;
   }
 }
 
 export async function saveStore(dataDir, store) {
-  const file = path.join(dataDir, STORE_FILE);
-  const tmp = `${file}.tmp`;
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(tmp, JSON.stringify(migrate(store), null, 2));
-  await fs.rename(tmp, file);
+  const key = path.resolve(dataDir);
+  const prev = saveQueues.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const queued = prev.then(() => gate);
+  saveQueues.set(
+    key,
+    queued.finally(() => {
+      if (saveQueues.get(key) === queued) saveQueues.delete(key);
+    }),
+  );
+  await prev.catch(() => {});
+  try {
+    await saveStoreUnlocked(dataDir, store);
+    cachedStore = store;
+    cachedDir = path.resolve(dataDir);
+  } finally {
+    release();
+  }
 }
 
 export function ensureDevice(store, deviceId, secret) {

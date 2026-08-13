@@ -6,15 +6,11 @@ import type {
   HistorySeries,
   StationReading,
 } from '../shared/types';
-import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricLabel, metricUnit, metricValue } from './windguru';
+import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricUnit, metricValue } from './windguru';
 
 function meetsRule(value: number | null, rule: FollowedStation['rule']): boolean {
   if (value === null) return false;
   return rule.comparison === 'gte' ? value >= rule.threshold : value <= rule.threshold;
-}
-
-function comparisonSymbol(rule: FollowedStation['rule']): string {
-  return rule.comparison === 'gte' ? '≥' : '≤';
 }
 
 /** Gust − avg (knots). Null if either reading is missing. */
@@ -180,65 +176,37 @@ export function evaluateAlert(
   }
 
   const unit = metricUnit(metric);
-  const label = metricLabel(metric);
-  const valueText = value == null ? 'n/a' : `${value.toFixed(1)} ${unit}`;
-  const cmp = comparisonSymbol(station.rule);
-  const spreadText = spread == null ? 'n/a' : `${spread.toFixed(1)} kt`;
-  const dirText =
-    reading.wind_direction == null ? 'n/a' : `${Math.round(reading.wind_direction)}°`;
-  const sectorText = formatDirectionSector(
-    station.rule.windDirFromDeg ?? 0,
-    station.rule.windDirToDeg ?? 360,
-  );
-  const maxWave = station.rule.maxWaveHeightM ?? 1.5;
-  const maxWind = station.rule.maxWindKnots ?? 25;
-  const waveText =
-    reading.wave_height == null ? 'n/a' : `${reading.wave_height.toFixed(1)} m`;
-  const windAvgText =
-    reading.wind_avg == null ? 'n/a' : `${reading.wind_avg.toFixed(1)} kt`;
+  const formatValue = (v: number | null | undefined) => {
+    if (v == null || !Number.isFinite(Number(v))) return null;
+    const n = Number(v);
+    const rounded = Math.round(n * 10) / 10;
+    const text = Math.abs(rounded - Math.round(rounded)) < 0.05 ? String(Math.round(rounded)) : rounded.toFixed(1);
+    return `${text} ${unit}`;
+  };
+  const valueText = formatValue(value) ?? '—';
 
+  // Plain status for the home/detail alert line — lead with the live number, not metric keys.
   let message: string;
   if (!monitoringOn) {
-    message = 'Monitoring paused';
+    message = 'Paused';
   } else if (value == null) {
-    message = `${label} is not reported by this station`;
+    message = 'No reading';
   } else if (!metricOk) {
-    message = `Waiting — ${label} ${valueText} (need ${cmp}${station.rule.threshold} ${unit})`;
+    message = valueText;
   } else if (!spreadOk) {
-    message =
-      spread == null
-        ? `Waiting — need gust + avg to check spread (limit ≤${maxSpread} kt)`
-        : `Too gusty — spread ${spreadText} (limit ≤${maxSpread} kt)`;
+    message = spread == null ? 'Need gust reading' : 'Too gusty';
   } else if (!waveCapOk) {
-    message =
-      reading.wave_height == null
-        ? `Waiting — need wave height (max ≤${maxWave} m)`
-        : `Waves too big — ${waveText} (max ≤${maxWave} m)`;
+    message = reading.wave_height == null ? 'Need wave reading' : 'Waves too high';
   } else if (!windCapOk) {
-    message =
-      reading.wind_avg == null
-        ? `Waiting — need wind avg (max ≤${maxWind} kt)`
-        : `Wind too strong — ${windAvgText} (max ≤${maxWind} kt)`;
+    message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too strong';
   } else if (!dirOk) {
-    message =
-      reading.wind_direction == null
-        ? `Waiting — need wind direction (limit ${sectorText})`
-        : `Wrong direction — ${dirText} (need ${sectorText})`;
+    message = reading.wind_direction == null ? 'Need direction' : 'Wrong direction';
   } else if (sustainedMs < requiredMs) {
-    const heldMin = Math.floor(sustainedMs / 60000);
-    message = spreadEnabled
-      ? `Holding ${valueText} · spread ${spreadText} for ${heldMin}/${station.rule.sustainedMinutes} min`
-      : `Holding ${valueText} for ${heldMin}/${station.rule.sustainedMinutes} min`;
+    message = `Holding · ${valueText}`;
   } else if (shouldNotify) {
-    const extras = [
-      spreadEnabled ? `spread ≤${maxSpread} kt` : null,
-      station.rule.maxWaveEnabled && windPrimary ? `wave ≤${maxWave} m` : null,
-      station.rule.maxWindEnabled && wavePrimary ? `wind ≤${maxWind} kt` : null,
-      station.rule.windDirEnabled && dirApplicable ? `dir ${dirText}` : null,
-    ].filter(Boolean);
-    message = `Alert — ${label} ${cmp}${station.rule.threshold} ${unit} for ${station.rule.sustainedMinutes}+ min (now ${valueText}${extras.length ? `, ${extras.join(', ')}` : ''})`;
+    message = `Alert · ${valueText}`;
   } else {
-    message = `Condition still met (${valueText}${spreadEnabled ? `, spread ${spreadText}` : ''}). Already notified for this run.`;
+    message = `On target · ${valueText}`;
   }
 
   return {
@@ -265,7 +233,7 @@ export async function runStationCheck(
   station: FollowedStation,
   prev: AlertState,
 ): Promise<{ result: CheckResult; nextState: AlertState }> {
-  if (!station.stationId.trim()) {
+  if (!String(station.stationId ?? '').trim()) {
     return {
       result: {
         reading: null,
@@ -279,13 +247,13 @@ export async function runStationCheck(
         ...prev,
         lastCheckMs: Date.now(),
         lastError: 'Missing station ID',
-        lastStationId: station.stationId,
+        lastStationId: String(station.stationId ?? ''),
       },
     };
   }
 
   const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
-  const pollId = (station.liveStationId || station.stationId).trim();
+  const pollId = String(station.liveStationId || station.stationId || '').trim();
   const [reading, history] = await Promise.all([
     fetchCurrentReading(pollId),
     fetchRecentHistory(pollId, station.rule.metric, hours, 10),
@@ -299,7 +267,7 @@ export async function runStationCheck(
     };
   }
   try {
-    const fc = await fetchSpotForecastNow(station.stationId.trim());
+    const fc = await fetchSpotForecastNow(String(station.stationId).trim());
     return {
       result: {
         ...evaluated.result,
@@ -328,7 +296,7 @@ export async function runAllStationChecks(
     [];
 
   for (const station of stations) {
-    if (!station.stationId.trim()) continue;
+    if (!String(station.stationId ?? '').trim()) continue;
     const prev = { ...DEFAULT_ALERT_STATE, ...(states[station.id] ?? {}) };
     try {
       const { result, nextState } = await runStationCheck(station, prev);

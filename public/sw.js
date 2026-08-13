@@ -1,11 +1,29 @@
 /* Windsage service worker — Web Push + static cache
- * v5: cache hashed JS/images for faster repeat loads; keep push lock-screen icons absolute.
+ * v7: bump after overnight opt catch-up; keep network-first HTML shell.
  */
-const SW_VERSION = 'windsage-sw-v5';
-const STATIC_CACHE = 'windsage-static-v5';
+const SW_VERSION = 'windsage-sw-v7';
+const STATIC_CACHE = 'windsage-static-v7';
+const SHELL_CACHE = 'windsage-shell-v7';
+const SHELL_URLS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    (async () => {
+      try {
+        const cache = await caches.open(SHELL_CACHE);
+        await Promise.all(
+          SHELL_URLS.map((u) =>
+            fetch(u, { cache: 'no-store' })
+              .then((res) => (res && res.ok ? cache.put(u, res) : undefined))
+              .catch(() => undefined),
+          ),
+        );
+      } catch {
+        // ignore — first visit may still work via network
+      }
+      await self.skipWaiting();
+    })(),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -14,7 +32,12 @@ self.addEventListener('activate', (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k.startsWith('windsage-static-') && k !== STATIC_CACHE)
+          .filter(
+            (k) =>
+              (k.startsWith('windsage-static-') || k.startsWith('windsage-shell-')) &&
+              k !== STATIC_CACHE &&
+              k !== SHELL_CACHE,
+          )
           .map((k) => caches.delete(k)),
       );
       await self.clients.claim();
@@ -51,6 +74,27 @@ function isStaticAsset(url) {
   return /\.(?:js|css|png|jpe?g|webp|ico|woff2?)$/i.test(p);
 }
 
+function isNavigation(req, url) {
+  if (req.mode === 'navigate') return true;
+  const accept = req.headers.get('accept') || '';
+  if (accept.includes('text/html') && (url.pathname === '/' || url.pathname.endsWith('.html'))) {
+    return true;
+  }
+  return false;
+}
+
+async function shellFallback() {
+  const cache = await caches.open(SHELL_CACHE);
+  for (const u of SHELL_URLS) {
+    const hit = await cache.match(u);
+    if (hit) return hit;
+  }
+  return new Response(
+    '<!doctype html><meta charset=utf-8><title>Windsage</title><p>Offline — open when you have a connection.</p>',
+    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+  );
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -61,9 +105,37 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin !== self.location.origin) return;
-  // Never cache API / HTML shell aggressively — always prefer network.
+  // Never cache API — always prefer network.
   if (url.pathname.startsWith('/v1/') || url.pathname === '/health') return;
-  if (url.pathname === '/' || url.pathname.endsWith('.html') || url.pathname === '/sw.js') return;
+  if (url.pathname === '/sw.js') return;
+
+  // HTML shell: network-first, fall back to last good shell when offline/stale fail.
+  if (isNavigation(req, url) || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      (async () => {
+        try {
+          const res = await fetch(req);
+          if (res && res.ok) {
+            try {
+              const cache = await caches.open(SHELL_CACHE);
+              await cache.put(url.pathname === '/' ? '/' : url.pathname, res.clone());
+              if (url.pathname === '/' || url.pathname.endsWith('index.html')) {
+                await cache.put('/index.html', res.clone());
+              }
+            } catch {
+              // ignore quota
+            }
+            return res;
+          }
+        } catch {
+          // network down
+        }
+        return shellFallback();
+      })(),
+    );
+    return;
+  }
+
   if (!isStaticAsset(url)) return;
 
   event.respondWith(

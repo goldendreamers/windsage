@@ -44,3 +44,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+code/cloud/data/
+releases/local-zips/
+
+# Agent runtime state
+.cursor/

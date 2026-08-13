@@ -11,9 +11,17 @@ type Props = {
   alertState: AlertState | null;
   sustainedMinutes: number;
   progress: number;
+  /** Optional plain rule summary, e.g. "Need ≥15 kt for 20m" */
+  ruleHint?: string | null;
 };
 
-export function StatusPanel({ result, alertState, sustainedMinutes, progress }: Props) {
+export function StatusPanel({
+  result,
+  alertState,
+  sustainedMinutes,
+  progress,
+  ruleHint,
+}: Props) {
   const width = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -32,6 +40,15 @@ export function StatusPanel({ result, alertState, sustainedMinutes, progress }: 
         ? colors.accent
         : colors.muted;
 
+  const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
+  const metaParts = [
+    ruleHint || null,
+    result?.conditionMet
+      ? `Held ${formatDuration(result.sustainedMs ?? 0)} of ${sustainedMinutes}m`
+      : `Need ${sustainedMinutes}m steady`,
+    result?.reading?.datetime || null,
+  ].filter(Boolean);
+
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
@@ -41,7 +58,7 @@ export function StatusPanel({ result, alertState, sustainedMinutes, progress }: 
           contentFit="contain"
         />
         <Text style={[styles.statusLine, { color: tone }]}>
-          {result?.message ?? 'No check yet — add a station to begin'}
+          {result?.message ?? 'Waiting for first check…'}
         </Text>
       </View>
 
@@ -60,10 +77,10 @@ export function StatusPanel({ result, alertState, sustainedMinutes, progress }: 
         />
       </View>
 
-      <Text style={styles.meta}>
-        Held {formatDuration(result?.sustainedMs ?? 0)} · need {sustainedMinutes}m
-        {result?.reading?.datetime ? ` · ${result.reading.datetime}` : ''}
-      </Text>
+      <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
+      {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
+        <Text style={styles.metaQuiet}>Alert starts when your target holds long enough</Text>
+      ) : null}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>
   );
@@ -93,6 +110,11 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.muted,
     fontSize: 12,
+  },
+  metaQuiet: {
+    color: colors.muted,
+    fontSize: 12,
+    opacity: 0.85,
   },
   errorText: {
     color: colors.danger,

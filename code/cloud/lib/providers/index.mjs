@@ -9,6 +9,7 @@ import {
   isForecastOnlySpot as wgIsForecastOnly,
   normalizeWindguruFollowInput as wgResolve,
   evaluateAlert,
+  needsAlertHistory,
 } from '../wind.mjs';
 import { cacheKey, providerOf, sensorId } from './common.mjs';
 import {
@@ -52,7 +53,7 @@ import {
 } from './location.mjs';
 import { mapsStatus } from './geo.mjs';
 
-export { evaluateAlert, cacheKey, providerOf, sensorId, mapsStatus };
+export { evaluateAlert, needsAlertHistory, cacheKey, providerOf, sensorId, mapsStatus };
 
 function wgStationUrl(id, kind) {
   const sid = String(id || '').trim();

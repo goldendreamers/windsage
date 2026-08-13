@@ -50,6 +50,7 @@ type Props = {
   onCheck: () => void;
   onResetAlert: () => void;
   onUnfollow: () => void;
+  onAlertFeedback?: (rating: 'good' | 'meh') => Promise<void> | void;
 };
 
 export function StationDetailScreen({
@@ -67,8 +68,10 @@ export function StationDetailScreen({
   onCheck,
   onResetAlert,
   onUnfollow,
+  onAlertFeedback,
 }: Props) {
   const [saving, setSaving] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState<'good' | 'meh' | null>(null);
   const reading = result?.reading;
   const forecast = result?.forecast ?? null;
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
@@ -191,7 +194,7 @@ export function StationDetailScreen({
         <Text style={styles.label}>Nickname</Text>
         <TextInput
           style={styles.input}
-          value={station.nickname}
+          value={station.nickname ?? ''}
           onChangeText={(nickname) => onChange({ ...station, nickname })}
           onEndEditing={(e) => onPersist({ ...station, nickname: e.nativeEvent.text })}
           placeholder="Home reef / Spot name"
@@ -230,9 +233,10 @@ export function StationDetailScreen({
                           station.sourceName ||
                           null,
                         nickname:
-                          station.nickname.trim() ||
+                          (station.nickname || '').trim() ||
                           target.spotName ||
-                          station.nickname,
+                          station.nickname ||
+                          '',
                       });
                     } catch {
                       onPersist({
@@ -293,9 +297,10 @@ export function StationDetailScreen({
                       station.sourceName ||
                       null,
                     nickname:
-                      station.nickname.trim() ||
+                      (station.nickname || '').trim() ||
                       target.spotName ||
-                      station.nickname,
+                      station.nickname ||
+                      '',
                   });
                   return;
                 }
@@ -445,7 +450,52 @@ export function StationDetailScreen({
           alertState={alertState}
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
+          ruleHint={`Target ${station.rule.comparison === 'gte' ? '≥' : '≤'}${
+            Number.isInteger(station.rule.threshold)
+              ? station.rule.threshold
+              : station.rule.threshold.toFixed(1)
+          } ${
+            station.rule.metric === 'temperature'
+              ? '°C'
+              : station.rule.metric === 'wave_height'
+                ? 'm'
+                : 'kt'
+          }`}
         />
+        {alertState?.notifiedForRun && onAlertFeedback ? (
+          <View style={styles.feedbackBox}>
+            <Text style={styles.feedbackTitle}>Was this alert right?</Text>
+            <Text style={styles.feedbackHint}>Helps tune thresholds and blended sources.</Text>
+            {feedbackSent ? (
+              <Text style={styles.feedbackThanks}>
+                Thanks — marked {feedbackSent === 'good' ? 'good' : 'meh'}.
+              </Text>
+            ) : (
+              <View style={styles.feedbackRow}>
+                <Pressable
+                  style={styles.feedbackGood}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setFeedbackSent('good');
+                    void onAlertFeedback('good');
+                  }}
+                >
+                  <Text style={styles.feedbackGoodText}>Good</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.feedbackMeh}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setFeedbackSent('meh');
+                    void onAlertFeedback('meh');
+                  }}
+                >
+                  <Text style={styles.feedbackMehText}>Meh</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : null}
       </Section>
 
       <Section title="Alert rule" icon="bell" hint={alertHint}>
@@ -829,9 +879,10 @@ export function StationDetailScreen({
                   station.sourceName ||
                   null,
                 nickname:
-                  station.nickname.trim() ||
+                  (station.nickname || '').trim() ||
                   target.spotName ||
-                  station.nickname,
+                  station.nickname ||
+                  '',
               };
               onSave(next);
             } catch (e) {
@@ -1047,6 +1098,57 @@ const styles = StyleSheet.create({
   linkText: {
     color: colors.accent,
     fontWeight: '600',
+  },
+  feedbackBox: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    gap: 6,
+  },
+  feedbackTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  feedbackHint: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  feedbackThanks: {
+    color: colors.ok,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  feedbackRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  feedbackGood: {
+    backgroundColor: colors.accentDim,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  feedbackGoodText: {
+    color: colors.accent,
+    fontWeight: '800',
+  },
+  feedbackMeh: {
+    backgroundColor: colors.input,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  feedbackMehText: {
+    color: colors.muted,
+    fontWeight: '800',
   },
   primaryBtn: {
     alignItems: 'center',
