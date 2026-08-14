@@ -12,7 +12,7 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ### 1) Phone lock-screen push (VAPID + release)
 
-**Why:** Nimrod only gets emails, not phone notifications. Windsage does **not** send wind-alert emails — lock-screen alerts are Web Push (installed PWA). That needs `WEB_PUSH_VAPID_*` in `/data/windsage/oauth.env`, `web-push` installed on Wald, then the phone subscribed from the home-screen app (Safari on iPhone). Cloud PR: phone-push-alerts branch.
+**Why:** Nimrod only gets emails, not phone notifications. Windsage does **not** send wind-alert emails — lock-screen alerts are Web Push (installed PWA). That needs `WEB_PUSH_VAPID_*` in `/data/windsage/oauth.env`, `web-push` installed on Wald, then the phone subscribed from the home-screen app (Safari on iPhone). PR: https://github.com/goldendreamers/windsage/pull/8
 
 **Paste this entire block into a local Mac Cursor agent:**
 
@@ -25,7 +25,7 @@ export PATH="$HOME/.local/node/bin:$PATH"
 cd /Users/goldendreamers/windsage
 git checkout main && git pull --ff-only
 
-1) Merge the open phone-push PR if still open (gh pr list --state open), or pull main after it merges.
+1) Merge https://github.com/goldendreamers/windsage/pull/8 if still open (`gh pr merge 8 --merge`), then git pull --ff-only.
 2) Check live health:
    curl -sS https://windsage.nimrod.bio/health | python3 -m json.tool | head -40
    If "webPush" is not true:
