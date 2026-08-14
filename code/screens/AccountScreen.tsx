@@ -13,6 +13,7 @@ import type { CloudUser } from '../core/cloud';
 import {
   CloudError,
   fetchAuthProviders,
+  fetchCloudHealth,
   fetchMe,
   loginAccount,
   logoutAccount,
@@ -24,7 +25,7 @@ import {
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
 import { registerWebPushSubscription, ensureNotificationPermissions, isInstalledPwa } from '../core/notifications';
-import { isRunningAsInstalledApp } from '../core/pwaInstall';
+import { isRunningAsInstalledApp, getInstallPlatform } from '../core/pwaInstall';
 
 type Props = {
   onBack: () => void;
@@ -49,18 +50,22 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [phoneAlertMsg, setPhoneAlertMsg] = useState<string | null>(null);
+  const [webPushOn, setWebPushOn] = useState<boolean | null>(null);
+  const installPlatform = getInstallPlatform();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [me, prov] = await Promise.all([
+        const [me, prov, health] = await Promise.all([
           fetchMe().catch(() => null),
           fetchAuthProviders().catch(() => ({ google: false, facebook: false, apple: false })),
+          fetchCloudHealth().catch(() => null),
         ]);
         if (cancelled) return;
         setUser(me);
         setProviders(prov);
+        setWebPushOn(health?.webPush ?? null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -280,23 +285,45 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
       <Section
         title="Phone alerts"
         icon="bell"
-        hint="Must wake the lock screen — not only after you open the phone."
+        hint="Lock-screen push only — Windsage does not send email when wind hits."
       >
+        {webPushOn === false ? (
+          <Text style={[styles.hint, styles.warnHint]}>
+            Server phone push is off (no VAPID keys on Wald). Until that is set, the cloud cannot
+            wake your phone. Email is not a Windsage alert channel.
+          </Text>
+        ) : null}
+        {installPlatform === 'ios-other' ? (
+          <Text style={[styles.hint, styles.warnHint]}>
+            iPhone alerts only work in Safari. Open https://windsage.nimrod.bio/ in Safari → Share →
+            Add to Home Screen, then open that icon (not Chrome).
+          </Text>
+        ) : null}
         {!isInstalledPwa() && !isRunningAsInstalledApp() ? (
           <Text style={[styles.hint, styles.warnHint]}>
-            Open Windsage from the home-screen icon (installed app), not a Chrome tab. Lock-screen
-            wake is unreliable in a normal browser tab.
+            Open Windsage from the home-screen icon (installed app), not a browser tab. Lock-screen
+            wake is unreliable in a normal tab.
           </Text>
         ) : (
           <Text style={styles.hint}>Running as installed app ✓</Text>
         )}
-        <Text style={styles.hint}>
-          Android (required for alerts while locked):{'\n'}
-          1. Settings → Apps → Windsage (and Chrome) → Battery → Unrestricted{'\n'}
-          2. Notifications → Lock screen → Show all / Alerting{'\n'}
-          3. Turn Adaptive Battery off if alerts still wait for unlock{'\n'}
-          Then lock the phone, wait 30s, and tap the test below.
-        </Text>
+        {installPlatform === 'ios' || installPlatform === 'ios-other' ? (
+          <Text style={styles.hint}>
+            iPhone:{'\n'}
+            1. Safari (not Chrome) → Add to Home Screen{'\n'}
+            2. Open the home-screen icon and allow Notifications{'\n'}
+            3. Settings → Notifications → Windsage → Allow Notifications{'\n'}
+            Then lock the phone and tap the test below.
+          </Text>
+        ) : (
+          <Text style={styles.hint}>
+            Android (required for alerts while locked):{'\n'}
+            1. Settings → Apps → Windsage (and Chrome) → Battery → Unrestricted{'\n'}
+            2. Notifications → Lock screen → Show all / Alerting{'\n'}
+            3. Turn Adaptive Battery off if alerts still wait for unlock{'\n'}
+            Then lock the phone, wait 30s, and tap the test below.
+          </Text>
+        )}
         <Pressable
           style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
           disabled={busy}
@@ -306,7 +333,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
               const allowed = await ensureNotificationPermissions();
               if (!allowed) {
                 throw new CloudError(
-                  'Notifications are blocked. Enable them in phone settings for Windsage / Chrome.',
+                  'Notifications are blocked. Enable them in Settings → Notifications → Windsage (Safari on iPhone, Chrome on Android).',
                   400,
                 );
               }
