@@ -10,9 +10,9 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 1) Phone lock-screen push (VAPID + release)
+### 1) Enable phone Web Push on Wald + release PR #8
 
-**Why:** Nimrod only gets emails, not phone notifications. Windsage does **not** send wind-alert emails — lock-screen alerts are Web Push (installed PWA). That needs `WEB_PUSH_VAPID_*` in `/data/windsage/oauth.env`, `web-push` installed on Wald, then the phone subscribed from the home-screen app (Safari on iPhone). PR: https://github.com/goldendreamers/windsage/pull/8
+**Why:** https://github.com/goldendreamers/windsage/pull/8 is **merged** (`594621e` on `main`). Live https://windsage.nimrod.bio/ still needs VAPID keys (if `webPush` is false) and `npm run release:web`. Windsage does **not** send wind-alert emails.
 
 **Paste this entire block into a local Mac Cursor agent:**
 
@@ -21,21 +21,24 @@ You are on the Mac at /Users/goldendreamers/windsage with Tailscale to Wald.
 Read file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md and file:///Users/goldendreamers/windsage/CLOUD_AGENT_CONTEXT.md.
 Do not wipe store.json / stations.
 
+https://github.com/goldendreamers/windsage/pull/8 is already MERGED. Do not merge again.
+
 export PATH="$HOME/.local/node/bin:$PATH"
 cd /Users/goldendreamers/windsage
 git checkout main && git pull --ff-only
+git log -5 --oneline
 
-1) Merge https://github.com/goldendreamers/windsage/pull/8 if still open (`gh pr merge 8 --merge`), then git pull --ff-only.
-2) Check live health:
+1) Check live health:
    curl -sS https://windsage.nimrod.bio/health | python3 -m json.tool | head -40
    If "webPush" is not true:
      ssh wald-mc 'cd /data/windsage && /usr/bin/npm install --omit=dev --no-fund --no-audit'
      On Mac: npx --yes web-push generate-vapid-keys
      Append WEB_PUSH_VAPID_PUBLIC, WEB_PUSH_VAPID_PRIVATE, and WEB_PUSH_CONTACT=mailto:shakedwald@gmail.com to /data/windsage/oauth.env WITHOUT deleting Google/other keys (chmod 600, owner nimrodw).
      ssh wald-mc 'sudo systemctl restart windsage && sleep 2 && curl -sS http://127.0.0.1:8787/health'
-3) npm run release:web
-4) Email: Windsage · ACTION NEEDED: Open home-screen Windsage → Account → Send test phone alert
-   Tell Nimrod: iPhone must use Safari Add to Home Screen (Chrome iOS cannot push). Then lock the phone and tap the test. Windsage does not send email alerts.
+     Confirm health shows "webPush": true.
+2) npm run release:web
+3) Email Nimrod: Windsage · ACTION NEEDED: Open home-screen Windsage → Account → Send test phone alert
+   iPhone must use Safari Add to Home Screen (Chrome iOS cannot push). Lock the phone, then tap the test. Windsage does not send email alerts.
 
 Update docs/MAC_AGENT_PROMPTS.md (move this to Done with today’s date) after VAPID is on and release is live; leave the phone-test as ACTION NEEDED until Nimrod confirms a lock-screen buzz.
 Prefer absolute file:// and https:// links.
@@ -44,6 +47,10 @@ Prefer absolute file:// and https:// links.
 ---
 
 ## Done
+
+### 2026-08-14 — PR #8 merged on GitHub (cloud agent)
+
+Merged https://github.com/goldendreamers/windsage/pull/8 (`594621e`). Web Push subscribe now syncs to Wald; test-push explains missing VAPID; Account/Download call out Safari-on-iPhone. Wald VAPID + `npm run release:web` still pending (item 1 above).
 
 ### 2026-08-13 — Wald release of merged PR #7 (Mac + Tailscale)
 
