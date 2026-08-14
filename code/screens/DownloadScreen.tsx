@@ -34,7 +34,7 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
   }, []);
 
   const installLabel =
-    platform === 'ios'
+    platform === 'ios' || platform === 'ios-other'
       ? 'Add to Home Screen'
       : platform === 'android'
         ? 'Install on this phone'
@@ -44,7 +44,9 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
     ? 'Already installed on this device'
     : canPrompt
       ? 'Adds Windsage like a normal app'
-      : platform === 'ios'
+      : platform === 'ios-other'
+        ? 'iPhone alerts need Safari — open windsage.nimrod.bio in Safari, then Share → Add to Home Screen'
+        : platform === 'ios'
         ? 'Safari → Share → Add to Home Screen'
         : platform === 'android'
           ? 'Chrome menu → Install app / Add to Home screen'
@@ -69,8 +71,12 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
         return;
       }
     }
-    if (platform === 'ios') {
-      setHint('In Safari: tap Share, then “Add to Home Screen”, then Add.');
+    if (platform === 'ios' || platform === 'ios-other') {
+      setHint(
+        platform === 'ios-other'
+          ? 'Chrome on iPhone cannot receive lock-screen alerts. Open https://windsage.nimrod.bio/ in Safari, then Share → Add to Home Screen.'
+          : 'In Safari: tap Share, then “Add to Home Screen”, then Add.',
+      );
       return;
     }
     if (platform === 'android') {

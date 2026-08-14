@@ -1151,13 +1151,31 @@ async function handleDevices(req, res, pathname) {
       delivered += results.filter((r) => r.ok).length;
     }
     await saveStore(DATA_DIR, store);
-    console.log(`[notify] test-push device=${deviceId} delivered=${delivered}`);
+    const webPushConfigured = vapidConfig().enabled;
+    const expoCount = collectPushTokens(bag).length;
+    console.log(
+      `[notify] test-push device=${deviceId} delivered=${delivered} expo=${expoCount} webPush=${subs.length} vapid=${webPushConfigured}`,
+    );
+    let error;
+    if (!delivered) {
+      if (!webPushConfigured && !expoCount) {
+        error =
+          'Phone lock-screen push is off on the server (missing WEB_PUSH_VAPID keys). Windsage does not send email alerts.';
+      } else if (!subs.length && !expoCount) {
+        error =
+          'This phone is not subscribed yet. Open the home-screen app in Safari (iPhone) or Chrome (Android), allow notifications, then try again. Windsage does not send email alerts.';
+      } else {
+        error =
+          'Push send failed. Re-open the installed app, allow notifications, and try again. Windsage does not send email alerts.';
+      }
+    }
     return json(res, delivered ? 200 : 400, {
       ok: delivered > 0,
       delivered,
-      error: delivered
-        ? undefined
-        : 'No phone subscription yet. Allow notifications, install the app, open it once, then try again.',
+      webPushConfigured,
+      expoTokens: expoCount,
+      webPushSubs: subs.length,
+      error,
     });
   }
 

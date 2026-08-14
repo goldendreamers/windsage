@@ -5,6 +5,7 @@
 
 let webpushMod = null;
 let configured = false;
+let warnedSkip = false;
 
 export function vapidConfig() {
   const publicKey = (process.env.WEB_PUSH_VAPID_PUBLIC || '').trim();
@@ -79,7 +80,15 @@ export function collectWebPushSubscriptions(bag) {
 
 export async function sendWebPush(subscription, { title, body, data } = {}) {
   const ok = await ensureWebPushConfigured();
-  if (!ok) return { ok: false, skipped: true };
+  if (!ok) {
+    if (!warnedSkip) {
+      console.warn(
+        '[webpush] skipped — set WEB_PUSH_VAPID_PUBLIC and WEB_PUSH_VAPID_PRIVATE in /data/windsage/oauth.env',
+      );
+      warnedSkip = true;
+    }
+    return { ok: false, skipped: true };
+  }
   const mod = await loadWebPush();
   if (!mod) return { ok: false, skipped: true };
   const webpush = mod.default || mod;

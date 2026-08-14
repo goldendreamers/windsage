@@ -638,6 +638,18 @@ export async function pingCloud(): Promise<boolean> {
   }
 }
 
+/** Public health — includes whether Wald can send Web Push. */
+export async function fetchCloudHealth(): Promise<{
+  ok: boolean;
+  webPush?: boolean;
+} | null> {
+  try {
+    return await cloudFetch<{ ok: boolean; webPush?: boolean }>('/health', { method: 'GET' });
+  } catch {
+    return null;
+  }
+}
+
 export function snapshotsToLive(
   snapshots: Record<string, CloudSnapshot> | null | undefined,
 ): Record<

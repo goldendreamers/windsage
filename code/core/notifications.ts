@@ -96,8 +96,8 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
     const keyJson = (await keyRes.json()) as { publicKey?: string };
     if (!keyJson.publicKey) return null;
 
-    // Cache-bust so phones pick up lock-screen SW fixes after deploy.
-    const swVersion = '5';
+    // Must match public/sw.js SW_VERSION (windsage-sw-v7).
+    const swVersion = '7';
     const reg = await navigator.serviceWorker.register(`/sw.js?v=${swVersion}`, { scope: '/' });
     await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
@@ -127,6 +127,12 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
       expirationTime: json.expirationTime ?? null,
       keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
     };
+    try {
+      const { registerWithCloud } = await import('./cloud');
+      await registerWithCloud();
+    } catch (syncErr) {
+      console.warn('[windsage] push subscription not stored on cloud yet', syncErr);
+    }
     return cachedWebPush;
   } catch (error) {
     console.warn('[windsage] web push subscribe failed', error);

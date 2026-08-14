@@ -31,9 +31,10 @@ export function isRunningAsInstalledApp(): boolean {
   return !!(mq || iosStandalone);
 }
 
-export function getInstallPlatform(): 'ios' | 'android' | 'desktop' | 'other' {
+export function getInstallPlatform(): 'ios' | 'ios-other' | 'android' | 'desktop' | 'other' {
   if (typeof navigator === 'undefined') return 'other';
   const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua) && /CriOS|FxiOS|EdgiOS/i.test(ua)) return 'ios-other';
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
   if (/Android/i.test(ua)) return 'android';
   if (/Windows|Macintosh|Linux/i.test(ua)) return 'desktop';
