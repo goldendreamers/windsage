@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -14,8 +14,9 @@ import {
   DEFAULT_RULE,
   type CatalogStation,
   findExistingFollow,
+  foldSearchText,
   followSourceRef,
-  suggestCatalogStations,
+  searchCatalogStations,
   suggestExistingFollows,
   windguruName,
 } from '../shared/defaults';
@@ -33,7 +34,7 @@ import {
   resolveFollowInput,
 } from '../core/stations';
 import { parseWindguruRef } from '../core/windguru';
-import { getCloudBaseUrl } from '../core/cloud';
+import { fetchCatalogSearch, getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
 import { FirstTimeBanner } from './FirstTimeBanner';
 import { SimpleNotifyPicker } from './SimpleNotifyPicker';
@@ -91,6 +92,12 @@ export function AddStationModal({
   const [locationPick, setLocationPick] = useState<LocationPick | null>(null);
   const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
+  const [catalogHits, setCatalogHits] = useState<CatalogStation[]>([]);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogSize, setCatalogSize] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [showAllMatches, setShowAllMatches] = useState(false);
+  const [fromServer, setFromServer] = useState(false);
   const [notifyRule, setNotifyRule] = useState<AlertRule>(() =>
     ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID),
   );
@@ -135,31 +142,74 @@ export function AddStationModal({
   const addDisabled = busy || (provider === 'location' && !locationPick);
 
   const searchQuery = (stationId.trim() || (simpleMode ? nickname.trim() : '')).trim();
+  const searchReady = searchQuery.length >= 2 || /^\d+$/.test(searchQuery);
 
-  const existingSuggestions = useMemo(
-    () =>
-      suggestExistingFollows(existingStations, searchQuery).filter(
-        (f) => normalizeProvider(f.provider) === provider,
-      ),
-    [existingStations, searchQuery, provider],
-  );
-  const catalogSuggestions = useMemo(
-    () => {
-      const rows = suggestCatalogStations(
-        catalogStations,
-        existingStations,
-        searchQuery,
-        12,
-        provider,
-      );
-      if (!simpleMode) return rows;
-      return rows.filter(
-        (entry) =>
-          normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
-      );
-    },
-    [catalogStations, existingStations, searchQuery, provider, simpleMode],
-  );
+  useEffect(() => {
+    if (!visible) return;
+    if (!searchReady) {
+      setCatalogHits([]);
+      setCatalogTotal(0);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      void (async () => {
+        const limit = showAllMatches ? 400 : 40;
+        const providerFilter = simpleMode ? 'windguru' : provider;
+        const kindFilter = simpleMode ? 'station' : undefined;
+        const remote = await fetchCatalogSearch(searchQuery, {
+          limit,
+          provider: providerFilter,
+          kind: kindFilter,
+        });
+        if (cancelled) return;
+        if (remote.fromServer) {
+          const rows = simpleMode
+            ? remote.stations.filter(
+                (entry) =>
+                  normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
+              )
+            : remote.stations;
+          setCatalogHits(rows);
+          setCatalogTotal(remote.total);
+          setCatalogSize(remote.catalogSize);
+          setFromServer(true);
+          setSearching(false);
+          return;
+        }
+        const local = searchCatalogStations(catalogStations, searchQuery, {
+          limit,
+          provider: providerFilter,
+          kind: kindFilter,
+        });
+        const rows = simpleMode
+          ? local.stations.filter(
+              (entry) =>
+                normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
+            )
+          : local.stations;
+        setCatalogHits(rows);
+        setCatalogTotal(local.total);
+        setCatalogSize(catalogStations.length);
+        setFromServer(false);
+        setSearching(false);
+      })();
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    visible,
+    searchReady,
+    searchQuery,
+    showAllMatches,
+    simpleMode,
+    provider,
+    catalogStations,
+  ]);
 
   const saveFollow = (
     id: string,
@@ -184,6 +234,12 @@ export function AddStationModal({
     setLocationPick(null);
     setPendingMembers(null);
     setPendingCatalog(null);
+    setCatalogHits([]);
+    setCatalogTotal(0);
+    setCatalogSize(0);
+    setSearching(false);
+    setShowAllMatches(false);
+    setFromServer(false);
     setNotifyRule(ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID));
   };
 
@@ -212,6 +268,57 @@ export function AddStationModal({
       linkedLiveStation: entry.linkedLiveStation ?? null,
       liveLinkWarning: entry.liveLinkWarning ?? null,
     });
+
+  const followedHits = suggestExistingFollows(existingStations, searchQuery, 80);
+  const lookupRows = (() => {
+    const rows: Array<{
+      key: string;
+      name: string;
+      meta: string;
+      action: 'Open' | 'Add';
+      onPress: () => void;
+    }> = [];
+    const seen = new Set<string>();
+    for (const follow of followedHits) {
+      const key = `${normalizeProvider(follow.provider)}:${follow.stationId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        key: `follow_${follow.id}`,
+        name: windguruName(follow),
+        meta: `${PROVIDER_META[normalizeProvider(follow.provider)].short} · ${followSourceRef(follow)}`,
+        action: 'Open',
+        onPress: () => pickExisting(follow),
+      });
+    }
+    for (const entry of catalogHits) {
+      const key = `${normalizeProvider(entry.provider)}:${entry.stationId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const existing = findExistingFollow(existingStations, {
+        stationId: entry.stationId,
+        provider: entry.provider,
+      });
+      if (existing) {
+        rows.push({
+          key: `follow_${existing.id}`,
+          name: windguruName(existing),
+          meta: `${PROVIDER_META[normalizeProvider(existing.provider)].short} · ${followSourceRef(existing)}`,
+          action: 'Open',
+          onPress: () => pickExisting(existing),
+        });
+        continue;
+      }
+      rows.push({
+        key: `cat_${entry.provider}_${entry.stationId}`,
+        name: catalogLabel(entry),
+        meta: `${PROVIDER_META[normalizeProvider(entry.provider)].short} · #${entry.stationId}`,
+        action: 'Add',
+        onPress: () => pickCatalog(entry),
+      });
+    }
+    return rows;
+  })();
 
   /** Tap a directory hit — add it to the follow list (or open if already saved). */
   const pickCatalog = (entry: CatalogStation) => {
@@ -244,6 +351,7 @@ export function AddStationModal({
 
   const applyIdText = (text: string) => {
     setStationId(text);
+    setShowAllMatches(false);
     setPendingCatalog(null);
     setError(null);
     setLinkHint(null);
@@ -307,43 +415,41 @@ export function AddStationModal({
     const typed = (stationId.trim() || (simpleMode ? nickname.trim() : '')).trim();
     const looksLikeId = /^\d+$/.test(typed);
     if (!looksLikeId && typed.length >= 2 && (simpleMode || provider === 'windguru')) {
-      const existingHits = suggestExistingFollows(existingStations, typed).filter(
-        (follow) => !simpleMode || normalizeProvider(follow.provider) === 'windguru',
-      );
-      const catalogHits = suggestCatalogStations(
-        catalogStations,
-        existingStations,
-        typed,
-        5,
-        simpleMode ? 'windguru' : provider,
-      );
-      const needle = typed.toLowerCase();
+      const existingHits = suggestExistingFollows(existingStations, typed, 80);
+      const submitHits = catalogHits.length
+        ? catalogHits
+        : searchCatalogStations(catalogStations, typed, {
+            limit: 40,
+            provider: simpleMode ? 'windguru' : provider,
+            kind: simpleMode ? 'station' : undefined,
+          }).stations;
+      const needle = foldSearchText(typed);
       const exactExisting = existingHits.find(
-        (follow) => windguruName(follow).toLowerCase() === needle,
+        (follow) => foldSearchText(windguruName(follow)) === needle,
       );
       if (exactExisting) {
         reset();
         onReuse(exactExisting.id);
         return;
       }
-      const exactCatalog = catalogHits.find(
-        (hit) => catalogLabel(hit).trim().toLowerCase() === needle,
+      const exactCatalog = submitHits.find(
+        (hit) => foldSearchText(catalogLabel(hit).trim()) === needle,
       );
-      const pick = exactCatalog || (catalogHits.length === 1 ? catalogHits[0] : null);
+      const pick = exactCatalog || (submitHits.length === 1 ? submitHits[0] : null);
       if (pick) {
         pickCatalog(pick);
         return;
       }
-      if (existingHits.length === 1 && catalogHits.length === 0) {
+      if (existingHits.length === 1 && submitHits.length === 0) {
         reset();
         onReuse(existingHits[0].id);
         return;
       }
-      if (catalogHits.length > 1 || existingHits.length > 1) {
+      if (submitHits.length > 1 || existingHits.length > 1) {
         setError('Several stations match — tap one below to add it.');
         return;
       }
-      if (catalogHits.length === 0 && existingHits.length === 0) {
+      if (submitHits.length === 0 && existingHits.length === 0) {
         setError('No live station with that name. Try another spelling or the station number.');
         return;
       }
@@ -614,51 +720,60 @@ export function AddStationModal({
               Nearby: {pendingMembers.slice(0, 4).map((m) => m.name).join(' · ')}
             </Text>
           ) : null}
-          {existingSuggestions.length > 0 ? (
-            <View style={styles.suggestions}>
-              <Text style={styles.suggestLabel}>Already following</Text>
-              {existingSuggestions.map((follow) => (
-                <Pressable
-                  key={follow.id}
-                  style={styles.suggestRow}
-                  onPress={() => pickExisting(follow)}
-                  disabled={busy}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.suggestName}>{windguruName(follow)}</Text>
-                    <Text style={styles.suggestMeta}>
-                      {PROVIDER_META[normalizeProvider(follow.provider)].short} ·{' '}
-                      {followSourceRef(follow)}
-                    </Text>
-                  </View>
-                  <Text style={styles.suggestOpen}>Open</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          {catalogSuggestions.length > 0 ? (
+          {searchReady ? (
             <View style={styles.suggestions}>
               <Text style={styles.suggestLabel}>
-                {simpleMode ? 'Matching stations' : 'Catalog'}
+                {searching && lookupRows.length === 0
+                  ? 'Searching live stations'
+                  : catalogTotal > lookupRows.length
+                    ? `Showing ${lookupRows.length} of ${catalogTotal} matching “${searchQuery}”`
+                    : lookupRows.length > 0
+                      ? `${lookupRows.length} matching “${searchQuery}”`
+                      : `No live station matching “${searchQuery}”`}
               </Text>
-              {catalogSuggestions.map((entry) => (
+              {catalogSize > 0 ? (
+                <Text style={styles.suggestCount}>
+                  {catalogSize.toLocaleString()} stations in directory
+                  {fromServer ? '' : ' (saved names)'}
+                </Text>
+              ) : searching ? null : (
+                <Text style={styles.suggestCount}>
+                  Directory not loaded — results may be incomplete.
+                </Text>
+              )}
+              {lookupRows.map((row) => (
                 <Pressable
-                  key={`cat_${entry.provider}_${entry.stationId}`}
+                  key={row.key}
                   style={styles.suggestRow}
-                  onPress={() => pickCatalog(entry)}
+                  onPress={row.onPress}
                   disabled={busy}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.suggestName}>{catalogLabel(entry)}</Text>
-                    <Text style={styles.suggestMeta}>
-                      {PROVIDER_META[normalizeProvider(entry.provider)].short} · #
-                      {entry.stationId}
-                    </Text>
+                    <Text style={styles.suggestName}>{row.name}</Text>
+                    <Text style={styles.suggestMeta}>{row.meta}</Text>
                   </View>
-                  <Text style={styles.suggestOpen}>Add</Text>
+                  <Text style={styles.suggestOpen}>{row.action}</Text>
                 </Pressable>
               ))}
+              {!showAllMatches && catalogTotal > catalogHits.length ? (
+                <Pressable
+                  style={styles.suggestMore}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setShowAllMatches(true);
+                  }}
+                  disabled={busy || searching}
+                >
+                  <Text style={styles.suggestMoreText}>
+                    Show all {catalogTotal} matches
+                  </Text>
+                </Pressable>
+              ) : null}
+              {searching && lookupRows.length > 0 ? (
+                <View style={styles.suggestBusy}>
+                  <ActivityIndicator color={colors.accent} />
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -732,7 +847,7 @@ const styles = StyleSheet.create({
     maxHeight: '92%',
   },
   formScroll: {
-    maxHeight: 420,
+    maxHeight: 520,
   },
   formScrollContent: {
     paddingBottom: 8,
@@ -865,6 +980,29 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '800',
     fontSize: 13,
+  },
+  suggestCount: {
+    color: colors.muted,
+    fontSize: 11,
+    paddingHorizontal: 12,
+    paddingBottom: 6,
+  },
+  suggestMore: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  suggestMoreText: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  suggestBusy: {
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
   },
   linkHint: {
     color: colors.accent,

@@ -25,6 +25,7 @@ import {
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
 import { persistWindguruNameFiles, NAME_FILES } from './lib/windguruNames.mjs';
+import { mergeCatalogRows, searchCatalogStations } from './lib/catalogSearch.mjs';
 import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
@@ -1398,6 +1399,7 @@ async function handleApi(req, res, pathname, url) {
   }
 
   // Follow search directory: Windguru live names + this server's shared follows.
+  // With ?q= rank over the full directory and return a page (phones never need all ~7k rows).
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
     const shared = publicCatalogStations(store);
@@ -1407,23 +1409,28 @@ async function handleApi(req, res, pathname, url) {
     } catch (e) {
       console.error('[windsage-cloud] windguru directory failed', e);
     }
-    const byKey = new Map();
-    for (const row of [...windguru, ...shared]) {
-      const provider = String(row?.provider || 'windguru').toLowerCase();
-      const sid = String(row?.stationId || '').trim();
-      if (!sid) continue;
-      const key = `${provider}:${sid}`;
-      const prev = byKey.get(key);
-      if (!prev) {
-        byKey.set(key, row);
-        continue;
-      }
-      // Prefer a real source name when merging shared follows onto the live list.
-      if (!prev.sourceName && row.sourceName) byKey.set(key, { ...prev, ...row, sourceName: row.sourceName });
+    const merged = mergeCatalogRows([windguru, shared]);
+    const q = String(url.searchParams.get('q') || '').trim();
+    const limitRaw = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+    const provider = String(url.searchParams.get('provider') || '').trim() || null;
+    const kind = String(url.searchParams.get('kind') || '').trim() || null;
+    if (!q) {
+      return json(res, 200, {
+        ok: true,
+        stations: merged,
+        total: merged.length,
+        catalogSize: merged.length,
+      });
     }
+    const found = searchCatalogStations(merged, q, { limit, provider, kind });
     return json(res, 200, {
       ok: true,
-      stations: [...byKey.values()],
+      stations: found.stations,
+      total: found.total,
+      catalogSize: merged.length,
+      query: q,
+      limit,
     });
   }
 

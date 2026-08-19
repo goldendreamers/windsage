@@ -10,9 +10,11 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 2026-08-19 — Wald release: restore dropped follows + Install download (PR #9)
+### 2026-08-19 — Wald release: full Follow lookup + restore follows (PR #9)
 
-Nimrod reported about half of his stations were deleted. Cloud PUT used to replace the whole bag whenever the client sent a non-empty shorter list. Fix is on this branch. After `npm run release:web`, if the live count is still short, merge from a daily backup (does not wipe users):
+Nimrod could not see all stations when looking them up (Follow search capped at 12, and phones often never loaded the ~6,900-name directory). Also earlier: about half of followed stations were deleted by a short-list sync.
+
+After `npm run release:web`, check lookup on https://windsage.nimrod.bio/ — type a common name (e.g. Haifa / Park). You should see **more than 12** hits when many match, a **“Showing N of M”** line, **Show all M matches**, and directory size around **6,900**. Then if follow count is still short, merge from a daily backup (does not wipe users):
 
 ```
 cd /Users/goldendreamers/windsage
@@ -24,6 +26,9 @@ npm run release:web
 
 node scripts/build-windguru-station-names.mjs --out public
 
+# Lookup: live directory search (should be ~6900, not a 12-hit cap)
+curl -sS "https://windsage.nimrod.bio/v1/catalog/stations?q=haifa&limit=40" | python3 -c "import sys,json; d=json.load(sys.stdin); print('hits',len(d.get('stations')or[]),'total',d.get('total'),'catalog',d.get('catalogSize'))"
+
 ssh wald-mc 'python3 -c "import json;d=json.load(open(\"/data/windsage/data/store.json\"));
 print(\"users\",len(d.get(\"users\")or{}), \"follows\", sum(len(u.get(\"stations\")or[]) for u in (d.get(\"users\")or{}).values()))"'
 
@@ -34,7 +39,7 @@ ssh wald-mc 'node /data/windsage/restore-stations.mjs --live /data/windsage/data
 
 Never wipe /data/windsage/data/store.json.
 
-Email via scripts/notify-email.sh when live follow counts are restored.
+Email via scripts/notify-email.sh when live lookup shows the full directory and follow counts are restored.
 ```
 
 ---

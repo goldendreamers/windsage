@@ -431,32 +431,60 @@ export function findExistingFollow(
   return null;
 }
 
-/** Typeahead filter over already-followed stations (Windguru name / ids). */
+/** Fold accents so "bobik" matches "Bobík" and "haifa" matches "Haïfa". */
+export function foldSearchText(value: string): string {
+  let s = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  s = s
+    .replace(/ł/g, 'l')
+    .replace(/ø/g, 'o')
+    .replace(/æ/g, 'ae')
+    .replace(/œ/g, 'oe')
+    .replace(/ß/g, 'ss')
+    .replace(/đ/g, 'd');
+  return s;
+}
+
+export function compactSearchText(value: string): string {
+  return foldSearchText(value).replace(/[^a-z0-9]+/g, '');
+}
+
+function followMatchesQuery(station: FollowedStation, query: string): boolean {
+  const qRaw = query.trim();
+  const q = foldSearchText(qRaw);
+  if (!q) return false;
+  const digits = qRaw.replace(/\D/g, '');
+  const label = foldSearchText(windguruName(station));
+  const nick = foldSearchText(String(station.nickname ?? ''));
+  const sid = foldSearchText(String(station.stationId ?? ''));
+  const live = foldSearchText(String(station.liveStationId ?? ''));
+  const compact = compactSearchText(windguruName(station) + ' ' + String(station.nickname ?? ''));
+  const qCompact = compactSearchText(qRaw);
+  return (
+    label.includes(q) ||
+    (nick && nick.includes(q)) ||
+    sid.includes(q) ||
+    (live && live.includes(q)) ||
+    (qCompact.length >= 2 && compact.includes(qCompact)) ||
+    (digits.length > 0 && (sid.includes(digits) || (live && live.includes(digits))))
+  );
+}
+
+/** Typeahead filter over already-followed stations (Windguru name / ids / nickname). */
 export function suggestExistingFollows(
   stations: FollowedStation[],
   query: string,
   limit = 6,
 ): FollowedStation[] {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   if (!q) return [];
-  const digits = q.replace(/\D/g, '');
   const out: FollowedStation[] = [];
   for (const station of stations) {
-    const label = windguruName(station).toLowerCase();
-    const nick = String(station.nickname ?? '').trim().toLowerCase();
-    const sid = String(station.stationId ?? '').trim().toLowerCase();
-    const live = String(station.liveStationId ?? '').trim().toLowerCase();
-    const hit =
-      label.includes(q) ||
-      (nick && nick.includes(q)) ||
-      sid.includes(q) ||
-      (live && live.includes(q)) ||
-      (digits.length > 0 &&
-        (sid.includes(digits) || (live && live.includes(digits))));
-    if (hit) {
-      out.push(station);
-      if (out.length >= limit) break;
-    }
+    if (!followMatchesQuery(station, q)) continue;
+    out.push(station);
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -476,6 +504,94 @@ function catalogKey(provider: StationProvider | string | null | undefined, stati
   return `${normalizeProvider(provider)}:${String(stationId ?? '').trim()}`;
 }
 
+/** Keep scoring in sync with code/cloud/lib/catalogSearch.mjs */
+export function catalogMatchScore(entry: CatalogStation, query: string): number {
+  const qRaw = String(query ?? '').trim();
+  const q = foldSearchText(qRaw);
+  if (!q) return 0;
+  const digits = qRaw.replace(/\D/g, '');
+  if (q.length < 2 && digits.length < 1) return 0;
+
+  const sid = String(entry?.stationId ?? '').trim();
+  const asFollow = {
+    id: `catalog_${normalizeProvider(entry.provider)}_${sid}`,
+    provider: normalizeProvider(entry.provider),
+    stationId: sid,
+    kind: entry.kind,
+    nickname: '',
+    sourceName: entry.sourceName ?? null,
+    enabled: true,
+    rule: DEFAULT_RULE,
+    liveStationId: entry.liveStationId ?? null,
+    linkedLiveStation: entry.linkedLiveStation ?? null,
+    liveLinkWarning: entry.liveLinkWarning ?? null,
+  } satisfies FollowedStation;
+  const label = foldSearchText(windguruName(asFollow));
+  const live = foldSearchText(String(entry.liveStationId ?? ''));
+  const sidFold = foldSearchText(sid);
+  const qCompact = compactSearchText(qRaw);
+  const labelCompact = compactSearchText(windguruName(asFollow));
+
+  if (label === q || sidFold === q) return 100;
+  if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
+  if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
+  if (digits && (sid === digits || sid.startsWith(digits))) return 75;
+  if (label.includes(q) || sidFold.includes(q)) return 50;
+  if (qCompact.length >= 2 && labelCompact.includes(qCompact)) return 45;
+  if (live && (live.includes(q) || (digits && live.includes(digits)))) return 40;
+  if (digits.length > 0 && sid.includes(digits)) return 30;
+  return 0;
+}
+
+export type CatalogSearchOpts = {
+  limit?: number;
+  provider?: StationProvider | string | null;
+  kind?: WindguruKind | 'any' | null;
+  exclude?: FollowedStation[];
+};
+
+/** Rank matches over the full directory. Does not drop already-followed IDs unless `exclude` is set. */
+export function searchCatalogStations(
+  catalog: CatalogStation[],
+  query: string,
+  opts: CatalogSearchOpts = {},
+): { stations: CatalogStation[]; total: number } {
+  const qRaw = String(query ?? '').trim();
+  const q = foldSearchText(qRaw);
+  const digits = qRaw.replace(/\D/g, '');
+  if (!q || (q.length < 2 && digits.length < 1)) {
+    return { stations: [], total: 0 };
+  }
+
+  const limitRaw = Number(opts.limit);
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+  const wantProvider = opts.provider ? normalizeProvider(opts.provider) : null;
+  const wantKind = opts.kind && opts.kind !== 'any' ? opts.kind : null;
+  const exclude = new Set<string>();
+  for (const row of opts.exclude || []) {
+    const sid = String(row?.stationId ?? '').trim();
+    if (sid) exclude.add(catalogKey(row.provider, sid));
+  }
+
+  const scored: { entry: CatalogStation; score: number; sid: string }[] = [];
+  for (const entry of catalog) {
+    const sid = String(entry.stationId ?? '').trim();
+    const provider = normalizeProvider(entry.provider);
+    if (!sid) continue;
+    if (exclude.has(catalogKey(provider, sid))) continue;
+    if (wantProvider && provider !== wantProvider) continue;
+    if (wantKind && (entry.kind || 'station') !== wantKind) continue;
+    const score = catalogMatchScore(entry, qRaw);
+    if (score > 0) scored.push({ entry, score, sid });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return {
+    stations: scored.slice(0, limit).map((row) => row.entry),
+    total: scored.length,
+  };
+}
+
 /** Catalog suggestions excluding IDs already in the user's follow list. */
 export function suggestCatalogStations(
   catalog: CatalogStation[],
@@ -484,47 +600,9 @@ export function suggestCatalogStations(
   limit = 12,
   providerFilter?: StationProvider | null,
 ): CatalogStation[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  const digits = q.replace(/\D/g, '');
-  if (q.length < 2 && digits.length < 1) return [];
-  const taken = new Set<string>();
-  for (const s of existing) {
-    if (s.stationId?.trim()) taken.add(catalogKey(s.provider, s.stationId));
-  }
-  const wantProvider = providerFilter ? normalizeProvider(providerFilter) : null;
-  const scored: { entry: CatalogStation; score: number }[] = [];
-  for (const entry of catalog) {
-    const sid = String(entry.stationId ?? '').trim();
-    const provider = normalizeProvider(entry.provider);
-    if (!sid || taken.has(catalogKey(provider, sid))) continue;
-    if (wantProvider && provider !== wantProvider) continue;
-    const asFollow = {
-      id: `catalog_${provider}_${sid}`,
-      provider,
-      stationId: sid,
-      kind: entry.kind,
-      nickname: '',
-      sourceName: entry.sourceName ?? null,
-      enabled: true,
-      rule: DEFAULT_RULE,
-      liveStationId: entry.liveStationId ?? null,
-      linkedLiveStation: entry.linkedLiveStation ?? null,
-      liveLinkWarning: entry.liveLinkWarning ?? null,
-    } satisfies FollowedStation;
-    const label = windguruName(asFollow).toLowerCase();
-    const live = String(entry.liveStationId ?? '').trim().toLowerCase();
-    const sidLower = sid.toLowerCase();
-    let score = 0;
-    if (label === q || sidLower === q) score = 100;
-    else if (label.startsWith(q) || sidLower.startsWith(q)) score = 90;
-    else if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) score = 80;
-    else if (digits && (sid === digits || sid.startsWith(digits))) score = 75;
-    else if (label.includes(q) || sidLower.includes(q)) score = 50;
-    else if (live && (live.includes(q) || (digits && live.includes(digits)))) score = 40;
-    else if (digits.length > 0 && sid.includes(digits)) score = 30;
-    if (score > 0) scored.push({ entry, score });
-  }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, Math.max(1, limit)).map((row) => row.entry);
+  return searchCatalogStations(catalog, query, {
+    limit: Math.max(1, limit),
+    provider: providerFilter,
+    exclude: existing,
+  }).stations;
 }
