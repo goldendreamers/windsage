@@ -10,9 +10,9 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 2026-08-19 — Wald release: Follow names + Install actually downloads (PR #9)
+### 2026-08-19 — Wald release: restore dropped follows + Install download (PR #9)
 
-Cloud agent cannot SSH `wald-mc`. Install must download the app (Chrome install dialog / iOS `.mobileconfig`), not a how-to page.
+Nimrod reported about half of his stations were deleted. Cloud PUT used to replace the whole bag whenever the client sent a non-empty shorter list. Fix is on this branch. After `npm run release:web`, if the live count is still short, merge from a daily backup (does not wipe users):
 
 ```
 cd /Users/goldendreamers/windsage
@@ -23,24 +23,18 @@ git pull origin cursor/cloud-agent-1787128827188-i9kiy
 npm run release:web
 
 node scripts/build-windguru-station-names.mjs --out public
-ls -l public/windguru-live-station-names.txt public/app/windsage.mobileconfig
 
-curl -sS -I https://windsage.nimrod.bio/app/windsage.mobileconfig | head
-# Expect Content-Type: application/x-apple-aspen-config
+ssh wald-mc 'python3 -c "import json;d=json.load(open(\"/data/windsage/data/store.json\"));
+print(\"users\",len(d.get(\"users\")or{}), \"follows\", sum(len(u.get(\"stations\")or[]) for u in (d.get(\"users\")or{}).values()))"'
 
-curl -sS https://windsage.nimrod.bio/v1/catalog/stations | python3 -c "import json,sys; d=json.load(sys.stdin); print('ok', d.get('ok'), 'n', len(d.get('stations') or []))"
-# Expect n around 6900.
+# If follows are still short, pick a backup from before the drop:
+ssh wald-mc 'ls -lt /data/backups/windsage | head'
+ssh wald-mc 'node /data/windsage/restore-stations.mjs --live /data/windsage/data --from /data/backups/windsage/STOREFILE.json.gz'
+# Then: sudo systemctl restart windsage
 
-If public/windguru-live-station-names.txt is ~100 KB, commit and push it:
-git add public/windguru-live-station-names.txt public/windguru-live-station-names.unique.txt public/windguru-live-station-names.json public/windguru-live-stations.json public/windguru-live-station-names.meta.json
-git commit -m "Save Windguru live station names (~100 KB names-only file)."
-git push
+Never wipe /data/windsage/data/store.json.
 
-Do not wipe /data/windsage/data/store.json.
-
-Email via scripts/notify-email.sh:
-Subject: Windsage · done: Install downloads the app + live names search
-Body: Live https://windsage.nimrod.bio/ — Menu → Install downloads the app (Chrome install prompt, or https://windsage.nimrod.bio/app/windsage.mobileconfig on iPhone). Follow search lists live Windguru names. PR https://github.com/goldendreamers/windsage/pull/9
+Email via scripts/notify-email.sh when live follow counts are restored.
 ```
 
 ---

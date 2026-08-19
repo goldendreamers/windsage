@@ -359,7 +359,11 @@ export async function consumeAuthRedirectParams(): Promise<{
 export async function syncStationsToCloud(
   settings: AppSettings,
   pushToken?: string | null,
-  opts?: { clearStations?: boolean },
+  opts?: {
+    clearStations?: boolean;
+    removedIds?: string[];
+    removedKeys?: Array<{ provider?: string; stationId: string }>;
+  },
 ): Promise<{
   snapshots: Record<string, CloudSnapshot>;
   stations?: FollowedStation[];
@@ -376,6 +380,8 @@ export async function syncStationsToCloud(
     // ignore
   }
   const clearStations = opts?.clearStations === true ? true : undefined;
+  const removedIds = opts?.removedIds?.length ? opts.removedIds : undefined;
+  const removedKeys = opts?.removedKeys?.length ? opts.removedKeys : undefined;
 
   if (session) {
     const data = await cloudFetch<{
@@ -388,6 +394,8 @@ export async function syncStationsToCloud(
       body: JSON.stringify({
         stations: settings.stations,
         clearStations,
+        removedIds,
+        removedKeys,
         pollIntervalMinutes: settings.pollIntervalMinutes,
         simpleMode: settings.simpleMode !== false,
         pushToken: tokenPush ?? undefined,
@@ -413,6 +421,8 @@ export async function syncStationsToCloud(
     body: JSON.stringify({
       stations: settings.stations,
       clearStations,
+      removedIds,
+      removedKeys,
       pollIntervalMinutes: settings.pollIntervalMinutes,
       simpleMode: settings.simpleMode !== false,
       pushToken: tokenPush ?? undefined,

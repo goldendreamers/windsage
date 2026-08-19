@@ -124,6 +124,8 @@ export interface AppSettings {
   pollIntervalMinutes: number;
   /** Easy UI. Missing/undefined means on. Saved per account when signed in. */
   simpleMode?: boolean;
+  /** Signed-in user id for this device bag — used so sync does not drop local extras. */
+  accountId?: string | null;
 }
 
 export interface StationReading {

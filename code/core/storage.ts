@@ -43,6 +43,7 @@ function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
         ? raw.pollIntervalMinutes
         : DEFAULT_SETTINGS.pollIntervalMinutes,
     simpleMode: raw.simpleMode !== false,
+    accountId: raw.accountId ? String(raw.accountId) : null,
   };
 }
 

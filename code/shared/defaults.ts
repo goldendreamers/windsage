@@ -52,6 +52,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
   simpleMode: true,
+  accountId: null,
 };
 
 export const DEFAULT_ALERT_STATE: AlertState = {
@@ -228,6 +229,48 @@ export function alertConditionLabel(message: string | null | undefined): string 
 
 export function stationProvider(station: Pick<FollowedStation, 'provider'> | null | undefined): StationProvider {
   return normalizeProvider(station?.provider);
+}
+
+export function followIdentityKey(
+  station: Pick<FollowedStation, 'provider' | 'stationId'> | null | undefined,
+): string {
+  const sid = String(station?.stationId ?? '').trim();
+  if (!sid) return '';
+  return `${normalizeProvider(station?.provider)}:${sid}`;
+}
+
+/** Union two follow lists. Primary wins on the same provider:id; extra adds new ones. */
+export function mergeFollowedStations(
+  primary: FollowedStation[] | null | undefined,
+  extra: FollowedStation[] | null | undefined,
+): FollowedStation[] {
+  const map = new Map<string, FollowedStation>();
+  for (const station of primary || []) {
+    const key = followIdentityKey(station);
+    if (key) map.set(key, station);
+  }
+  for (const station of extra || []) {
+    const key = followIdentityKey(station);
+    if (!key || map.has(key)) continue;
+    map.set(key, station);
+  }
+  return [...map.values()];
+}
+
+/** True when every cloud follow is already on the local list (local is a superset). */
+export function cloudCoveredByLocal(
+  cloud: FollowedStation[] | null | undefined,
+  local: FollowedStation[] | null | undefined,
+): boolean {
+  const rows = cloud || [];
+  if (!rows.length) return false;
+  const localKeys = new Set(
+    (local || []).map((station) => followIdentityKey(station)).filter(Boolean),
+  );
+  return rows.every((station) => {
+    const key = followIdentityKey(station);
+    return !!key && localKeys.has(key);
+  });
 }
 
 export function createFollowedStation(

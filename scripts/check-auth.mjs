@@ -14,6 +14,8 @@ import {
   createSession,
   getSession,
   mergeStations,
+  applyStationsPut,
+  restoreStationsFromBackupStore,
   publicUser,
   ensureDevice,
   linkDeviceToUser,
@@ -99,5 +101,45 @@ assert.equal(newbie.stations[0].stationId, '219');
 assert.equal(unlinkDeviceFromUser(store, 'dev_shared', 'sec_shared'), true);
 assert.equal(store.devices.dev_shared.userId, null);
 assert.equal(store.devices.dev_shared.stations.length, 0);
+
+const twelve = Array.from({ length: 12 }, (_, i) => ({
+  id: `st_${i}`,
+  provider: 'windguru',
+  stationId: String(1000 + i),
+  nickname: `S${i}`,
+}));
+const half = twelve.slice(0, 6);
+const shrink = applyStationsPut(twelve, half, {});
+assert.equal(shrink.stations.length, 12, 'partial PUT must not drop omitted follows');
+assert.equal(shrink.restored, 6);
+
+const unfollowed = applyStationsPut(twelve, twelve.slice(1), {
+  removedIds: ['st_0'],
+  removedKeys: [{ provider: 'windguru', stationId: '1000' }],
+});
+assert.equal(unfollowed.stations.length, 11);
+assert.equal(unfollowed.stations.some((s) => s.stationId === '1000'), false);
+
+const emptied = applyStationsPut(twelve, [], {});
+assert.equal(emptied.stations.length, 12);
+assert.equal(emptied.kept, true);
+const cleared = applyStationsPut(twelve, [], { clearStations: true });
+assert.equal(cleared.stations.length, 0);
+
+const bakStore = {
+  users: {
+    u1: { stations: twelve },
+  },
+  devices: {},
+};
+const liveStore = {
+  users: {
+    u1: { stations: half },
+  },
+  devices: {},
+};
+const rec = restoreStationsFromBackupStore(liveStore, bakStore);
+assert.equal(rec.restored, 6);
+assert.equal(liveStore.users.u1.stations.length, 12);
 
 console.log('check-auth: ok');

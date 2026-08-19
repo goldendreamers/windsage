@@ -109,6 +109,12 @@ export async function loadStore(dataDir) {
     );
     loaded = empty();
   }
+  if (loaded && backup && loaded !== backup) {
+    const rec = restoreStationsFromBackupStore(loaded, backup);
+    if (rec.restored > 0) {
+      console.warn(`[store] reattached ${rec.restored} dropped follows from ${STORE_BAK}`);
+    }
+  }
   cachedStore = loaded;
   cachedDir = key;
   return cachedStore;
@@ -366,22 +372,108 @@ export function unlinkDeviceFromUser(store, deviceId, secret) {
 
 /** Prefer existing user station rules; add guest stations that are new by Windguru id. */
 export function mergeStations(userStations = [], guestStations = []) {
-  const keyOf = (s) => {
-    const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
-    const sid = String(s?.stationId || '').trim();
-    return sid ? `${provider}:${sid}` : '';
-  };
   const map = new Map();
   for (const s of userStations) {
-    const k = keyOf(s);
+    const k = followKey(s);
     if (k) map.set(k, s);
   }
   for (const s of guestStations) {
-    const k = keyOf(s);
+    const k = followKey(s);
     if (!k) continue;
     if (!map.has(k)) map.set(k, s);
   }
   return [...map.values()];
+}
+
+export function followKey(s) {
+  const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
+  const sid = String(s?.stationId || '').trim();
+  return sid ? `${provider}:${sid}` : '';
+}
+
+/**
+ * Apply a stations PUT without dropping follows the client omitted by accident.
+ * Removals must be explicit (`removedIds` / `removedKeys` or `clearStations`).
+ */
+export function applyStationsPut(existing = [], incoming, opts = {}) {
+  const current = Array.isArray(existing) ? existing.slice() : [];
+  if (!Array.isArray(incoming)) {
+    return { stations: current, kept: true, restored: 0 };
+  }
+  if (incoming.length === 0 && current.length > 0 && opts.clearStations !== true) {
+    return { stations: current, kept: true, restored: 0 };
+  }
+  if (incoming.length === 0 && opts.clearStations === true) {
+    return { stations: [], kept: false, restored: 0 };
+  }
+
+  const removedIds = new Set(
+    (opts.removedIds || []).map((id) => String(id || '').trim()).filter(Boolean),
+  );
+  const removedKeys = new Set();
+  for (const raw of opts.removedKeys || []) {
+    if (!raw) continue;
+    if (typeof raw === 'string') {
+      const k = raw.trim();
+      if (k) removedKeys.add(k);
+      continue;
+    }
+    const k = followKey(raw);
+    if (k) removedKeys.add(k);
+  }
+
+  const incomingByKey = new Map();
+  for (const s of incoming) {
+    const k = followKey(s);
+    if (!k) continue;
+    incomingByKey.set(k, s);
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const s of current) {
+    const k = followKey(s);
+    if (!k) {
+      out.push(s);
+      continue;
+    }
+    if (removedIds.has(String(s.id || '').trim()) || removedKeys.has(k)) continue;
+    const newer = incomingByKey.get(k);
+    out.push(newer ? { ...s, ...newer, id: s.id || newer.id } : s);
+    seen.add(k);
+  }
+  for (const [k, s] of incomingByKey) {
+    if (seen.has(k)) continue;
+    if (removedIds.has(String(s.id || '').trim()) || removedKeys.has(k)) continue;
+    out.push(s);
+    seen.add(k);
+  }
+  const restored = Math.max(0, out.length - incoming.length);
+  return { stations: out, kept: false, restored };
+}
+
+/** Re-attach follows that still exist on bak but were dropped from the live bag. */
+export function restoreStationsFromBackupStore(primary, backup) {
+  if (!primary || !backup) return { restored: 0 };
+  let restored = 0;
+  const mergeBag = (cur, bak, label) => {
+    if (!cur || !bak?.stations?.length) return;
+    const before = (cur.stations || []).length;
+    const merged = mergeStations(cur.stations || [], bak.stations || []);
+    const extra = merged.length - before;
+    if (extra > 0) {
+      console.warn(`[store] restored ${extra} follows for ${label} from bak`);
+      cur.stations = merged;
+      restored += extra;
+    }
+  };
+  for (const [id, user] of Object.entries(primary.users || {})) {
+    mergeBag(user, backup.users?.[id], `user/${id}`);
+  }
+  for (const [id, device] of Object.entries(primary.devices || {})) {
+    mergeBag(device, backup.devices?.[id], `device/${id}`);
+  }
+  return { restored };
 }
 
 /** Upsert follows into the server-wide catalog (keyed by provider:stationId). */

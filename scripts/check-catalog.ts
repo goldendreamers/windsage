@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   createFollowedStation,
+  mergeFollowedStations,
+  cloudCoveredByLocal,
   suggestCatalogStations,
   suggestExistingFollows,
 } from '../code/shared/defaults';
@@ -73,5 +75,14 @@ assert.equal(ndbcOnly[0].stationId, '44013');
 
 const wgOnly = suggestCatalogStations(catalog, [], 'bost', 12, 'windguru');
 assert.equal(wgOnly.length, 0);
+
+const twelve = [
+  createFollowedStation('1', 'A', { provider: 'windguru' }),
+  createFollowedStation('2', 'B', { provider: 'windguru' }),
+];
+const half = [twelve[0]];
+assert.equal(cloudCoveredByLocal(half, twelve), true);
+assert.equal(cloudCoveredByLocal(twelve, half), false);
+assert.equal(mergeFollowedStations(half, twelve).length, 2);
 
 console.log('check-catalog: ok');

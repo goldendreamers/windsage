@@ -28,7 +28,7 @@ import {
   snapshotsToLive,
   syncStationsToCloud,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, createFollowedStation, displayName, findExistingFollow, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
@@ -62,6 +62,21 @@ function withStationDefaults(stations: FollowedStation[] | null | undefined): Fo
     nickname: s?.nickname ?? '',
     starred: s?.starred === true,
   }));
+}
+
+/** Keep local extras when the cloud bag is a subset (stale/partial sync). */
+function adoptCloudStations(
+  local: FollowedStation[] | null | undefined,
+  incoming: FollowedStation[] | null | undefined,
+  opts?: { sameAccount?: boolean },
+): FollowedStation[] {
+  const cloud = withStationDefaults(incoming);
+  const loc = withStationDefaults(local);
+  if (!cloud.length) return loc;
+  if (opts?.sameAccount || cloudCoveredByLocal(cloud, loc)) {
+    return mergeFollowedStations(cloud, loc);
+  }
+  return cloud;
 }
 
 async function hapticLight() {
@@ -190,14 +205,17 @@ export default function App() {
         if (sync.stations) {
           const incoming = withStationDefaults(sync.stations);
           const local = settingsRef.current.stations || [];
-          // Never blank a non-empty home list with an empty cloud reply.
-          if (incoming.length > 0 || local.length === 0) {
-            const next = {
-              ...settingsRef.current,
-              stations: incoming,
-            };
-            setSettings(next);
-            await saveSettings(next);
+          const stations = adoptCloudStations(local, incoming, {
+            sameAccount: !!settingsRef.current.accountId,
+          });
+          const next = {
+            ...settingsRef.current,
+            stations,
+          };
+          setSettings(next);
+          await saveSettings(next);
+          if (stations.length > incoming.length) {
+            showToast(`Restored ${stations.length - incoming.length} missing station(s)`);
           }
         }
         const [snap] = await Promise.all([
@@ -229,7 +247,11 @@ export default function App() {
   const persistSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistSyncPending = useRef<{
     next: AppSettings;
-    opts?: { clearStations?: boolean };
+    opts?: {
+      clearStations?: boolean;
+      removedIds?: string[];
+      removedKeys?: Array<{ provider?: string; stationId: string }>;
+    };
     waiters: Array<{ resolve: () => void; reject: (e: unknown) => void }>;
   } | null>(null);
 
@@ -247,11 +269,12 @@ export default function App() {
       if (sync.stations) {
         const incoming = withStationDefaults(sync.stations);
         const local = pending.next.stations || [];
-        if (incoming.length > 0 || local.length === 0) {
-          const fixed = { ...pending.next, stations: incoming };
-          setSettings(fixed);
-          await saveSettings(fixed);
-        }
+        const stations = adoptCloudStations(local, incoming, {
+          sameAccount: !!pending.next.accountId,
+        });
+        const fixed = { ...pending.next, stations };
+        setSettings(fixed);
+        await saveSettings(fixed);
       }
       setCloudStatus(`cloud · ${formatCloudAge(Date.now())}`);
       for (const w of pending.waiters) w.resolve();
@@ -263,7 +286,14 @@ export default function App() {
   }, [applySnapshots, showToast]);
 
   const persistSettings = useCallback(
-    async (next: AppSettings, opts?: { clearStations?: boolean }) => {
+    async (
+      next: AppSettings,
+      opts?: {
+        clearStations?: boolean;
+        removedIds?: string[];
+        removedKeys?: Array<{ provider?: string; stationId: string }>;
+      },
+    ) => {
       setSettings(next);
       await saveSettings(next);
       return new Promise<void>((resolve, reject) => {
@@ -274,8 +304,9 @@ export default function App() {
           opts: {
             ...prev?.opts,
             ...opts,
-            // Once any waiter opts into clearStations, keep it for the flush.
             clearStations: !!(prev?.opts?.clearStations || opts?.clearStations),
+            removedIds: [...new Set([...(prev?.opts?.removedIds || []), ...(opts?.removedIds || [])])],
+            removedKeys: [...(prev?.opts?.removedKeys || []), ...(opts?.removedKeys || [])],
           },
           waiters: [...(prev?.waiters || []), { resolve, reject }],
         };
@@ -301,37 +332,35 @@ export default function App() {
       setAccount(payload.user);
       const cloudStations = withStationDefaults(payload.stations);
       const localStations = settingsRef.current.stations || [];
-      // Only import leftover guest follows on REGISTER. Login on a shared phone
-      // must not push the previous person's local list into this account.
       const importLocal =
         opts?.importLocalGuestFollows === true &&
         cloudStations.length === 0 &&
         localStations.length > 0;
-      const stations = cloudStations.length > 0
-        ? cloudStations
-        : importLocal
-          ? withStationDefaults(localStations)
-          : cloudStations;
+      const sameAccount = !!(payload.user?.id && settingsRef.current.accountId === payload.user.id);
+      const stations = importLocal
+        ? withStationDefaults(localStations)
+        : adoptCloudStations(localStations, cloudStations, { sameAccount });
       const next: AppSettings = {
         stations,
         pollIntervalMinutes: Number.isFinite(Number(payload.pollIntervalMinutes))
           ? Number(payload.pollIntervalMinutes)
           : 10,
         simpleMode: payload.simpleMode !== false,
+        accountId: payload.user.id,
       };
       setSettings(next);
+      settingsRef.current = next;
       await saveSettings(next);
       setAccountOpen(false);
+      const restored = Math.max(0, stations.length - cloudStations.length);
       showToast(
-        `Signed in · ${payload.user.username || payload.user.sso.google?.email || 'account'}`,
+        restored
+          ? `Signed in · restored ${restored} missing station(s)`
+          : `Signed in · ${payload.user.username || payload.user.sso.google?.email || 'account'}`,
       );
-      if (importLocal) {
-        await persistSettings(next);
-      } else {
-        await refreshFromCloud('auto');
-      }
+      await persistSettings(next);
     },
-    [persistSettings, refreshFromCloud, showToast],
+    [persistSettings, showToast],
   );
 
   const checkOne = useCallback(
@@ -479,11 +508,17 @@ export default function App() {
               setAccount(me);
               const pulled = await pullMyStations().catch(() => null);
               if (pulled && !cancelled) {
-                // Always take the cloud bag when signed in — never push leftover
-                // guest follows from a previous person on this phone into the account.
+                const local = settingsRef.current.stations || [];
                 const cloudStations = withStationDefaults(pulled.stations);
-                const merged = { ...pulled, stations: cloudStations };
+                const sameAccount = settingsRef.current.accountId === me.id;
+                const stations = adoptCloudStations(local, cloudStations, { sameAccount });
+                const merged: AppSettings = {
+                  ...pulled,
+                  stations,
+                  accountId: me.id,
+                };
                 setSettings(merged);
+                settingsRef.current = merged;
                 await saveSettings(merged);
               }
             }
@@ -741,8 +776,9 @@ export default function App() {
         stations: settingsRef.current.stations.filter((s) => s.id !== station.id),
       };
       await persistSettings(payload, {
-        // Only intentional unfollow-to-empty may clear the cloud bag.
         clearStations: payload.stations.length === 0,
+        removedIds: [station.id],
+        removedKeys: [{ provider: station.provider, stationId: station.stationId }],
       });
       setLive((prev) => {
         const next = { ...prev };
@@ -811,13 +847,14 @@ export default function App() {
         <AccountScreen
           onBack={() => setAccountOpen(false)}
           onOpenMenu={() => setMenuOpen(true)}
-          onAuthed={(payload) => void applyAccountPayload(payload)}
+          onAuthed={(payload, opts) => void applyAccountPayload(payload, opts)}
           onLoggedOut={() => {
             setAccount(null);
             const cleared: AppSettings = {
               stations: [],
               pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
               simpleMode: true,
+              accountId: null,
             };
             setSettings(cleared);
             void saveSettings(cleared);

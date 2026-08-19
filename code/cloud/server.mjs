@@ -45,6 +45,7 @@ import {
   unlinkDeviceFromUser,
   simpleModeOf,
   applySimpleMode,
+  applyStationsPut,
 } from './lib/store.mjs';
 import {
   hashPassword,
@@ -266,28 +267,40 @@ function sensorCacheKey(station) {
 /**
  * Apply a stations PUT safely.
  * - Missing/non-array `stations` → leave bag unchanged (token/poll-only updates).
- * - Explicit `[]` while bag non-empty → keep existing unless `clearStations: true`
- *   (blocks boot-race / empty-local wipes; unfollow-all must opt in).
+ * - Explicit `[]` while bag non-empty → keep existing unless `clearStations: true`.
+ * - Non-empty but shorter list → keep omitted follows unless `removedIds`/`removedKeys`.
  */
 async function resolveStationsPut(bag, body) {
   const existing = Array.isArray(bag.stations) ? bag.stations : [];
   if (!Array.isArray(body?.stations)) {
-    return { stations: existing, kept: true, annotatedKinds: 0 };
+    return { stations: existing, kept: true, annotatedKinds: 0, restored: 0 };
   }
-  const incoming = body.stations;
-  if (incoming.length === 0 && existing.length > 0 && body.clearStations !== true) {
+  const applied = applyStationsPut(existing, body.stations, {
+    clearStations: body.clearStations === true,
+    removedIds: body.removedIds,
+    removedKeys: body.removedKeys,
+  });
+  if (applied.kept) {
+    if (body.stations.length === 0 && existing.length > 0 && body.clearStations !== true) {
+      console.warn(
+        `[stations-put] refused empty wipe (kept ${existing.length} follows)`,
+      );
+    }
+    return { stations: applied.stations, kept: true, annotatedKinds: 0, restored: applied.restored };
+  }
+  if (applied.restored > 0) {
     console.warn(
-      `[stations-put] refused empty wipe (kept ${existing.length} follows)`,
+      `[stations-put] kept ${applied.restored} follows omitted by client (need removedIds to unfollow)`,
     );
-    return { stations: existing, kept: true, annotatedKinds: 0 };
   }
-  const fixed = await fixSpotStations(incoming);
+  const fixed = await fixSpotStations(applied.stations);
   const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
-  const stations = Array.isArray(nextStations) ? nextStations : existing;
+  const stations = Array.isArray(nextStations) ? nextStations : applied.stations;
   return {
     stations,
     kept: false,
     annotatedKinds: Array.isArray(fixed) ? 0 : fixed?.changed || 0,
+    restored: applied.restored,
   };
 }
 
@@ -1493,7 +1506,7 @@ server.listen(PORT, HOST, async () => {
       await saveStore(DATA_DIR, store);
     }
     console.log(
-      `[windsage-cloud] users=${Object.keys(store.users || {}).length} sharedStations=${(store.sharedStations || []).length}`,
+      `[windsage-cloud] users=${Object.keys(store.users || {}).length} sharedStations=${(store.sharedStations || []).length} follows=${Object.values(store.users || {}).reduce((n, u) => n + ((u.stations || []).length), 0)}`,
     );
   } catch (e) {
     console.error('[windsage-cloud] store migrate failed', e);
