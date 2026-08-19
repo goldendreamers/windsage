@@ -52,7 +52,7 @@ export function AppMenu({
     rows.push({
       key: 'install',
       label: simpleMode ? 'Put on home screen' : 'Install app',
-      sub: simpleMode ? 'So alerts show on the lock screen' : 'Home screen — no store',
+      sub: simpleMode ? 'Downloads the app so alerts show on the lock screen' : 'Downloads the app onto this phone',
       onPress: () => run(onInstall),
     });
   }

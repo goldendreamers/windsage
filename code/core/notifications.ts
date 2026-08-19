@@ -97,10 +97,10 @@ export async function registerWebPushSubscription(): Promise<WebPushSubscription
     if (!keyJson.publicKey) return null;
 
     // Cache-bust so phones pick up lock-screen SW fixes after deploy.
-    const swVersion = '8';
-    const reg = await navigator.serviceWorker.register(`/sw.js?v=${swVersion}`, { scope: '/' });
-    await navigator.serviceWorker.ready;
-    await reg.update().catch(() => undefined);
+    const { PWA_SW_VERSION, registerPwaServiceWorker } = await import('./pwaInstall');
+    const swVersion = PWA_SW_VERSION;
+    const reg = await registerPwaServiceWorker();
+    if (!reg?.pushManager) return null;
 
     let sub = await reg.pushManager.getSubscription();
     const prevSw = window.localStorage.getItem('windsage.swPushVersion');

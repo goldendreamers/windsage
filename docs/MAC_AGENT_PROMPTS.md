@@ -10,9 +10,9 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 2026-08-19 — Wald release of Follow search + save the ~100 KB live-names file (PR #9)
+### 2026-08-19 — Wald release: Follow names + Install actually downloads (PR #9)
 
-Cloud agent cannot SSH `wald-mc` or fetch `windguru.cz` (egress). After deploy, Wald must write the names-only live-station file (~101 KB, one name per line).
+Cloud agent cannot SSH `wald-mc`. Install must download the app (Chrome install dialog / iOS `.mobileconfig`), not a how-to page.
 
 ```
 cd /Users/goldendreamers/windsage
@@ -22,16 +22,16 @@ git checkout cursor/cloud-agent-1787128827188-i9kiy
 git pull origin cursor/cloud-agent-1787128827188-i9kiy
 npm run release:web
 
-# Save the names-only live list (~100 KB) into public/ and the running web dir:
 node scripts/build-windguru-station-names.mjs --out public
-ls -l public/windguru-live-station-names.txt public/windguru-live-station-names.json public/windguru-live-stations.json
-# Expect names.txt around 101 KB (one name per line, ~6,898 named live stations).
+ls -l public/windguru-live-station-names.txt public/app/windsage.mobileconfig
 
-curl -sS https://windsage.nimrod.bio/v1/catalog/station-names | python3 -m json.tool | head -40
+curl -sS -I https://windsage.nimrod.bio/app/windsage.mobileconfig | head
+# Expect Content-Type: application/x-apple-aspen-config
+
 curl -sS https://windsage.nimrod.bio/v1/catalog/stations | python3 -c "import json,sys; d=json.load(sys.stdin); print('ok', d.get('ok'), 'n', len(d.get('stations') or []))"
 # Expect n around 6900.
 
-If public/windguru-live-station-names.txt is ~100 KB, commit and push it on this branch so GitHub has the saved names file:
+If public/windguru-live-station-names.txt is ~100 KB, commit and push it:
 git add public/windguru-live-station-names.txt public/windguru-live-station-names.unique.txt public/windguru-live-station-names.json public/windguru-live-stations.json public/windguru-live-station-names.meta.json
 git commit -m "Save Windguru live station names (~100 KB names-only file)."
 git push
@@ -39,8 +39,8 @@ git push
 Do not wipe /data/windsage/data/store.json.
 
 Email via scripts/notify-email.sh:
-Subject: Windsage · done: Follow search + live names file
-Body: Live https://windsage.nimrod.bio/ — Follow → type Parkstone → tap Add. Names file https://windsage.nimrod.bio/windguru-live-station-names.txt (~101 KB, one name per line). PR https://github.com/goldendreamers/windsage/pull/9
+Subject: Windsage · done: Install downloads the app + live names search
+Body: Live https://windsage.nimrod.bio/ — Menu → Install downloads the app (Chrome install prompt, or https://windsage.nimrod.bio/app/windsage.mobileconfig on iPhone). Follow search lists live Windguru names. PR https://github.com/goldendreamers/windsage/pull/9
 ```
 
 ---

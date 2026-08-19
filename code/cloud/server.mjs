@@ -132,6 +132,8 @@ const MIME = {
   '.webp': 'image/webp',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.zip': 'application/zip',
+  '.apk': 'application/vnd.android.package-archive',
+  '.mobileconfig': 'application/x-apple-aspen-config',
 };
 
 function cors(res) {
@@ -707,7 +709,7 @@ async function serveStatic(req, res, pathname) {
         ? 'public, max-age=604800, immutable'
         : 'public, max-age=86400',
   };
-  if (ext === '.zip') {
+  if (ext === '.zip' || ext === '.apk' || ext === '.mobileconfig') {
     headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
   }
   res.writeHead(200, headers);

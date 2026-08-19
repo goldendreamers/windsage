@@ -1,11 +1,12 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   canPromptInstall,
   getInstallPlatform,
+  installWindsage,
   isRunningAsInstalledApp,
-  promptPwaInstall,
+  type InstallOutcome,
 } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
 
@@ -17,69 +18,61 @@ type Props = {
   onOpenMenu?: () => void;
 };
 
+function hintFor(outcome: InstallOutcome, platform: ReturnType<typeof getInstallPlatform>): string {
+  if (outcome === 'installed') return 'Windsage is already installed. Open it from your home screen.';
+  if (outcome === 'accepted') return 'Installed. Open Windsage from your home screen.';
+  if (outcome === 'dismissed') return 'Install canceled. Tap Download to try again.';
+  if (outcome === 'downloaded') {
+    if (platform === 'ios') {
+      return 'Download started. Open the Windsage profile, then Install, to put the app on your Home Screen.';
+    }
+    if (platform === 'android') return 'Download started. Open the file to install Windsage.';
+    return 'Download started.';
+  }
+  return 'Couldn’t start a download in this browser. Open windsage.nimrod.bio in Chrome and tap Download again.';
+}
+
 export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
   const [installed, setInstalled] = useState(() => isRunningAsInstalledApp());
-  const [canPrompt, setCanPrompt] = useState(() => canPromptInstall());
+  const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const started = useRef(false);
   const platform = getInstallPlatform();
+
+  const runInstall = async () => {
+    if (installed || busy) return;
+    setBusy(true);
+    setHint(null);
+    try {
+      const outcome = await installWindsage();
+      if (outcome === 'accepted' || outcome === 'installed') setInstalled(true);
+      setHint(hintFor(outcome, platform));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const tick = () => {
-      setInstalled(isRunningAsInstalledApp());
-      setCanPrompt(canPromptInstall());
-    };
-    tick();
-    const id = setInterval(tick, 800);
-    return () => clearInterval(id);
+    if (isRunningAsInstalledApp()) {
+      setInstalled(true);
+      return;
+    }
+    if (started.current) return;
+    started.current = true;
+    void Haptics.selectionAsync();
+    void runInstall();
+    // One auto-download when this screen opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const installLabel =
-    platform === 'ios'
-      ? 'Add to Home Screen'
-      : platform === 'android'
-        ? 'Install on this phone'
-        : 'Install Windsage';
-
   const installHint = installed
-    ? 'Already installed on this device'
-    : canPrompt
-      ? 'Adds Windsage like a normal app'
-      : platform === 'ios'
-        ? 'Safari → Share → Add to Home Screen'
-        : platform === 'android'
-          ? 'Chrome menu → Install app / Add to Home screen'
-          : 'Use your browser’s Install / Add to Home Screen';
-
-  const onInstall = async () => {
-    void Haptics.selectionAsync();
-    if (installed) {
-      setHint('Windsage is already installed. Open it from your home screen.');
-      return;
-    }
-    if (canPrompt) {
-      const outcome = await promptPwaInstall();
-      if (outcome === 'accepted') {
-        setInstalled(true);
-        setCanPrompt(false);
-        setHint('Installed. Open Windsage from your home screen.');
-        return;
-      }
-      if (outcome === 'dismissed') {
-        setHint('Install canceled. You can try again anytime.');
-        return;
-      }
-    }
-    if (platform === 'ios') {
-      setHint('In Safari: tap Share, then “Add to Home Screen”, then Add.');
-      return;
-    }
-    if (platform === 'android') {
-      setHint('In Chrome: tap ⋮ → “Install app” or “Add to Home screen”.');
-      return;
-    }
-    setHint('In your browser menu, choose Install app / Add to Home Screen.');
-  };
+    ? 'Already on this device'
+    : busy
+      ? 'Starting download…'
+      : canPromptInstall()
+        ? 'Saves Windsage like a normal app'
+        : 'Downloads the app onto this phone';
 
   return (
     <ScrollView
@@ -114,16 +107,22 @@ export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
 
       <View style={styles.hero}>
         <Text style={styles.title}>Install Windsage</Text>
-        <Text style={styles.sub}>Home screen app — no store or ZIP.</Text>
+        <Text style={styles.sub}>Downloads the app onto this phone.</Text>
       </View>
 
       {!installed ? (
         <>
           <Pressable
-            style={[styles.btn, styles.btnPrimary]}
-            onPress={() => void onInstall()}
+            style={[styles.btn, styles.btnPrimary, busy && styles.primaryDisabled]}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              void runInstall();
+            }}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="Download Windsage"
           >
-            <Text style={styles.btnPrimaryText}>{installLabel}</Text>
+            <Text style={styles.btnPrimaryText}>{busy ? 'Downloading…' : 'Download Windsage'}</Text>
             <Text style={styles.btnHintPrimary}>{installHint}</Text>
           </Pressable>
 
@@ -152,7 +151,7 @@ export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
       <Text style={styles.foot}>
-        After install: open from the home-screen icon, allow notifications, Android battery
+        After it lands on the home screen: open that icon, allow notifications, Android battery
         unrestricted for Windsage and Chrome.
       </Text>
       <Text style={styles.footUrl}>{PUBLIC_APP}</Text>
@@ -198,6 +197,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   btnPrimary: { backgroundColor: colors.accent },
+  primaryDisabled: { opacity: 0.7 },
   btnPrimaryText: { color: colors.bg, fontWeight: '800', fontSize: 18 },
   btnHintPrimary: { color: 'rgba(6, 24, 33, 0.72)', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   btnSecondary: {
@@ -206,7 +206,6 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   btnSecondaryText: { color: colors.text, fontWeight: '800', fontSize: 18 },
-  btnHintSecondary: { color: colors.muted, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   hint: {
     color: colors.accent,
     fontSize: 14,

@@ -36,7 +36,7 @@ const STEPS: { id: Exclude<HowtoScreen, 'home'>; n: number; short: string; hint:
     id: 'install',
     n: 3,
     short: 'Install',
-    hint: 'Menu → Install app for lock-screen alerts',
+    hint: 'Menu → Install app — downloads Windsage onto this phone',
   },
   {
     id: 'account',

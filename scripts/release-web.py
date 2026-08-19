@@ -234,6 +234,7 @@ def main() -> int:
     if node_bin not in path_bin:
         os.environ["PATH"] = f"{node_bin}:{path_bin}"
 
+    run([sys.executable, str(ROOT / "scripts" / "build-install-packages.py")])
     run(["npx", "expo", "export", "--platform", "web"])
     copy_public_assets(DIST)
     patch_web_icons(DIST)

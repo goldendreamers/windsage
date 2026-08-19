@@ -32,7 +32,7 @@ import { DEFAULT_SETTINGS, createFollowedStation, displayName, findExistingFollo
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
-import { initPwaInstallCapture } from '../core/pwaInstall';
+import { initPwaInstallCapture, registerPwaServiceWorker } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
 import { followTargetFromResolved, resolveFollowInput } from '../core/stations';
 import {
@@ -92,6 +92,7 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 if (Platform.OS === 'web') {
   initPwaInstallCapture();
+  void registerPwaServiceWorker();
 }
 
 type LiveEntry = {
