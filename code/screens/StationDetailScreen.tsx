@@ -251,9 +251,11 @@ export function StationDetailScreen({
         <Image source={brandImages.station} style={styles.titleIcon} contentFit="contain" />
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>{displayName(station)}</Text>
-          <Text style={styles.subtitle}>
-            {providerMeta.label} · {followSourceRef(station)}
-          </Text>
+          {simpleMode ? null : (
+            <Text style={styles.subtitle}>
+              {providerMeta.label} · {followSourceRef(station)}
+            </Text>
+          )}
         </View>
         {simpleMode ? null : (
         <Pressable
@@ -272,7 +274,7 @@ export function StationDetailScreen({
         )}
       </View>
 
-      {station.liveLinkWarning && station.linkedLiveStation ? (
+      {simpleMode || !station.liveLinkWarning || !station.linkedLiveStation ? null : (
         <View style={styles.warnBox}>
           <Text style={styles.warnText}>{station.liveLinkWarning}</Text>
           <Pressable
@@ -341,13 +343,13 @@ export function StationDetailScreen({
       )}
 
       <Section title={simpleMode ? 'Name' : 'Identity'} icon="station">
-        <Text style={styles.label}>Nickname</Text>
+        {simpleMode ? null : <Text style={styles.label}>Nickname</Text>}
         <TextInput
           style={styles.input}
           value={station.nickname ?? ''}
           onChangeText={(nickname) => onChange({ ...station, nickname })}
           onEndEditing={(e) => onPersist({ ...station, nickname: e.nativeEvent.text })}
-          placeholder="Home reef / Spot name"
+          placeholder={simpleMode ? 'Nickname' : 'Home reef / Spot name'}
           placeholderTextColor={colors.muted}
         />
 
@@ -549,6 +551,7 @@ export function StationDetailScreen({
             sustainedMinutes={station.rule.sustainedMinutes}
             progress={progress}
             ruleHint={formatAlertTrigger(station.rule, 'short')}
+            quiet={simpleMode}
           />
           {simpleMode || !alertState?.notifiedForRun || !onAlertFeedback ? null : (
             <View style={styles.feedbackBox}>
@@ -619,6 +622,7 @@ export function StationDetailScreen({
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
           ruleHint={formatAlertTrigger(station.rule, 'short')}
+          quiet={simpleMode}
         />
         {simpleMode || !alertState?.notifiedForRun || !onAlertFeedback ? null : (
           <View style={styles.feedbackBox}>
@@ -661,11 +665,11 @@ export function StationDetailScreen({
           <SimpleNotifyPicker
             rule={station.rule}
             onChange={(rule) => onPersist({ ...station, rule })}
+            hideLabel
           />
           <View style={[styles.block, styles.rowBetween, { paddingHorizontal: 0, marginTop: 8 }]}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.label}>Send alerts</Text>
-              <Text style={styles.hintLine}>Off = no pings from this station</Text>
             </View>
             <Switch
               value={station.enabled !== false}

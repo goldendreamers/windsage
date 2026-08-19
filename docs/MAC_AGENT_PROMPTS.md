@@ -14,7 +14,7 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 Nimrod could not see all stations when looking them up (Follow search capped at 12, and phones often never loaded the ~6,900-name directory). Also earlier: about half of followed stations were deleted by a short-list sync.
 
-After `npm run release:web`, check lookup on https://windsage.nimrod.bio/ — type a common name (e.g. Haifa / Park). You should see **more than 12** hits when many match, a **“Showing N of M”** line, **Show all M matches**, and directory size around **6,900**. Then if follow count is still short, merge from a daily backup (does not wipe users):
+After `npm run release:web`, check lookup on https://windsage.nimrod.bio/ — type a common name (e.g. Haifa / Park). You should see **more than 12** hits when many match, and **More** when the list is long. Simple mode should be quieter: names and actions only, no tiny “N of M” / directory captions, no how-to banner, no Station # line on cards. Then if follow count is still short, merge from a daily backup (does not wipe users):
 
 ```
 cd /Users/goldendreamers/windsage

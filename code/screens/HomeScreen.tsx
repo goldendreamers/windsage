@@ -139,16 +139,12 @@ export function HomeScreen({
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.heading}>{simpleMode ? 'Your stations' : 'Your follows'}</Text>
-            {hasStations ? (
+            {simpleMode ? null : hasStations ? (
               <Text style={styles.sub}>
-                {simpleMode
-                  ? 'Tap one to pick when you get a ping'
-                  : `${stations.length}${starredCount ? ` · ${starredCount} starred` : ''}${
-                      cloudStatus === 'offline' || cloudStatus === 'error' ? ' · cloud down' : ''
-                    }`}
+                {`${stations.length}${starredCount ? ` · ${starredCount} starred` : ''}${
+                  cloudStatus === 'offline' || cloudStatus === 'error' ? ' · cloud down' : ''
+                }`}
               </Text>
-            ) : simpleMode ? (
-              <Text style={styles.sub}>None yet — add a Windguru station to start</Text>
             ) : cloudStatus === 'offline' || cloudStatus === 'error' ? (
               <Text style={styles.sub}>Cloud down — follows still work</Text>
             ) : null}
@@ -190,22 +186,22 @@ export function HomeScreen({
               if (top) onOpenStation(top.id);
             }}
           >
-            <Text style={styles.glanceLabel}>Right now</Text>
+            {simpleMode ? null : <Text style={styles.glanceLabel}>Right now</Text>}
             <Text style={styles.glanceHeadline} numberOfLines={2}>
               {headline}
             </Text>
-            {glanceRows.length > 1 ? (
+            {simpleMode || glanceRows.length <= 1 ? null : (
               <Text style={styles.glanceSub} numberOfLines={2}>
                 {glanceRows
                   .slice(1, 3)
                   .map((r) => r.line)
                   .join(' · ')}
               </Text>
-            ) : null}
+            )}
           </Pressable>
         ) : hasStations ? (
           <View style={styles.glance}>
-            <Text style={styles.glanceLabel}>Right now</Text>
+            {simpleMode ? null : <Text style={styles.glanceLabel}>Right now</Text>}
             <Text style={styles.glanceHeadline} numberOfLines={2}>
               {simpleMode ? 'Waiting for wind…' : 'Waiting for first readings…'}
             </Text>
@@ -301,7 +297,7 @@ const styles = StyleSheet.create({
   },
   sub: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: 14,
     marginTop: 2,
   },
   menuBtn: {

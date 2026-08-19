@@ -36,7 +36,7 @@ export function AppMenu({
     {
       key: 'follow',
       label: simpleMode ? 'Add a station' : 'Follow a station',
-      sub: simpleMode ? 'Paste a Windguru station number' : 'Windguru, map pin, NDBC, and more',
+      sub: simpleMode ? undefined : 'Windguru, map pin, NDBC, and more',
       onPress: () => run(onFollow),
     },
   ];
@@ -44,7 +44,12 @@ export function AppMenu({
     rows.push({
       key: 'account',
       label: simpleMode ? 'Sign in' : 'Account',
-      sub: accountLabel && accountLabel !== 'Account' ? accountLabel : simpleMode ? 'Keep this list on another phone' : 'Sign in or guest',
+      sub:
+        accountLabel && accountLabel !== 'Account'
+          ? accountLabel
+          : simpleMode
+            ? undefined
+            : 'Sign in or guest',
       onPress: () => run(onAccount),
     });
   }
@@ -52,7 +57,7 @@ export function AppMenu({
     rows.push({
       key: 'install',
       label: simpleMode ? 'Put on home screen' : 'Install app',
-      sub: simpleMode ? 'Downloads the app so alerts show on the lock screen' : 'Downloads the app onto this phone',
+      sub: simpleMode ? undefined : 'Downloads the app onto this phone',
       onPress: () => run(onInstall),
     });
   }
@@ -87,11 +92,9 @@ export function AppMenu({
             <View style={styles.toggleRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.label}>Simple mode</Text>
-                <Text style={styles.sub}>
-                  {simpleMode
-                    ? 'On — only the basics. Turn off for extra options.'
-                    : 'Off — all options. Turn on to hide extras.'}
-                </Text>
+                {simpleMode ? null : (
+                  <Text style={styles.sub}>Off — all options. Turn on to hide extras.</Text>
+                )}
               </View>
               <Switch
                 value={simpleMode}
@@ -179,7 +182,7 @@ const styles = StyleSheet.create({
   },
   sub: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
     marginTop: 2,
   },
   chevron: {

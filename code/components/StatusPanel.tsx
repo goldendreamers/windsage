@@ -14,6 +14,7 @@ type Props = {
   progress: number;
   /** Alert threshold only, e.g. "15 kt" — never a live reading. */
   ruleHint?: string | null;
+  quiet?: boolean;
 };
 
 export function StatusPanel({
@@ -22,6 +23,7 @@ export function StatusPanel({
   sustainedMinutes,
   progress,
   ruleHint,
+  quiet = false,
 }: Props) {
   const width = useRef(new Animated.Value(0)).current;
 
@@ -86,7 +88,7 @@ export function StatusPanel({
         />
       </View>
 
-      <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
+      {quiet ? null : <Text style={styles.meta}>{metaParts.join(' · ')}</Text>}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>
   );

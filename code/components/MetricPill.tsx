@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
   },
   pillTitle: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   pillValue: {
@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
   },
   pillUnit: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
     marginTop: 2,
   },
 });

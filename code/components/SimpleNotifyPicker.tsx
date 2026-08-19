@@ -14,9 +14,10 @@ import type { AlertRule } from '../shared/types';
 type Props = {
   rule: AlertRule;
   onChange: (rule: AlertRule) => void;
+  hideLabel?: boolean;
 };
 
-export function SimpleNotifyPicker({ rule, onChange }: Props) {
+export function SimpleNotifyPicker({ rule, onChange, hideLabel = false }: Props) {
   const [open, setOpen] = useState(false);
   const currentId = matchSimpleNotifyId(rule);
   const label = simpleNotifyLabel(rule);
@@ -29,7 +30,7 @@ export function SimpleNotifyPicker({ rule, onChange }: Props) {
 
   return (
     <View>
-      <Text style={styles.label}>Ping me when</Text>
+      {hideLabel ? null : <Text style={styles.label}>Ping me when</Text>}
       <Pressable
         style={styles.trigger}
         onPress={() => {
@@ -58,7 +59,6 @@ export function SimpleNotifyPicker({ rule, onChange }: Props) {
           })}
         </View>
       ) : null}
-      <Text style={styles.hint}>You’ll get a phone ping when it stays at that wind.</Text>
     </View>
   );
 }
@@ -66,7 +66,7 @@ export function SimpleNotifyPicker({ rule, onChange }: Props) {
 const styles = StyleSheet.create({
   label: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     marginBottom: 6,
   },
@@ -116,11 +116,5 @@ const styles = StyleSheet.create({
   optionTextOn: {
     color: colors.accent,
     fontWeight: '800',
-  },
-  hint: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 6,
   },
 });

@@ -816,7 +816,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
-      {showHowto && !addOpen ? (
+      {showHowto && !addOpen && !simpleMode ? (
         <FirstTimeBanner
           screen={howtoScreen}
           simple={simpleMode}

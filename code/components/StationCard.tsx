@@ -99,21 +99,27 @@ export const StationCard = memo(function StationCard({
               {name}
               {trend ? ` ${trend}` : ''}
             </Text>
-            <Text style={styles.meta} numberOfLines={1}>
-              {simpleMode
-                ? `${followSourceRef(station)}${station.enabled === false ? ' · alerts off' : ''}`
-                : `${providerShort} · ${followSourceRef(station)}${
+            {simpleMode ? (
+              station.enabled === false ? (
+                <Text style={styles.meta}>Alerts off</Text>
+              ) : null
+            ) : (
+              <>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {`${providerShort} · ${followSourceRef(station)}${
                     station.enabled === false ? ' · paused' : ''
                   }${
                     showingForecast
                       ? ` · fcst${result?.forecastModel ? ` ${result.forecastModel}` : ''}`
                       : ''
                   }`}
-            </Text>
-            {simpleMode || !station.liveLinkWarning || !station.linkedLiveStation ? null : (
-              <Text style={styles.warn} numberOfLines={2}>
-                {station.liveLinkWarning}
-              </Text>
+                </Text>
+                {!station.liveLinkWarning || !station.linkedLiveStation ? null : (
+                  <Text style={styles.warn} numberOfLines={2}>
+                    {station.liveLinkWarning}
+                  </Text>
+                )}
+              </>
             )}
           </View>
         </Pressable>
@@ -153,24 +159,52 @@ export const StationCard = memo(function StationCard({
           <Fragment key={`${col.label}-${index}`}>
             {index > 0 ? <View style={styles.divider} /> : null}
             <View style={styles.stat}>
-              <Text style={styles.statLabel}>{col.label}</Text>
-              <Text style={styles.statValue}>{col.value}</Text>
-              <Text style={styles.statUnit}>{col.unit}</Text>
+              {simpleMode ? (
+                <>
+                  <Text style={[styles.statValue, styles.statValueSimple]}>
+                    {col.unit ? `${col.value} ${col.unit}` : col.value}
+                  </Text>
+                  <Text style={[styles.statLabel, styles.statLabelSimple]}>{col.label}</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.statLabel}>{col.label}</Text>
+                  <Text style={styles.statValue}>{col.value}</Text>
+                  <Text style={styles.statUnit}>{col.unit}</Text>
+                </>
+              )}
             </View>
           </Fragment>
         ))}
         <View style={styles.divider} />
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>{simpleMode ? 'Ping at' : 'Alert'}</Text>
-          <Text
-            style={[
-              styles.statValue,
-              holding ? styles.statusHold : errored ? styles.statusError : null,
-            ]}
-          >
-            {errored ? '—' : alertCol.value}
-          </Text>
-          <Text style={styles.statUnit}>{alertCol.unit}</Text>
+          {simpleMode ? (
+            <>
+              <Text
+                style={[
+                  styles.statValue,
+                  styles.statValueSimple,
+                  holding ? styles.statusHold : errored ? styles.statusError : null,
+                ]}
+              >
+                {errored ? '—' : alertCol.unit ? `${alertCol.value} ${alertCol.unit}` : alertCol.value}
+              </Text>
+              <Text style={[styles.statLabel, styles.statLabelSimple]}>Ping</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.statLabel}>Alert</Text>
+              <Text
+                style={[
+                  styles.statValue,
+                  holding ? styles.statusHold : errored ? styles.statusError : null,
+                ]}
+              >
+                {errored ? '—' : alertCol.value}
+              </Text>
+              <Text style={styles.statUnit}>{alertCol.unit}</Text>
+            </>
+          )}
         </View>
       </Pressable>
     </View>
@@ -233,7 +267,7 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
   },
   warn: {
     color: '#E8B84A',
@@ -293,10 +327,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
+  statLabelSimple: {
+    fontSize: 13,
+    letterSpacing: 0,
+    textTransform: 'none',
+    fontWeight: '600',
+  },
   statValue: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '800',
+  },
+  statValueSimple: {
+    fontSize: 20,
   },
   statUnit: {
     color: colors.muted,

@@ -94,10 +94,8 @@ export function AddStationModal({
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
   const [catalogHits, setCatalogHits] = useState<CatalogStation[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
-  const [catalogSize, setCatalogSize] = useState(0);
   const [searching, setSearching] = useState(false);
   const [showAllMatches, setShowAllMatches] = useState(false);
-  const [fromServer, setFromServer] = useState(false);
   const [notifyRule, setNotifyRule] = useState<AlertRule>(() =>
     ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID),
   );
@@ -174,8 +172,6 @@ export function AddStationModal({
             : remote.stations;
           setCatalogHits(rows);
           setCatalogTotal(remote.total);
-          setCatalogSize(remote.catalogSize);
-          setFromServer(true);
           setSearching(false);
           return;
         }
@@ -192,8 +188,6 @@ export function AddStationModal({
           : local.stations;
         setCatalogHits(rows);
         setCatalogTotal(local.total);
-        setCatalogSize(catalogStations.length);
-        setFromServer(false);
         setSearching(false);
       })();
     }, 180);
@@ -236,10 +230,8 @@ export function AddStationModal({
     setPendingCatalog(null);
     setCatalogHits([]);
     setCatalogTotal(0);
-    setCatalogSize(0);
     setSearching(false);
     setShowAllMatches(false);
-    setFromServer(false);
     setNotifyRule(ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID));
   };
 
@@ -601,11 +593,7 @@ export function AddStationModal({
             />
           ) : null}
 
-          {simpleMode ? (
-            <Text style={styles.hint}>
-              Open the live station on windguru.cz, or type its name — matching stations pop up.
-            </Text>
-          ) : (
+          {simpleMode ? null : (
             <>
           <Text style={styles.label}>Source</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerScroll}>
@@ -697,15 +685,15 @@ export function AddStationModal({
             />
           ) : (
             <>
-              <Text style={[styles.label, styles.spaced]}>
-                {simpleMode ? 'Name or station number' : `${meta.label} URL or id`}
-              </Text>
+              {simpleMode ? null : (
+                <Text style={[styles.label, styles.spaced]}>{`${meta.label} URL or id`}</Text>
+              )}
               <TextInput
                 ref={nicknameInputRef}
-                style={styles.input}
+                style={[styles.input, simpleMode && styles.inputFirst]}
                 value={stationId}
                 onChangeText={applyIdText}
-                placeholder={simpleMode ? 'e.g. Parkstone or 12345' : meta.placeholder}
+                placeholder={simpleMode ? 'Station name or number' : meta.placeholder}
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -720,27 +708,11 @@ export function AddStationModal({
               Nearby: {pendingMembers.slice(0, 4).map((m) => m.name).join(' · ')}
             </Text>
           ) : null}
-          {searchReady ? (
+          {searching && lookupRows.length === 0 ? (
+            <ActivityIndicator color={colors.accent} style={styles.suggestSpinner} />
+          ) : null}
+          {lookupRows.length > 0 ? (
             <View style={styles.suggestions}>
-              <Text style={styles.suggestLabel}>
-                {searching && lookupRows.length === 0
-                  ? 'Searching live stations'
-                  : catalogTotal > lookupRows.length
-                    ? `Showing ${lookupRows.length} of ${catalogTotal} matching “${searchQuery}”`
-                    : lookupRows.length > 0
-                      ? `${lookupRows.length} matching “${searchQuery}”`
-                      : `No live station matching “${searchQuery}”`}
-              </Text>
-              {catalogSize > 0 ? (
-                <Text style={styles.suggestCount}>
-                  {catalogSize.toLocaleString()} stations in directory
-                  {fromServer ? '' : ' (saved names)'}
-                </Text>
-              ) : searching ? null : (
-                <Text style={styles.suggestCount}>
-                  Directory not loaded — results may be incomplete.
-                </Text>
-              )}
               {lookupRows.map((row) => (
                 <Pressable
                   key={row.key}
@@ -750,7 +722,9 @@ export function AddStationModal({
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.suggestName}>{row.name}</Text>
-                    <Text style={styles.suggestMeta}>{row.meta}</Text>
+                    {simpleMode || !row.meta ? null : (
+                      <Text style={styles.suggestMeta}>{row.meta}</Text>
+                    )}
                   </View>
                   <Text style={styles.suggestOpen}>{row.action}</Text>
                 </Pressable>
@@ -764,22 +738,19 @@ export function AddStationModal({
                   }}
                   disabled={busy || searching}
                 >
-                  <Text style={styles.suggestMoreText}>
-                    Show all {catalogTotal} matches
-                  </Text>
+                  <Text style={styles.suggestMoreText}>More</Text>
                 </Pressable>
               ) : null}
-              {searching && lookupRows.length > 0 ? (
-                <View style={styles.suggestBusy}>
-                  <ActivityIndicator color={colors.accent} />
-                </View>
-              ) : null}
             </View>
+          ) : searchReady && !searching ? (
+            <Text style={styles.suggestEmpty}>No match</Text>
           ) : null}
 
-          <Text style={[styles.label, styles.spaced]}>
-            {simpleMode ? 'Nickname (optional)' : catalogPending ? 'Nickname (optional)' : 'Nickname'}
-          </Text>
+          {simpleMode ? null : (
+            <Text style={[styles.label, styles.spaced]}>
+              {catalogPending ? 'Nickname (optional)' : 'Nickname'}
+            </Text>
+          )}
           <TextInput
             style={styles.input}
             value={nickname}
@@ -791,7 +762,7 @@ export function AddStationModal({
               pendingCatalog
                 ? `Nickname for ${catalogLabel(pendingCatalog)}`
                 : simpleMode
-                  ? 'e.g. Home beach'
+                  ? 'Nickname'
                   : 'Home reef / Spot name'
             }
             placeholderTextColor={colors.muted}
@@ -858,12 +829,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
   },
-  hint: {
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 6,
-  },
   label: {
     color: colors.text,
     fontSize: 14,
@@ -903,11 +868,6 @@ const styles = StyleSheet.create({
   providerChipTextActive: {
     color: '#042018',
   },
-  sourceHint: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
   segment: {
     flexDirection: 'row',
     backgroundColor: colors.input,
@@ -940,6 +900,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
+  inputFirst: {
+    marginTop: 8,
+  },
   suggestions: {
     borderRadius: 12,
     borderWidth: 1,
@@ -947,62 +910,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.input,
     overflow: 'hidden',
   },
-  suggestLabel: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
   suggestRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
   },
   suggestName: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
   suggestMeta: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
     marginTop: 2,
   },
   suggestOpen: {
     color: colors.accent,
     fontWeight: '800',
-    fontSize: 13,
-  },
-  suggestCount: {
-    color: colors.muted,
-    fontSize: 11,
-    paddingHorizontal: 12,
-    paddingBottom: 6,
+    fontSize: 16,
   },
   suggestMore: {
     alignItems: 'center',
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    paddingVertical: 14,
   },
   suggestMoreText: {
     color: colors.accent,
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 16,
   },
-  suggestBusy: {
+  suggestEmpty: {
+    color: colors.muted,
+    fontSize: 16,
     paddingVertical: 8,
-    alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+  },
+  suggestSpinner: {
+    marginVertical: 10,
   },
   linkHint: {
     color: colors.accent,
