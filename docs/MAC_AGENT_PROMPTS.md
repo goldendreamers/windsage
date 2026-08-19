@@ -10,7 +10,33 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-*(none)*
+### 2026-08-19 — Wald release of Follow live-directory search (PR #9)
+
+Cloud agent exported web on this VM but **could not SSH `wald-mc`** (no Tailscale/DNS/rsync/keys) and **could not send notify-email** (no `.env.smtp`). Code is on branch `cursor/cloud-agent-1787128827188-i9kiy` — https://github.com/goldendreamers/windsage/pull/9
+
+Paste this into a **local Mac** Cursor agent:
+
+```
+Windsage Wald deploy for Follow name search.
+
+cd /Users/goldendreamers/windsage
+export PATH="$HOME/.local/node/bin:$PATH"
+git fetch origin
+git checkout cursor/cloud-agent-1787128827188-i9kiy
+git pull origin cursor/cloud-agent-1787128827188-i9kiy
+npm run release:web
+
+Then verify:
+curl -sS https://windsage.nimrod.bio/health
+curl -sS https://windsage.nimrod.bio/v1/catalog/stations | python3 -c "import json,sys; d=json.load(sys.stdin); print('ok', d.get('ok'), 'n', len(d.get('stations') or []))"
+# Expect n around 6900 live Windguru stations, not only previously saved shared follows.
+
+Do not wipe /data/windsage/data/store.json.
+
+Email via scripts/notify-email.sh:
+Subject: Windsage · done: Follow search lists all live Windguru names
+Body: Live https://windsage.nimrod.bio/ — Follow → type Parkstone (or any live name) → Matching stations pop up → tap Add. Already-followed hits say Open. Catalog is Windguru station_list at runtime (not baked into git). PR https://github.com/goldendreamers/windsage/pull/9
+```
 
 ---
 
