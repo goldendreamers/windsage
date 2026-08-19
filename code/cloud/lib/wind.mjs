@@ -158,12 +158,7 @@ export async function getStationListForNearby() {
   return getStationList();
 }
 
-/**
- * Compact live-station directory for Follow search (names + ids only).
- * Fetched from Windguru station_list and cached in memory with that list.
- */
-export async function windguruCatalogStations() {
-  const list = await getStationList();
+function catalogFromStationList(list) {
   const out = [];
   const seen = new Set();
   for (const row of list) {
@@ -174,18 +169,40 @@ export async function windguruCatalogStations() {
     const sid = String(Math.trunc(n));
     if (!sid || seen.has(sid)) continue;
     seen.add(sid);
-    const name = String(row.name || row.spotname || '').trim() || `Station ${sid}`;
+    const name = String(row.name || row.spotname || '').trim();
     out.push({
       provider: 'windguru',
       stationId: sid,
       kind: 'station',
-      sourceName: name,
+      sourceName: name || null,
       liveStationId: sid,
       linkedLiveStation: null,
       liveLinkWarning: null,
     });
   }
   return out;
+}
+
+/**
+ * Compact live-station directory for Follow search (names + ids only).
+ * Fetched from Windguru station_list and cached in memory with that list.
+ * On success, writes the ~100 KB names-only file (and a compact id+name catalog)
+ * so search still works if Windguru is later unreachable.
+ */
+export async function windguruCatalogStations() {
+  const { persistWindguruNameFiles, readCompactCatalog } = await import('./windguruNames.mjs');
+  try {
+    const list = await getStationList();
+    const out = catalogFromStationList(list);
+    persistWindguruNameFiles(out).catch((e) => {
+      console.error('[windsage-cloud] windguru names file write failed', e);
+    });
+    return out;
+  } catch (error) {
+    const cached = await readCompactCatalog();
+    if (cached.length) return cached;
+    throw error;
+  }
 }
 
 /** Nearest live station to a lat/lon from Windguru's public station_list. */

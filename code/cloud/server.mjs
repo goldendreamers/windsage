@@ -24,6 +24,7 @@ import {
   mapsStatus,
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
+import { persistWindguruNameFiles, NAME_FILES } from './lib/windguruNames.mjs';
 import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
@@ -1411,6 +1412,23 @@ async function handleApi(req, res, pathname, url) {
     });
   }
 
+  if (req.method === 'GET' && pathname === '/v1/catalog/station-names') {
+    const filePath = path.join(DATA_DIR, NAME_FILES.meta);
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const meta = JSON.parse(raw);
+      return json(res, 200, { ok: true, ...meta });
+    } catch {
+      try {
+        const rows = await windguruCatalogStations();
+        const meta = await persistWindguruNameFiles(rows, [WEB_DIR]);
+        return json(res, 200, { ok: true, ...meta });
+      } catch (e) {
+        return json(res, 503, { error: e.message || 'Windguru names file not ready' });
+      }
+    }
+  }
+
   const authHandled = await handleAuth(req, res, pathname, url);
   if (authHandled !== false) return true;
 
@@ -1483,7 +1501,12 @@ server.listen(PORT, HOST, async () => {
   }, 5_000);
   setTimeout(() => {
     windguruCatalogStations()
-      .then((rows) => console.log(`[windsage-cloud] windguruDirectory=${rows.length}`))
+      .then(async (rows) => {
+        const meta = await persistWindguruNameFiles(rows, [WEB_DIR]);
+        console.log(
+          `[windsage-cloud] windguruDirectory=${rows.length} namesFile=${meta?.files?.oneNamePerLine?.bytes || 0}B`,
+        );
+      })
       .catch((e) => console.error('[windsage-cloud] windguru directory warmup failed', e));
   }, 2_000);
 
