@@ -14,9 +14,10 @@ const PUBLIC_APP = 'https://windsage.nimrod.bio/';
 type Props = {
   onBack: () => void;
   onOpenApp: () => void;
+  onOpenMenu?: () => void;
 };
 
-export function DownloadScreen({ onBack, onOpenApp }: Props) {
+export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
   const [installed, setInstalled] = useState(() => isRunningAsInstalledApp());
   const [canPrompt, setCanPrompt] = useState(() => canPromptInstall());
   const [hint, setHint] = useState<string | null>(null);
@@ -86,21 +87,34 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable
-        style={styles.back}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          onBack();
-        }}
-      >
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable
+          style={styles.back}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onBack();
+          }}
+        >
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.hero}>
         <Text style={styles.title}>Install Windsage</Text>
-        <Text style={styles.sub}>
-          Put the app on your phone’s home screen. No App Store or ZIP file needed.
-        </Text>
+        <Text style={styles.sub}>Home screen app — no store or ZIP.</Text>
       </View>
 
       {!installed ? (
@@ -121,7 +135,6 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
             }}
           >
             <Text style={styles.btnSecondaryText}>Open in browser</Text>
-            <Text style={styles.btnHintSecondary}>Use the app now without installing</Text>
           </Pressable>
         </>
       ) : (
@@ -133,16 +146,14 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
           }}
         >
           <Text style={styles.btnSecondaryText}>Back to home</Text>
-          <Text style={styles.btnHintSecondary}>Windsage is already installed on this device</Text>
         </Pressable>
       )}
 
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
       <Text style={styles.foot}>
-        After installing, open Windsage from the home-screen icon (not a browser tab), allow
-        notifications, and set Battery → Unrestricted for Windsage and Chrome. Otherwise Android
-        often holds alerts until you unlock the phone.
+        After install: open from the home-screen icon, allow notifications, Android battery
+        unrestricted for Windsage and Chrome.
       </Text>
       <Text style={styles.footUrl}>{PUBLIC_APP}</Text>
     </ScrollView>
@@ -156,8 +167,26 @@ const styles = StyleSheet.create({
     paddingBottom: 44,
     gap: 14,
   },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   back: { alignSelf: 'flex-start', paddingVertical: 4 },
   backText: { color: colors.accent, fontSize: 16, fontWeight: '700' },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
   hero: { gap: 8, marginBottom: 8 },
   title: { color: colors.text, fontSize: 32, fontWeight: '800' },
   sub: { color: colors.muted, fontSize: 16, lineHeight: 22, maxWidth: 360 },

@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -171,5 +171,49 @@ assert.notEqual(alertCol.value, String(below.result.metricValue));
 assert.equal(alertConditionLabel(below.result.message), null); // bare reading → not a status chip
 assert.equal(alertConditionLabel('Holding · 16 kt'), 'Holding');
 assert.equal(alertConditionLabel('Too gusty'), 'Too gusty');
+
+const fcstSpot = createFollowedStation('377929', 'Dimond', {
+  kind: 'spot',
+  linkedLiveStation: { id: '15077', name: 'Kinneret', distanceKm: 2 },
+  liveLinkWarning: 'no live sensor',
+});
+const switched = evaluateAlert(reading(18), history, fcstSpot, {
+  ...prev,
+  lastStationId: '377929',
+  notifiedForRun: true,
+  conditionSinceMs: Date.now() - 60 * 60 * 1000,
+}, Date.now());
+assert.equal(switched.nextState.lastStationId, 'forecast:377929');
+assert.equal(switched.result.shouldNotify, true);
+
+const alreadyFcst = evaluateAlert(reading(18), history, fcstSpot, {
+  ...prev,
+  lastStationId: 'forecast:377929',
+  notifiedForRun: true,
+  conditionSinceMs: Date.now() - 60 * 60 * 1000,
+}, Date.now());
+assert.equal(alreadyFcst.result.shouldNotify, false);
+assert.equal(alreadyFcst.nextState.lastStationId, 'forecast:377929');
+
+const a = createFollowedStation('1', 'A', { id: 'a' });
+const b = createFollowedStation('2', 'B', { id: 'b' });
+const c = createFollowedStation('3', 'C', { id: 'c' });
+const list = [a, b, c];
+assert.deepEqual(organizeFollows(list).map((s) => s.id), ['a', 'b', 'c']);
+assert.deepEqual(moveFollow(list, 'b', -1).map((s) => s.id), ['b', 'a', 'c']);
+assert.deepEqual(moveFollow(list, 'a', -1).map((s) => s.id), ['a', 'b', 'c']);
+const starredB = toggleFollowStar(list, 'b');
+assert.deepEqual(starredB.map((s) => s.id), ['b', 'a', 'c']);
+assert.equal(starredB[0]?.starred, true);
+assert.deepEqual(moveFollow(starredB, 'b', 1).map((s) => s.id), ['b', 'a', 'c']);
+assert.deepEqual(moveFollow(starredB, 'a', 1).map((s) => s.id), ['b', 'c', 'a']);
+
+assert.equal(parseLooseNumber(''), null);
+assert.equal(parseLooseNumber('-'), null);
+assert.equal(parseLooseNumber('15.5'), 15.5);
+assert.equal(parseLooseNumber('15,2'), 15.2);
+assert.equal(parseLooseNumber('abc'), null);
+assert.equal(parseLooseNumber('0'), 0);
+assert.equal(parseLooseNumber('-3'), -3);
 
 console.log('check-alerts: ok');

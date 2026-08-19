@@ -4,9 +4,7 @@ What still needs a decision or secret from the operator, what already works, and
 
 ## Still needed from user (action list)
 
-1. **Optional provider tokens** — Synoptic / Tempest / Windfinder stay env-gated. Free sources already work. **Map search works without any Google key** (Maps search URL → coordinates; Photon/Open-Meteo fallback). Optional: `GOOGLE_MAPS_API_KEY` on Wald only improves Places autocomplete.
-
-2. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
+1. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
 
 **Done recently:** Multi-source follows (WG/NDBC/Open-Meteo/location + tokened sources). Map/address blend. Store wipe-proofing + daily backup cron. Login/register rate limits. Home “right now” glance + trend. Weather-source hiccup banner. Alert good/meh feedback. Google SSO live. Email notify. Shared catalog. Faster first load.
 

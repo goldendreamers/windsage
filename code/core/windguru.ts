@@ -326,7 +326,7 @@ export async function resolveWindguruId(inputId: string): Promise<ResolvedWindgu
   }
 
   throw new Error(
-    `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} needs cloud resolve to link a nearest live station.`,
+    `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} needs cloud resolve (forecast alerts if it has no live sensor).`,
   );
 }
 
@@ -525,9 +525,10 @@ export type SpotForecastNow = {
   idModel: number;
   hour: number;
   spotName?: string;
+  history?: HistorySeries;
 };
 
-/** Spot uses nearest-live fallback (no native sensor on the spot). */
+/** Spot has no native Windguru live sensor — alerts use the model forecast. */
 export function isForecastOnlySpot(station: {
   kind?: WindguruKind;
   linkedLiveStation?: unknown;
@@ -540,9 +541,12 @@ export function isForecastOnlySpot(station: {
 
 /**
  * Current (nearest-hour) model forecast for a Windguru spot.
- * On web this must go through Wald (Referer). Used for UI when there is no native live sensor.
+ * On web this must go through Wald (Referer). Used for UI and alerts when there is no native live sensor.
  */
-export async function fetchSpotForecastNow(spotId: string): Promise<SpotForecastNow> {
+export async function fetchSpotForecastNow(
+  spotId: string,
+  opts?: { metric?: MetricKey; hours?: number },
+): Promise<SpotForecastNow> {
   const id = spotId.trim();
   if (!/^\d+$/.test(id)) {
     throw new Error('Spot ID must be numeric');
@@ -554,7 +558,11 @@ export async function fetchSpotForecastNow(spotId: string): Promise<SpotForecast
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ input: id }),
+    body: JSON.stringify({
+      input: id,
+      metric: opts?.metric,
+      hours: opts?.hours,
+    }),
   });
   const data = (await response.json().catch(() => ({}))) as Partial<SpotForecastNow> & {
     error?: string;
@@ -569,6 +577,7 @@ export async function fetchSpotForecastNow(spotId: string): Promise<SpotForecast
     idModel: data.idModel ?? 3,
     hour: data.hour ?? 0,
     spotName: data.spotName,
+    history: data.history,
   };
 }
 

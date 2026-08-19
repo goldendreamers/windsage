@@ -1,6 +1,8 @@
 /**
  * Location blend — pin/address → nearest live stations → weighted average.
- * Weights: inverse-distance × trust(accuracy) × user rating.
+ * Weights: steep inverse-distance × trust(accuracy) × user rating.
+ * Temperature uses an even sharper distance curve plus outlier shrink,
+ * so a far or disagreeing sensor cannot pull the pin’s air temp.
  */
 import { asNumber, emptyHistory, historyFromPairs, reading } from './common.mjs';
 import { fetchNdbcCurrent } from './ndbc.mjs';
@@ -37,27 +39,62 @@ function trustKey(provider, stationId) {
   return `${provider}:${stationId}`;
 }
 
-/** Map MAE (knots) → 0..1 accuracy score (higher = better). */
-export function accuracyScoreFromMae(mae, samples = 0) {
+/** Map MAE → 0..1 accuracy score (higher = better). `scale` is the MAE that halves the score. */
+export function accuracyScoreFromMae(mae, samples = 0, { scale = 2.5, floor = 0.12 } = {}) {
   if (samples < 3 || mae == null || !Number.isFinite(mae)) return 0.55;
-  // 0 kt MAE → 1.0, 8+ kt → ~0.15
-  const score = 1 / (1 + Math.max(0, mae) / 2.5);
-  return Math.max(0.15, Math.min(1, score));
+  const score = 1 / (1 + Math.max(0, mae) / Math.max(0.2, scale));
+  return Math.max(floor, Math.min(1, score));
 }
 
-export function memberWeight(member, trust) {
-  const d = Math.max(0, Number(member.distanceKm) || 0);
-  const distW = 1 / (d + 1) ** 2;
+/**
+ * Distance falloff. Temperature is local (shore vs inland, elevation);
+ * wind is more coherent so it uses a slightly gentler power.
+ */
+export function distanceWeight(distanceKm, metric = 'wind') {
+  const d = Math.max(0, Number(distanceKm) || 0);
+  const power = metric === 'temperature' ? 6 : 4;
+  return 1 / (d + 0.35) ** power;
+}
+
+export function memberWeight(member, trust, opts = {}) {
+  const metric = opts.metric === 'temperature' ? 'temperature' : 'wind';
+  const distW = distanceWeight(member.distanceKm, metric);
   const key = trustKey(member.provider, member.stationId);
   const t = trust?.[key];
-  const acc = accuracyScoreFromMae(t?.maeWind, t?.samples || 0);
+  const accWind = accuracyScoreFromMae(t?.maeWind, t?.samples || 0);
+  const accTemp = accuracyScoreFromMae(t?.maeTemp, t?.tempSamples || 0, { scale: 1.5 });
+  const acc =
+    metric === 'temperature' && (t?.tempSamples || 0) >= 3 ? accTemp : accWind;
   const rating =
     member.rating != null && Number.isFinite(Number(member.rating))
       ? Math.max(1, Math.min(5, Number(member.rating))) / 5
       : t?.ratingAvg != null
         ? Math.max(1, Math.min(5, Number(t.ratingAvg))) / 5
         : 0.7;
-  return distW * (0.35 + 0.65 * acc) * (0.5 + 0.5 * rating);
+  return distW * (0.12 + 0.88 * acc) * (0.3 + 0.7 * rating);
+}
+
+/** Shrink weights for values far from the median (bad / mismatched sensors). */
+export function robustifyMetricWeights(values, weights, { scale = 2.5 } = {}) {
+  const next = weights.slice();
+  const idxs = [];
+  const vals = [];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    const w = weights[i];
+    if (v == null || !Number.isFinite(v) || !(w > 0)) continue;
+    idxs.push(i);
+    vals.push(v);
+  }
+  if (vals.length < 3) return next;
+  const sorted = vals.slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const s = Math.max(0.4, Number(scale) || 2.5);
+  for (let j = 0; j < idxs.length; j++) {
+    const delta = Math.abs(vals[j] - median);
+    next[idxs[j]] *= Math.exp(-((delta / s) ** 2));
+  }
+  return next;
 }
 
 async function loadWindguruCandidates(lat, lon, radiusKm, limit) {
@@ -215,44 +252,49 @@ export async function fetchLocationCurrent(station, trustMap = {}) {
   // else: reuse cached members; still fetch readings below.
 
   const readings = [];
-  const weights = [];
   const used = [];
   for (const m of members) {
     try {
       const r = await fetchMemberReading(m);
-      const w = memberWeight(m, trustMap);
       readings.push(r);
-      weights.push(w);
-      used.push({ ...m, weight: w, ok: true });
+      used.push({ ...m, ok: true });
     } catch {
       used.push({ ...m, weight: 0, ok: false });
     }
   }
   if (!readings.length) throw new Error('No nearby stations returned readings');
 
+  const okMembers = used.filter((u) => u.ok);
+  const windWeights = okMembers.map((m) => memberWeight(m, trustMap));
+  const tempWeights = robustifyMetricWeights(
+    readings.map((r) => r.temperature),
+    okMembers.map((m) => memberWeight(m, trustMap, { metric: 'temperature' })),
+    { scale: 2.5 },
+  );
+
   const wind_avg = weightedMean(
     readings.map((r) => r.wind_avg),
-    weights,
+    windWeights,
   );
   const wind_max = weightedMean(
     readings.map((r) => r.wind_max),
-    weights,
+    windWeights,
   );
   const wind_min = weightedMean(
     readings.map((r) => r.wind_min),
-    weights,
+    windWeights,
   );
   const temperature = weightedMean(
     readings.map((r) => r.temperature),
-    weights,
+    tempWeights,
   );
   const wave_height = weightedMean(
     readings.map((r) => r.wave_height),
-    weights,
+    windWeights,
   );
   const wind_direction = circularMeanDeg(
     readings.map((r) => r.wind_direction),
-    weights,
+    windWeights,
   );
 
   const blended = reading({
@@ -269,30 +311,48 @@ export async function fetchLocationCurrent(station, trustMap = {}) {
   // Trust updates vs consensus (caller persists).
   const trustUpdates = {};
   for (let i = 0; i < readings.length; i++) {
-    const m = used.filter((u) => u.ok)[i];
+    const m = okMembers[i];
     const r = readings[i];
-    if (!m || wind_avg == null || r.wind_avg == null) continue;
-    const err = Math.abs(r.wind_avg - wind_avg);
+    if (!m) continue;
     const key = trustKey(m.provider, m.stationId);
-    const prev = trustMap[key] || { samples: 0, maeWind: 0, ratingAvg: null, ratingCount: 0 };
-    const samples = (prev.samples || 0) + 1;
-    const maeWind = ((prev.maeWind || 0) * (samples - 1) + err) / samples;
-    trustUpdates[key] = {
-      ...prev,
-      samples,
-      maeWind,
-      updatedAt: Date.now(),
-      name: m.name,
-      provider: m.provider,
-      stationId: m.stationId,
-    };
+    const prev = trustMap[key] || { samples: 0, maeWind: 0, tempSamples: 0, maeTemp: 0, ratingAvg: null, ratingCount: 0 };
+    let next = { ...prev, name: m.name, provider: m.provider, stationId: m.stationId, updatedAt: Date.now() };
+    if (wind_avg != null && r.wind_avg != null) {
+      const err = Math.abs(r.wind_avg - wind_avg);
+      const samples = (prev.samples || 0) + 1;
+      next = {
+        ...next,
+        samples,
+        maeWind: ((prev.maeWind || 0) * (samples - 1) + err) / samples,
+      };
+    }
+    if (temperature != null && r.temperature != null) {
+      const errT = Math.abs(r.temperature - temperature);
+      const tempSamples = (prev.tempSamples || 0) + 1;
+      next = {
+        ...next,
+        tempSamples,
+        maeTemp: ((prev.maeTemp || 0) * (tempSamples - 1) + errT) / tempSamples,
+      };
+    }
+    trustUpdates[key] = next;
   }
 
-  const weightSum = used.reduce((s, m) => s + (m.weight || 0), 0);
-  const membersOut = used.map((m) => ({
-    ...m,
-    weightNorm: weightSum > 0 ? (m.weight || 0) / weightSum : 0,
-  }));
+  const membersOut = [];
+  let okI = 0;
+  for (const m of used) {
+    if (!m.ok) {
+      membersOut.push({ ...m, weight: 0, weightNorm: 0 });
+      continue;
+    }
+    const w = windWeights[okI] || 0;
+    membersOut.push({ ...m, weight: w });
+    okI += 1;
+  }
+  const weightSum = membersOut.reduce((s, m) => s + (m.weight || 0), 0);
+  for (const m of membersOut) {
+    m.weightNorm = weightSum > 0 ? (m.weight || 0) / weightSum : 0;
+  }
 
   return {
     reading: blended,
@@ -347,7 +407,7 @@ export async function resolveLocation(input, extras = {}) {
     spotName: label,
     sourceName: label,
     linkedLiveStation: null,
-    liveLinkWarning: `Blends ${members.length} nearby stations (distance × accuracy × rating).`,
+    liveLinkWarning: `Blends ${members.length} nearby stations (closer sensors count much more).`,
     lat: coords.lat,
     lon: coords.lon,
     locationBlend: {

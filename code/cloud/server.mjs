@@ -24,7 +24,7 @@ import {
   mapsStatus,
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
-import { autocompletePlaces, geocodeAddress, placeDetails } from './lib/providers/geo.mjs';
+import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
@@ -42,6 +42,8 @@ import {
   publicCatalogStations,
   linkDeviceToUser,
   unlinkDeviceFromUser,
+  simpleModeOf,
+  applySimpleMode,
 } from './lib/store.mjs';
 import {
   hashPassword,
@@ -59,6 +61,7 @@ import {
   oauthConfig,
 } from './lib/oauth.mjs';
 import { sendExpoPush } from './lib/push.mjs';
+import { alertEmailConfig, sendAlertEmail } from './lib/alertEmail.mjs';
 import {
   vapidConfig,
   ensureWebPushConfigured,
@@ -221,14 +224,36 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     delivered += results.filter((r) => r.ok).length;
   }
 
+  const emailed =
+    bag?.username || bag?.email
+      ? await sendAlertEmail({ title, body })
+      : { ok: false, skipped: true };
+  if (emailed?.ok) delivered += 1;
+
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length}`,
+    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length} email=${emailed?.ok ? 1 : 0}`,
   );
   return { delivered, title, body };
 }
 
 function sensorPollId(station) {
+  if (isForecastOnlySpot(station)) {
+    return `spot:${String(station.stationId || '').trim()}`;
+  }
   return sensorId(station);
+}
+
+function stripProviderMeta(raw) {
+  if (!raw || typeof raw !== 'object') return raw;
+  const {
+    _forecastHistory,
+    _forecastModel,
+    _locationBlend,
+    _trustUpdates,
+    _members,
+    ...rest
+  } = raw;
+  return rest;
 }
 
 function sensorCacheKey(station) {
@@ -264,8 +289,8 @@ async function resolveStationsPut(bag, body) {
 }
 
 /**
- * Attach spot model forecast only when the follow is forecast-only AND we lack a
- * fresh prior (bag snap or in-poll cache). Avoids duplicate Windguru model hits.
+ * Attach spot model forecast for UI. When the current reading already *is* the
+ * forecast (forecast-only alerts), reuse it and skip a second Windguru hit.
  */
 async function attachSpotForecast(station, result, forecastCache, priorSnap) {
   if (!isForecastOnlySpot(station)) {
@@ -278,6 +303,14 @@ async function attachSpotForecast(station, result, forecastCache, priorSnap) {
   const key = `wg:${sid}`;
   if (forecastCache.has(key)) {
     return { ...result, ...forecastCache.get(key) };
+  }
+  if (result.forecast) {
+    const hit = {
+      forecast: result.forecast,
+      forecastModel: result.forecastModel ?? null,
+    };
+    forecastCache.set(key, hit);
+    return { ...result, ...hit };
   }
   const priorResult = priorSnap?.result;
   const priorAt = priorSnap?.updatedAt;
@@ -416,13 +449,16 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
         continue;
       }
 
+      const publicReading = stripProviderMeta(cached);
       // Skip history when rule fails or alert clock is already hot — history only
       // backfills sustained duration the first moment the condition becomes true.
       const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
       const histKey = `${key}:${station.rule.metric}:${hours}`;
       const emptyHistory = { unixtime: [], values: [] };
-      if (!historyCache.has(histKey)) {
-        if (needsAlertHistory(cached, station, prev)) {
+      if (cached._forecastHistory) {
+        historyCache.set(histKey, cached._forecastHistory);
+      } else if (!historyCache.has(histKey)) {
+        if (needsAlertHistory(publicReading, station, prev)) {
           try {
             historyCache.set(
               histKey,
@@ -437,17 +473,24 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       }
 
       const history = historyCache.get(histKey);
-      const evaluated = evaluateAlert(cached, history, station, prev);
+      const evaluated = evaluateAlert(publicReading, history, station, prev);
+      const withForecast = isForecastOnlySpot(station)
+        ? {
+            ...evaluated.result,
+            forecast: publicReading,
+            forecastModel: cached._forecastModel || null,
+          }
+        : evaluated.result;
       const result = await attachSpotForecast(
         station,
-        evaluated.result,
+        withForecast,
         forecastCache,
         priorSnap,
       );
       const { nextState } = evaluated;
       bag.alertStates[station.id] = nextState;
       bag.snapshots[station.id] = {
-        reading: cached,
+        reading: publicReading,
         result,
         alertState: nextState,
         updatedAt: Date.now(),
@@ -741,6 +784,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      simpleMode: simpleModeOf(user),
     });
   }
 
@@ -775,6 +819,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      simpleMode: simpleModeOf(user),
     });
   }
 
@@ -889,6 +934,7 @@ async function handleMe(req, res, pathname) {
       ok: true,
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      simpleMode: simpleModeOf(user),
     });
   }
 
@@ -897,9 +943,10 @@ async function handleMe(req, res, pathname) {
     const applied = await resolveStationsPut(user, body);
     user.stations = applied.stations;
     upsertSharedStations(store, user.stations);
-    if (body.pollIntervalMinutes) {
-      user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
+    if (body.pollIntervalMinutes != null && Number.isFinite(Number(body.pollIntervalMinutes))) {
+      user.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
+    applySimpleMode(user, body);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -932,6 +979,7 @@ async function handleMe(req, res, pathname) {
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      simpleMode: simpleModeOf(user),
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
@@ -1058,9 +1106,10 @@ async function handleDevices(req, res, pathname) {
     const applied = await resolveStationsPut(bag, body);
     bag.stations = applied.stations;
     upsertSharedStations(store, bag.stations);
-    if (body.pollIntervalMinutes) {
-      bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
+    if (body.pollIntervalMinutes != null && Number.isFinite(Number(body.pollIntervalMinutes))) {
+      bag.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
+    applySimpleMode(bag, body);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1090,6 +1139,7 @@ async function handleDevices(req, res, pathname) {
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: bag.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      simpleMode: simpleModeOf(bag),
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},
@@ -1177,10 +1227,11 @@ async function handleApi(req, res, pathname, url) {
       maps: mapsStatus(),
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
+      alertEmail: alertEmailConfig().enabled,
       // Stable-ish second bucket for short CDN/browser revalidation (not live ts).
       ts: Math.floor(Date.now() / 1000) * 1000,
     };
-    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}"`;
+    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}-${body.alertEmail ? 1 : 0}"`;
     const inm = req.headers['if-none-match'];
     if (inm && inm === etag) {
       cors(res);
@@ -1265,10 +1316,8 @@ async function handleApi(req, res, pathname, url) {
     const maps = mapsStatus();
     return json(res, 200, {
       ok: true,
-      googleMapsJs: maps.googleMapsJs,
-      browserKey: maps.browserKey,
-      geocodeProvider: maps.googleGeocode ? 'google' : 'google-maps',
-      searchVia: maps.searchVia || 'google-maps',
+      searchVia: maps.searchVia || 'google-maps-search',
+      fallback: maps.fallback || 'photon',
     });
   }
 
@@ -1297,10 +1346,6 @@ async function handleApi(req, res, pathname, url) {
     }
     const body = await readBody(req);
     try {
-      if (body.placeId) {
-        const hit = await placeDetails(String(body.placeId));
-        return json(res, 200, { ok: true, ...hit });
-      }
       const query =
         typeof body.query === 'string'
           ? body.query
@@ -1322,7 +1367,14 @@ async function handleApi(req, res, pathname, url) {
     const spotId = /^\d+$/.test(trimmed) ? trimmed : trimmed.match(/(\d{3,})/)?.[1];
     try {
       if (!spotId) throw new Error('Paste a Windguru spot URL or number');
-      const forecast = await fetchSpotForecastNow(spotId);
+      const metric = typeof body.metric === 'string' ? body.metric : 'wind_avg';
+      const hours = Number(body.hours);
+      const forecast = await fetchSpotForecastNow(
+        spotId,
+        null,
+        metric,
+        Number.isFinite(hours) && hours > 0 ? hours : 6,
+      );
       return json(res, 200, { ok: true, ...forecast });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not fetch forecast' });

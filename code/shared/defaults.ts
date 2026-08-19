@@ -51,6 +51,7 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
 export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
+  simpleMode: true,
 };
 
 export const DEFAULT_ALERT_STATE: AlertState = {
@@ -251,7 +252,61 @@ export function createFollowedStation(
     linkedLiveStation: partial?.linkedLiveStation ?? null,
     liveLinkWarning: partial?.liveLinkWarning ?? null,
     locationBlend: partial?.locationBlend ?? null,
+    starred: partial?.starred === true,
   };
+}
+
+export function parseLooseNumber(raw: string): number | null {
+  const t = String(raw ?? '')
+    .trim()
+    .replace(',', '.');
+  if (!t || t === '-' || t === '+' || t === '.' || t === '-.' || t === '+.') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function isFollowStarred(
+  station: Pick<FollowedStation, 'starred'> | null | undefined,
+): boolean {
+  return station?.starred === true;
+}
+
+/** Starred follows first, otherwise the stored array order. */
+export function organizeFollows(stations: FollowedStation[]): FollowedStation[] {
+  const starred: FollowedStation[] = [];
+  const rest: FollowedStation[] = [];
+  for (const s of stations || []) {
+    if (isFollowStarred(s)) starred.push(s);
+    else rest.push(s);
+  }
+  return [...starred, ...rest];
+}
+
+/** Swap a follow one step in the organized list. Will not cross the starred group. */
+export function moveFollow(
+  stations: FollowedStation[],
+  id: string,
+  delta: -1 | 1,
+): FollowedStation[] {
+  const displayed = organizeFollows(stations);
+  const i = displayed.findIndex((s) => s.id === id);
+  if (i < 0) return stations;
+  const j = i + delta;
+  if (j < 0 || j >= displayed.length) return stations;
+  if (isFollowStarred(displayed[i]) !== isFollowStarred(displayed[j])) return stations;
+  const next = displayed.slice();
+  const a = next[i];
+  const b = next[j];
+  if (!a || !b) return stations;
+  next[i] = b;
+  next[j] = a;
+  return organizeFollows(next);
+}
+
+export function toggleFollowStar(stations: FollowedStation[], id: string): FollowedStation[] {
+  return organizeFollows(
+    stations.map((s) => (s.id === id ? { ...s, starred: !isFollowStarred(s) } : s)),
+  );
 }
 
 export function stationNick(station: Pick<FollowedStation, 'nickname'> | null | undefined): string {

@@ -8,6 +8,12 @@ import type {
 } from '../shared/types';
 import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricUnit, metricValue } from './windguru';
 
+function alertEvalId(station: FollowedStation): string {
+  const sid = String(station?.stationId ?? '').trim();
+  if (isForecastOnlySpot(station) && sid) return `forecast:${sid}`;
+  return sid;
+}
+
 function meetsRule(value: number | null, rule: FollowedStation['rule']): boolean {
   if (value === null) return false;
   return rule.comparison === 'gte' ? value >= rule.threshold : value <= rule.threshold;
@@ -145,7 +151,8 @@ export function evaluateAlert(
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
 
-  if (prev.lastStationId && prev.lastStationId !== station.stationId) {
+  const evalId = alertEvalId(station);
+  if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
   }
@@ -225,7 +232,7 @@ export function evaluateAlert(
       lastCheckMs: nowMs,
       lastValue: value,
       lastError: null,
-      lastStationId: station.stationId,
+      lastStationId: evalId,
     },
   };
 }
@@ -254,6 +261,44 @@ export async function runStationCheck(
   }
 
   const hours = Math.max(1, Math.ceil((station.rule.sustainedMinutes + 20) / 60));
+  if (isForecastOnlySpot(station)) {
+    try {
+      const fc = await fetchSpotForecastNow(String(station.stationId).trim(), {
+        metric: station.rule.metric,
+        hours,
+      });
+      const evaluated = evaluateAlert(fc.reading, fc.history ?? { unixtime: [], values: [] }, station, prev);
+      return {
+        result: {
+          ...evaluated.result,
+          forecast: fc.reading,
+          forecastModel: fc.modelName,
+        },
+        nextState: evaluated.nextState,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Forecast unavailable';
+      return {
+        result: {
+          reading: null,
+          metricValue: null,
+          conditionMet: false,
+          sustainedMs: 0,
+          shouldNotify: false,
+          message,
+          forecast: null,
+          forecastModel: null,
+        },
+        nextState: {
+          ...prev,
+          lastCheckMs: Date.now(),
+          lastError: message,
+          lastStationId: alertEvalId(station),
+        },
+      };
+    }
+  }
+
   const pollId = String(station.liveStationId || station.stationId || '').trim();
   const [reading, history] = await Promise.all([
     fetchCurrentReading(pollId),
@@ -261,28 +306,10 @@ export async function runStationCheck(
   ]);
 
   const evaluated = evaluateAlert(reading, history, station, prev);
-  if (!isForecastOnlySpot(station)) {
-    return {
-      result: { ...evaluated.result, forecast: null, forecastModel: null },
-      nextState: evaluated.nextState,
-    };
-  }
-  try {
-    const fc = await fetchSpotForecastNow(String(station.stationId).trim());
-    return {
-      result: {
-        ...evaluated.result,
-        forecast: fc.reading,
-        forecastModel: fc.modelName,
-      },
-      nextState: evaluated.nextState,
-    };
-  } catch {
-    return {
-      result: { ...evaluated.result, forecast: null, forecastModel: null },
-      nextState: evaluated.nextState,
-    };
-  }
+  return {
+    result: { ...evaluated.result, forecast: null, forecastModel: null },
+    nextState: evaluated.nextState,
+  };
 }
 
 export async function runAllStationChecks(

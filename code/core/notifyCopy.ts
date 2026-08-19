@@ -23,15 +23,20 @@ function formatNumber(value: number | null | undefined, digits = 1): string | nu
   return Number(value).toFixed(digits);
 }
 
-function nearestLiveSentence(station: FollowedStation): string {
+function forecastAlertSentence(station: FollowedStation): string {
+  const isForecastOnly =
+    station.kind === 'spot' && !!(station.linkedLiveStation || station.liveLinkWarning);
+  if (!isForecastOnly) return '';
   const linked = station.linkedLiveStation;
-  if (!linked?.id) return '';
+  const modelNote =
+    ' This spot has no live Windguru sensor, so the alert uses the model forecast hour for this pin.';
+  if (!linked?.id) return modelNote;
   const name = (linked.name || linked.spotname || 'a nearby station').trim();
   const km =
     linked.distanceKm != null && Number.isFinite(Number(linked.distanceKm))
       ? ` about ${Number(linked.distanceKm).toFixed(1)} km away`
       : '';
-  return ` This forecast spot has no live sensor of its own, so the reading comes from the nearest live station “${name}” (Windguru #${linked.id})${km}.`;
+  return `${modelNote} The nearest live station “${name}” (Windguru #${linked.id})${km} is shown for reference only.`;
 }
 
 /** Plain-language push copy for threshold alerts. */
@@ -55,7 +60,7 @@ export function formatAlertNotificationCopy(
     `Your conditions were met at ${place}. ` +
     `The ${metric.name} is ${currentText}, and it has stayed ${cmp} your limit of ${threshold} ${metric.unitLong || metric.unitShort} ` +
     `for ${minutes} minutes or longer.` +
-    nearestLiveSentence(station);
+    forecastAlertSentence(station);
 
   return { title, body };
 }

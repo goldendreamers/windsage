@@ -1,8 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import {
-  Linking,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,16 +8,14 @@ import {
   View,
 } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
-import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
-import type { CloudAnnouncement } from '../core/cloud';
-import { isRunningAsInstalledApp } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
 import { StationCard } from '../components/StationCard';
 import { buildGlanceRows, glanceHeadline } from '../shared/glance';
+import { isFollowStarred, organizeFollows } from '../shared/defaults';
 
 type LiveMap = Record<
   string,
@@ -37,7 +32,6 @@ type Props = {
   refreshing: boolean;
   addOpen: boolean;
   cloudStatus?: string;
-  accountLabel?: string;
   onOpenAdd: () => void;
   onCloseAdd: () => void;
   onAdd: (
@@ -52,16 +46,19 @@ type Props = {
       | 'liveLinkWarning'
       | 'sourceName'
       | 'locationBlend'
+      | 'rule'
     >,
   ) => void;
   onReuse: (followId: string) => void;
   catalogStations?: CatalogStation[];
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
-  onOpenAccount?: () => void;
-  onOpenDownload?: () => void;
-  announcement?: CloudAnnouncement | null;
-  onDismissAnnouncement?: () => void;
+  onToggleStar?: (stationId: string) => void;
+  onMoveFollow?: (stationId: string, delta: -1 | 1) => void;
+  onOpenMenu?: () => void;
+  showHowto?: boolean;
+  onDismissHowto?: () => void;
+  simpleMode?: boolean;
 };
 
 export function HomeScreen({
@@ -70,7 +67,6 @@ export function HomeScreen({
   refreshing,
   addOpen,
   cloudStatus,
-  accountLabel,
   onOpenAdd,
   onCloseAdd,
   onAdd,
@@ -78,29 +74,17 @@ export function HomeScreen({
   catalogStations = [],
   onRefresh,
   onOpenStation,
-  onOpenAccount,
-  onOpenDownload,
-  announcement,
-  onDismissAnnouncement,
+  onToggleStar,
+  onMoveFollow,
+  onOpenMenu,
+  showHowto,
+  onDismissHowto,
+  simpleMode = false,
 }: Props) {
   const hasStations = stations.length > 0;
-  const [installedApp, setInstalledApp] = useState(() =>
-    Platform.OS === 'web' ? isRunningAsInstalledApp() : true,
-  );
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') {
-      setInstalledApp(true);
-      return;
-    }
-    const tick = () => setInstalledApp(isRunningAsInstalledApp());
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const showInstall = !!onOpenDownload && !installedApp;
-  const glanceRows = hasStations ? buildGlanceRows(stations, live) : [];
+  const orderedStations = organizeFollows(stations);
+  const starredCount = orderedStations.filter((s) => isFollowStarred(s)).length;
+  const glanceRows = hasStations ? buildGlanceRows(orderedStations, live) : [];
   const headline = glanceHeadline(glanceRows);
   const sourceFails = stations.filter((s) => {
     const err = live[s.id]?.alertState?.lastError;
@@ -140,82 +124,63 @@ export function HomeScreen({
           />
         }
       >
-        <BrandHero hasStation={hasStations} />
-
-        {announcement ? (
-          <View style={styles.updateBanner}>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.updateTitle}>{announcement.title}</Text>
-              {announcement.body ? (
-                <Text style={styles.updateBody}>{announcement.body}</Text>
-              ) : null}
-              {announcement.url ? (
-                <Pressable
-                  onPress={() => {
-                    void Haptics.selectionAsync();
-                    void Linking.openURL(announcement.url!);
-                  }}
-                >
-                  <Text style={styles.updateLink}>Details / install →</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {onDismissAnnouncement ? (
-              <Pressable
-                style={styles.updateDismiss}
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  onDismissAnnouncement();
-                }}
-              >
-                <Text style={styles.updateDismissText}>Dismiss</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+        <BrandHero hasStation={hasStations} simpleMode={simpleMode} />
 
         {stableSourceFails > 0 ? (
           <View style={styles.sourceBanner}>
-            <Text style={styles.sourceTitle}>Weather source hiccup</Text>
             <Text style={styles.sourceBody}>
-              {stableSourceFails} follow{stableSourceFails === 1 ? '' : 's'} could not fetch a
-              reading. Pull to refresh — other sources still work.
+              {simpleMode
+                ? 'Couldn’t load wind. Pull down to try again.'
+                : `${stableSourceFails} follow${stableSourceFails === 1 ? '' : 's'} couldn’t fetch — pull to refresh`}
             </Text>
           </View>
         ) : null}
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.heading}>Your follows</Text>
-            <Text style={styles.sub}>
-              {hasStations
-                ? `${stations.length} followed · ${cloudStatus || 'cloud'}`
-                : cloudStatus === 'offline' || cloudStatus === 'error'
-                  ? 'Cloud hiccup — you can still follow stations'
-                  : 'Follow spots or stations you care about'}
-            </Text>
+            <Text style={styles.heading}>{simpleMode ? 'Your stations' : 'Your follows'}</Text>
+            {hasStations ? (
+              <Text style={styles.sub}>
+                {simpleMode
+                  ? 'Tap one to pick when you get a ping'
+                  : `${stations.length}${starredCount ? ` · ${starredCount} starred` : ''}${
+                      cloudStatus === 'offline' || cloudStatus === 'error' ? ' · cloud down' : ''
+                    }`}
+              </Text>
+            ) : simpleMode ? (
+              <Text style={styles.sub}>None yet — add a Windguru station to start</Text>
+            ) : cloudStatus === 'offline' || cloudStatus === 'error' ? (
+              <Text style={styles.sub}>Cloud down — follows still work</Text>
+            ) : null}
           </View>
-          {onOpenAccount ? (
-            <Pressable
-              style={styles.accountBtn}
-              onPress={() => {
-                void Haptics.selectionAsync();
-                onOpenAccount();
-              }}
-            >
-              <Text style={styles.accountBtnText}>{accountLabel || 'Account'}</Text>
-            </Pressable>
-          ) : null}
           <Pressable
-            style={styles.addBtn}
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              (onOpenMenu || onOpenAdd)();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        </View>
+
+        {simpleMode ? (
+          <Pressable
+            style={styles.emptyCta}
             onPress={() => {
               void Haptics.selectionAsync();
               onOpenAdd();
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Add a Windguru station"
           >
-            <Text style={styles.addBtnText}>+ Follow</Text>
+            <Text style={styles.emptyCtaText}>
+              {hasStations ? 'Add another station' : 'Add a Windguru station'}
+            </Text>
           </Pressable>
-        </View>
+        ) : null}
 
         {hasStations && headline ? (
           <Pressable
@@ -242,30 +207,20 @@ export function HomeScreen({
           <View style={styles.glance}>
             <Text style={styles.glanceLabel}>Right now</Text>
             <Text style={styles.glanceHeadline} numberOfLines={2}>
-              Waiting for first readings…
-            </Text>
-            <Text style={styles.glanceSub} numberOfLines={2}>
-              Cloud is fetching your follows — pull to refresh if this sticks.
+              {simpleMode ? 'Waiting for wind…' : 'Waiting for first readings…'}
             </Text>
           </View>
         ) : null}
 
-        {!hasStations ? (
-          <View style={styles.empty}>
-            <Image source={brandImages.station} style={styles.emptyIcon} contentFit="contain" />
-            <Text style={styles.emptyTitle}>Nothing followed yet</Text>
-            <Text style={styles.emptyCopy}>
-              Follow Windguru, NDBC buoys, Open-Meteo points, and more. Name them and get notified
-              when your conditions hold.
-            </Text>
-            <Pressable style={styles.emptyCta} onPress={onOpenAdd}>
-              <Text style={styles.emptyCtaText}>Follow your first spot</Text>
-            </Pressable>
-          </View>
-        ) : (
+        {hasStations ? (
           <View style={styles.list}>
-            {stations.map((station) => {
+            {orderedStations.map((station, index) => {
               const item = live[station.id];
+              const prev = orderedStations[index - 1];
+              const next = orderedStations[index + 1];
+              const starred = isFollowStarred(station);
+              const canMoveUp = !!prev && isFollowStarred(prev) === starred;
+              const canMoveDown = !!next && isFollowStarred(next) === starred;
               return (
                 <StationCard
                   key={station.id}
@@ -273,23 +228,38 @@ export function HomeScreen({
                   reading={item?.reading ?? null}
                   result={item?.result ?? null}
                   alertState={item?.alertState}
+                  simpleMode={simpleMode}
+                  canMoveUp={canMoveUp}
+                  canMoveDown={canMoveDown}
                   onPress={() => onOpenStation(station.id)}
+                  onToggleStar={
+                    !simpleMode && onToggleStar
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onToggleStar(station.id);
+                        }
+                      : undefined
+                  }
+                  onMoveUp={
+                    !simpleMode && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, -1);
+                        }
+                      : undefined
+                  }
+                  onMoveDown={
+                    !simpleMode && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, 1);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}
           </View>
-        )}
-
-        {showInstall ? (
-          <Pressable
-            style={styles.downloadLink}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onOpenDownload?.();
-            }}
-          >
-            <Text style={styles.downloadLinkText}>Install app</Text>
-          </Pressable>
         ) : null}
       </ScrollView>
 
@@ -300,6 +270,9 @@ export function HomeScreen({
         onReuse={onReuse}
         existingStations={stations}
         catalogStations={catalogStations}
+        howto={showHowto}
+        onDismissHowto={onDismissHowto}
+        simpleMode={simpleMode}
       />
     </View>
   );
@@ -321,42 +294,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  updateBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: colors.accentDim,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.accent,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  updateTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  updateBody: {
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  updateLink: {
-    color: colors.accent,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  updateDismiss: {
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-  },
-  updateDismissText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   heading: {
     color: colors.text,
     fontSize: 22,
@@ -367,81 +304,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
-  addBtn: {
-    backgroundColor: colors.accentDim,
+  menuBtn: {
+    backgroundColor: colors.input,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.line,
   },
-  addBtnText: {
-    color: colors.accent,
+  menuBtnText: {
+    color: colors.text,
     fontWeight: '800',
     fontSize: 13,
   },
-  accountBtn: {
-    backgroundColor: colors.input,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: colors.line,
-    maxWidth: 120,
-  },
-  accountBtnText: {
-    color: colors.text,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  list: {
-    gap: 12,
-  },
-  empty: {
-    backgroundColor: colors.bgLift,
-    borderRadius: 18,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  emptyIcon: {
-    width: 28,
-    height: 28,
-    marginBottom: 4,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  emptyCopy: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   emptyCta: {
-    marginTop: 8,
     backgroundColor: colors.accent,
     borderRadius: 14,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
   emptyCtaText: {
     color: '#042018',
     fontWeight: '800',
+    fontSize: 16,
   },
-  downloadLink: {
-    alignSelf: 'center',
-    marginTop: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  downloadLinkText: {
-    color: colors.muted,
-    fontSize: 13,
-    fontWeight: '600',
+  list: {
+    gap: 12,
   },
   glance: {
     backgroundColor: colors.bgLift,

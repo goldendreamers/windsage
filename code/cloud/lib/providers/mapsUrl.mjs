@@ -7,7 +7,19 @@ import { fetchWithTimeout } from './common.mjs';
 const GEO_UA =
   'Windsage/1.0 (+https://windsage.nimrod.bio; friend-group wind alerts)';
 
+/** Browser-like UA — Google Maps HTML is empty of place coords with a bot UA. */
+const MAPS_FETCH_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
 const SHORT_HOSTS = new Set(['maps.app.goo.gl', 'goo.gl', 'g.co']);
+
+function decodeLoose(raw) {
+  try {
+    return decodeURIComponent(String(raw || '').replace(/\+/g, ' '));
+  } catch {
+    return String(raw || '').replace(/\+/g, ' ');
+  }
+}
 
 function tryUrl(text) {
   try {
@@ -39,11 +51,39 @@ export function looksLikeMapUrl(text) {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/^geo:/i.test(t)) return true;
+  if (/<iframe\b/i.test(t) && /google\.[^"'<\s]+\/maps/i.test(t)) return true;
+  if (/\/maps\/embed\?/i.test(t) || /[?&]pb=!1m/i.test(t)) return true;
+  const extracted = extractMapsUrlFromText(t);
+  if (extracted && extracted !== t) {
+    const u = tryUrl(extracted);
+    if (u && hostLooksLikeMaps(u.hostname, u.pathname)) return true;
+  }
   const u = tryUrl(t);
   if (u && hostLooksLikeMaps(u.hostname, u.pathname)) return true;
   return /maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/maps|google\.[^/\s]+\/maps|maps\.google\.|maps\.apple\.com|waze\.com\/ul|openstreetmap\.org/i.test(
     t,
   );
+}
+
+/**
+ * Pull a usable Maps URL out of a paste (bare URL, Share iframe, or HTML snippet).
+ */
+export function extractMapsUrlFromText(text) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const iframe = t.match(/<iframe\b[^>]*\bsrc=["']([^"']+)["']/i);
+  if (iframe?.[1]) return iframe[1].replace(/&amp;/g, '&').trim();
+  const src = t.match(/\bsrc=["'](https?:\/\/[^"']*google\.[^"']*\/maps[^"']+)["']/i);
+  if (src?.[1]) return src[1].replace(/&amp;/g, '&').trim();
+  const embed = t.match(
+    /https?:\/\/(?:www\.)?google\.[^\s"'<>]+\/maps\/embed\?[^\s"'<>]+/i,
+  );
+  if (embed) return embed[0].replace(/&amp;/g, '&');
+  const short = t.match(/https?:\/\/maps\.app\.goo\.gl\/[^\s"'<>]+/i);
+  if (short) return short[0];
+  const u = tryUrl(t);
+  if (u && hostLooksLikeMaps(u.hostname, u.pathname)) return u.toString();
+  return null;
 }
 
 export function looksLikeShortMapUrl(text) {
@@ -139,26 +179,101 @@ function decodePathPlace(raw) {
 }
 
 /**
- * Extract the most precise pin from a maps URL or HTML snippet.
- * Prefers !3d/!4d (place) over @lat,lon (camera).
+ * Embed Share iframe / maps/embed?pb= uses !1d{span}!2d{lng}!3d{lat}
+ * (not the regular-maps !3d{lat}!4d{lng} place pin).
+ */
+export function parseEmbedPbCoords(text) {
+  const t = decodeLoose(String(text || ''));
+  if (!t) return null;
+  const cam = t.match(/!1d-?\d+(?:\.\d+)?!2d(-?\d+(?:\.\d+)?)!3d(-?\d+(?:\.\d+)?)/);
+  if (cam) return validCoords(Number(cam[2]), Number(cam[1]));
+  const two = t.match(/!2d(-?\d+(?:\.\d+)?)!3d(-?\d+(?:\.\d+)?)/);
+  if (two) {
+    const a = Number(two[1]);
+    const b = Number(two[2]);
+    if (Math.abs(a) > 90 && Math.abs(b) <= 90) return validCoords(b, a);
+    if (Math.abs(b) > 90 && Math.abs(a) <= 90) return validCoords(a, b);
+    return validCoords(b, a);
+  }
+  return null;
+}
+
+export function extractPlaceNameFromEmbedPb(text) {
+  const t = decodeLoose(String(text || ''));
+  const named = t.match(/!2s([^!]+)/);
+  if (!named) return null;
+  const name = decodeLoose(named[1]).replace(/\/+$/, '').trim();
+  if (!name || /^0x[0-9a-f]+/i.test(name) || /^-?\d/.test(name)) return null;
+  if (name.length < 2 || name.length > 120) return null;
+  return name;
+}
+
+/**
+ * Place coords from Google Maps embed HTML (`output=embed`), which includes the
+ * resolved POI even when the interactive Maps page has no @lat,lon.
+ */
+export function parseCoordsFromEmbedHtml(html) {
+  const t = String(html || '');
+  if (!t) return null;
+  const cid = t.match(
+    /\["0x[0-9a-f]+:0x[0-9a-f]+","([^"]+)",\[(-?\d+\.\d+),(-?\d+\.\d+)\]/i,
+  );
+  if (cid) {
+    const hit = validCoords(Number(cid[2]), Number(cid[3]));
+    if (hit) return { ...hit, address: cid[1] };
+  }
+  const named = t.match(
+    /"([^"]{2,80})",\[(-?\d{1,2}\.\d{4,}),(-?\d{1,3}\.\d{4,})\]/,
+  );
+  if (named) {
+    const hit = validCoords(Number(named[2]), Number(named[3]));
+    if (hit) return { ...hit, address: named[1].replace(/,+\s*$/, '').trim() };
+  }
+  const trip = t.match(/\[\d{3,}\.\d+,(-?\d+\.\d+),(-?\d+\.\d+)\]/);
+  if (trip) return validCoords(Number(trip[2]), Number(trip[1]));
+  const e7 = t.match(/\[(\d{8,10}),(\d{8,10})\]/);
+  if (e7) return validCoords(Number(e7[1]) / 1e7, Number(e7[2]) / 1e7);
+  return parseEmbedPbCoords(t);
+}
+
+function parseQueryLatLon(text) {
+  const re =
+    /[?&#](?:q|query|ll|center|destination|daddr|sll|q1)=(-?\d+(?:\.\d+)?)(?:%2[cC]|,|\s*\+\s*|\s+)(-?\d+(?:\.\d+)?)/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    const before = text.slice(Math.max(0, m.index - 48), m.index).toLowerCase();
+    if (before.includes('staticmap')) continue;
+    const hit = validCoords(Number(m[1]), Number(m[2]));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Extract the most precise pin from a maps URL, iframe, or HTML snippet.
+ * Prefers !3d/!4d (place) over embed !2d/!3d over @lat,lon (camera).
+ * Ignores Google staticmap?center= (IP viewport, not the searched place).
  */
 export function parseCoordsFromMapText(text) {
-  const t = String(text || '').trim();
-  if (!t) return null;
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const extracted = extractMapsUrlFromText(raw);
+  const t = extracted ? `${extracted}\n${raw}` : raw;
 
-  const geo = t.match(/^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+  const geo = t.match(/geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
   if (geo) return validCoords(Number(geo[1]), Number(geo[2]));
 
   const bang = t.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
   if (bang) return validCoords(Number(bang[1]), Number(bang[2]));
 
+  const embed = parseEmbedPbCoords(t);
+  if (embed) return embed;
+
   const at = t.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
   if (at) return validCoords(Number(at[1]), Number(at[2]));
 
-  const qll = t.match(
-    /[?&#](?:q|query|ll|center|destination|daddr|sll|q1)=(-?\d+(?:\.\d+)?)(?:%2[cC]|,|\s*\+\s*|\s+)(-?\d+(?:\.\d+)?)/i,
-  );
-  if (qll) return validCoords(Number(qll[1]), Number(qll[2]));
+  const qll = parseQueryLatLon(t);
+  if (qll) return qll;
 
   const osmHash = t.match(/[#&]map=\d+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
   if (osmHash) return validCoords(Number(osmHash[1]), Number(osmHash[2]));
@@ -170,14 +285,17 @@ export function parseCoordsFromMapText(text) {
   const appleLl = t.match(/[?&]ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
   if (appleLl) return validCoords(Number(appleLl[1]), Number(appleLl[2]));
 
-  return parseLatLon(t);
+  return parseLatLon(raw);
 }
 
 /** Place name from a maps URL when coords are missing (e.g. /maps/place/Herzliya+Marina/). */
 export function extractPlaceQueryFromMapUrl(text) {
   const t = String(text || '').trim();
-  const u = tryUrl(t);
-  const src = u ? u.toString() : t;
+  const extracted = extractMapsUrlFromText(t) || t;
+  const pbName = extractPlaceNameFromEmbedPb(extracted) || extractPlaceNameFromEmbedPb(t);
+  if (pbName) return pbName;
+  const u = tryUrl(extracted);
+  const src = u ? u.toString() : extracted;
 
   const placePath = src.match(/\/maps\/place\/([^/@?]+)/i);
   if (placePath) {
@@ -210,7 +328,8 @@ export function extractPlaceQueryFromMapUrl(text) {
 
 export async function followMapShortUrl(input) {
   const raw = String(input || '').trim();
-  const start = tryUrl(raw.startsWith('http') ? raw : `https://${raw}`);
+  const extracted = extractMapsUrlFromText(raw) || raw;
+  const start = tryUrl(extracted.startsWith('http') ? extracted : `https://${extracted}`);
   if (!start || !looksLikeShortMapUrl(start.toString())) return null;
 
   const response = await fetchWithTimeout(start.toString(), {
@@ -219,6 +338,7 @@ export async function followMapShortUrl(input) {
     headers: {
       'User-Agent': GEO_UA,
       Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
     },
   });
   const finalUrl = String(response.url || '');
@@ -237,17 +357,25 @@ export async function followMapShortUrl(input) {
  */
 export async function resolveMapInput(text) {
   const raw = String(text || '').trim();
-  let coords = parseCoordsFromMapText(raw);
-  let placeQuery = extractPlaceQueryFromMapUrl(raw);
-  let resolvedUrl = null;
+  const extracted = extractMapsUrlFromText(raw) || raw;
+  let coords = parseCoordsFromMapText(extracted) || parseCoordsFromMapText(raw);
+  let placeQuery = extractPlaceQueryFromMapUrl(extracted) || extractPlaceQueryFromMapUrl(raw);
+  let resolvedUrl = extracted !== raw ? extracted : null;
 
-  if (!coords && looksLikeShortMapUrl(raw)) {
+  const shortish = looksLikeShortMapUrl(extracted) || looksLikeShortMapUrl(raw);
+  if (!coords && shortish) {
     try {
-      const followed = await followMapShortUrl(raw);
+      const followed = await followMapShortUrl(extracted);
       if (followed) {
         resolvedUrl = followed.finalUrl;
-        coords = parseCoordsFromMapText(followed.blob) || parseCoordsFromMapText(followed.finalUrl);
-        placeQuery = placeQuery || extractPlaceQueryFromMapUrl(followed.finalUrl);
+        coords =
+          parseCoordsFromMapText(followed.finalUrl) ||
+          parseCoordsFromEmbedHtml(followed.blob) ||
+          parseCoordsFromMapText(followed.blob);
+        placeQuery =
+          placeQuery ||
+          extractPlaceQueryFromMapUrl(followed.finalUrl) ||
+          null;
       }
     } catch {
       // caller may still try name search
@@ -257,4 +385,4 @@ export async function resolveMapInput(text) {
   return { coords, placeQuery, resolvedUrl };
 }
 
-export { GEO_UA };
+export { GEO_UA, MAPS_FETCH_UA };

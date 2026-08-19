@@ -25,6 +25,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     linkedLiveStation: raw.linkedLiveStation ?? null,
     liveLinkWarning: raw.liveLinkWarning ?? null,
     locationBlend: raw.locationBlend ?? null,
+    starred: raw.starred === true,
   });
 }
 
@@ -37,10 +38,11 @@ function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
     : [];
   return {
     stations,
-    pollIntervalMinutes: Math.max(
-      10,
-      raw.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes,
-    ),
+    pollIntervalMinutes:
+      typeof raw.pollIntervalMinutes === 'number' && Number.isFinite(raw.pollIntervalMinutes)
+        ? raw.pollIntervalMinutes
+        : DEFAULT_SETTINGS.pollIntervalMinutes,
+    simpleMode: raw.simpleMode !== false,
   };
 }
 
@@ -67,6 +69,7 @@ async function migrateLegacySettings(): Promise<AppSettings | null> {
     const migrated: AppSettings = {
       stations,
       pollIntervalMinutes: Math.max(10, legacy.pollIntervalMinutes ?? 10),
+      simpleMode: true,
     };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(migrated));
     return migrated;
@@ -79,11 +82,21 @@ export async function loadSettings(): Promise<AppSettings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (raw) {
-      return mergeSettings(JSON.parse(raw) as Partial<AppSettings>);
+      const parsed = JSON.parse(raw) as Partial<AppSettings>;
+      const merged = mergeSettings(parsed);
+      if (!Object.prototype.hasOwnProperty.call(parsed, 'simpleMode')) {
+        const legacy = await AsyncStorage.getItem('windsage.simpleMode.v1');
+        if (legacy === '0') merged.simpleMode = false;
+        if (legacy === '1') merged.simpleMode = true;
+      }
+      return merged;
     }
     const migrated = await migrateLegacySettings();
     if (migrated) return migrated;
-    return mergeSettings(null);
+    const merged = mergeSettings(null);
+    const legacy = await AsyncStorage.getItem('windsage.simpleMode.v1');
+    if (legacy === '0') merged.simpleMode = false;
+    return merged;
   } catch {
     return mergeSettings(null);
   }

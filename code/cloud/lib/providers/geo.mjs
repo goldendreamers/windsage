@@ -1,119 +1,77 @@
 /**
- * Geocoding / Places for Map follows.
- *
- * Search flow (user request): send the query to Google Maps and take the
- * resulting coordinates. Prefer the Geocoding/Places API when
- * GOOGLE_MAPS_API_KEY is set; otherwise follow a Google Maps search URL and
- * parse @lat,lon from the redirect. Free Photon/Open-Meteo remain as fallback.
+ * Geocoding for Map follows — no billed Google APIs.
+ * Pasted Maps links and Google Maps embed search (no key), then Photon / Open-Meteo.
  */
 import { asNumber, fetchJson, fetchWithTimeout } from './common.mjs';
 import {
   GEO_UA,
+  MAPS_FETCH_UA,
   looksLikeMapUrl,
+  parseCoordsFromEmbedHtml,
   parseCoordsFromMapText,
   parseLatLon,
   resolveMapInput,
 } from './mapsUrl.mjs';
 
-function googleKey() {
-  return (
-    process.env.GOOGLE_MAPS_API_KEY ||
-    process.env.GOOGLE_GEOCODING_API_KEY ||
-    process.env.GOOGLE_PLACES_API_KEY ||
-    ''
-  ).trim();
-}
-
-function googleBrowserKey() {
-  return (
-    process.env.GOOGLE_MAPS_BROWSER_KEY ||
-    process.env.GOOGLE_MAPS_JS_KEY ||
-    googleKey()
-  ).trim();
-}
-
 export function mapsStatus() {
-  const server = !!googleKey();
-  const browser = !!googleBrowserKey();
   return {
-    googleGeocode: server,
-    googleMapsJs: browser,
-    browserKey: browser ? googleBrowserKey() : null,
-    // Search always tries Google Maps (API or maps URL); free geocoders are fallback.
-    searchVia: 'google-maps',
+    searchVia: 'google-maps-search',
     fallback: 'photon',
   };
 }
 
-async function googleGeocodeApi(query) {
-  const key = googleKey();
-  if (!key) return null;
-  const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-  url.searchParams.set('address', query);
-  url.searchParams.set('key', key);
-  const data = await fetchJson(url.toString());
-  if (data.status !== 'OK' || !data.results?.[0]) return null;
-  const hit = data.results[0];
-  const lat = asNumber(hit.geometry?.location?.lat);
-  const lon = asNumber(hit.geometry?.location?.lng);
-  if (lat == null || lon == null) return null;
-  return {
-    provider: 'google',
-    lat,
-    lon,
-    address: hit.formatted_address || query,
-    placeId: hit.place_id || null,
-  };
-}
-
-async function googleReverseApi(lat, lon) {
-  const key = googleKey();
-  if (!key) return null;
-  const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-  url.searchParams.set('latlng', `${lat},${lon}`);
-  url.searchParams.set('key', key);
+async function photonReverse(lat, lon) {
+  const url = new URL('https://photon.komoot.io/reverse');
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lon));
+  url.searchParams.set('lang', 'en');
   try {
-    const data = await fetchJson(url.toString());
-    return data?.results?.[0]?.formatted_address || null;
+    const data = await fetchJson(url.toString(), { 'User-Agent': GEO_UA });
+    const props = data?.features?.[0]?.properties || {};
+    const street = [props.housenumber, props.street].filter(Boolean).join(' ').trim();
+    const name = String(props.name || street || '').trim();
+    const city = props.city || props.town || props.village || props.locality || '';
+    const parts = [name, city, props.state, props.country]
+      .map((p) => String(p || '').trim())
+      .filter(Boolean);
+    return [...new Set(parts)].join(', ') || null;
   } catch {
     return null;
   }
 }
 
 /**
- * No API key: open a Google Maps search URL, follow redirects, parse coordinates
- * from the final URL / HTML (@lat,lon or !3d/!4d).
+ * No API key: Google Maps embed HTML includes the resolved POI lat/lon.
+ * Do not scrape the interactive Maps page — it often only has staticmap?center=
+ * for the viewer's IP viewport (wrong pin).
  */
 async function resolveViaGoogleMapsSearch(query) {
   const q = String(query || '').trim();
   if (q.length < 2) return null;
-  const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  const embedUrl = `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed&hl=en`;
   try {
-    const response = await fetchWithTimeout(searchUrl, {
+    const response = await fetchWithTimeout(embedUrl, {
       method: 'GET',
       redirect: 'follow',
       headers: {
-        'User-Agent': GEO_UA,
+        'User-Agent': MAPS_FETCH_UA,
         Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
-    const finalUrl = String(response.url || searchUrl);
     let html = '';
     try {
       html = await response.text();
     } catch {
       html = '';
     }
-    const blob = `${finalUrl}\n${html.slice(0, 250_000)}`;
-    const coords = parseCoordsFromMapText(blob) || parseCoordsFromMapText(finalUrl);
-    if (!coords) return null;
-    const address =
-      (await googleReverseApi(coords.lat, coords.lon)) ||
-      q;
+    const hit = parseCoordsFromEmbedHtml(html);
+    if (!hit) return null;
+    const address = hit.address || (await photonReverse(hit.lat, hit.lon)) || q;
     return {
       provider: 'google-maps-search',
-      lat: coords.lat,
-      lon: coords.lon,
+      lat: hit.lat,
+      lon: hit.lon,
       address,
       placeId: null,
     };
@@ -125,11 +83,16 @@ async function resolveViaGoogleMapsSearch(query) {
 async function photonSearch(query, limit = 6) {
   const url = new URL('https://photon.komoot.io/api/');
   url.searchParams.set('q', query);
-  url.searchParams.set('limit', String(limit));
+  url.searchParams.set('limit', String(Math.max(limit, 8)));
   url.searchParams.set('lang', 'en');
+  const israelHint = /israel|ישראל|\bil\b/i.test(query);
+  if (israelHint) {
+    url.searchParams.set('lat', '32.8');
+    url.searchParams.set('lon', '35.2');
+  }
   try {
     const data = await fetchJson(url.toString(), { 'User-Agent': GEO_UA });
-    return (data?.features || [])
+    const hits = (data?.features || [])
       .map((feature) => {
         const coords = feature?.geometry?.coordinates;
         const lon = asNumber(Array.isArray(coords) ? coords[0] : null);
@@ -139,14 +102,21 @@ async function photonSearch(query, limit = 6) {
         const street = [props.housenumber, props.street].filter(Boolean).join(' ').trim();
         const name = String(props.name || street || '').trim();
         const city = props.city || props.town || props.village || props.locality || '';
-        const parts = [name, city, props.state, props.country]
+        const country = String(props.country || '').trim();
+        const parts = [name, city, props.state, country]
           .map((p) => String(p || '').trim())
           .filter(Boolean);
         const address = [...new Set(parts)].join(', ') || name;
         if (!address) return null;
-        return { lat, lon, address, placeId: null, provider: 'photon' };
+        return { lat, lon, address, country, placeId: null, provider: 'photon' };
       })
       .filter(Boolean);
+    if (israelHint) {
+      const il = hits.filter((h) => /israel|ישראל/i.test(`${h.address} ${h.country}`));
+      const rest = hits.filter((h) => !il.includes(h));
+      return (il.length ? [...il, ...rest] : hits).slice(0, limit);
+    }
+    return hits.slice(0, limit);
   } catch {
     return [];
   }
@@ -188,7 +158,7 @@ export async function geocodeAddress(query) {
   // Pasted coordinates
   const bare = parseLatLon(q) || parseCoordsFromMapText(q);
   if (bare && !looksLikeMapUrl(q) && !/^https?:\/\//i.test(q)) {
-    const address = (await googleReverseApi(bare.lat, bare.lon)) || `${bare.lat.toFixed(4)}, ${bare.lon.toFixed(4)}`;
+    const address = (await photonReverse(bare.lat, bare.lon)) || `${bare.lat.toFixed(4)}, ${bare.lon.toFixed(4)}`;
     return { provider: 'coords', lat: bare.lat, lon: bare.lon, address, placeId: null };
   }
 
@@ -197,7 +167,7 @@ export async function geocodeAddress(query) {
     const resolved = await resolveMapInput(q);
     if (resolved.coords) {
       const address =
-        (await googleReverseApi(resolved.coords.lat, resolved.coords.lon)) ||
+        (await photonReverse(resolved.coords.lat, resolved.coords.lon)) ||
         resolved.placeQuery ||
         q;
       return {
@@ -213,11 +183,7 @@ export async function geocodeAddress(query) {
     }
   }
 
-  // 1) Google Geocoding API (when keyed on Wald)
-  const apiHit = await googleGeocodeApi(q);
-  if (apiHit) return apiHit;
-
-  // 2) Google Maps search URL → coordinates (works without a billed key)
+  // Google Maps search URL → coordinates (no billed API key)
   const mapsHit = await resolveViaGoogleMapsSearch(q);
   if (mapsHit) return mapsHit;
 
@@ -267,32 +233,13 @@ export async function autocompletePlaces(query) {
     return [
       {
         description: q.length > 80 ? `${q.slice(0, 77)}…` : q,
+        query: q,
         placeId: null,
         lat: null,
         lon: null,
         provider: 'maps-url',
       },
     ];
-  }
-
-  const key = googleKey();
-  if (key) {
-    const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
-    url.searchParams.set('input', q);
-    url.searchParams.set('key', key);
-    // Do not restrict to types=geocode — beaches / marinas / spots must appear.
-    try {
-      const data = await fetchJson(url.toString());
-      if (data.status === 'OK' || data.status === 'ZERO_RESULTS') {
-        return (data.predictions || []).slice(0, 6).map((p) => ({
-          description: p.description,
-          placeId: p.place_id,
-          provider: 'google',
-        }));
-      }
-    } catch {
-      // fall through
-    }
   }
 
   const photon = await photonSearch(q, 6);
@@ -316,26 +263,3 @@ export async function autocompletePlaces(query) {
   }));
 }
 
-export async function placeDetails(placeId) {
-  const key = googleKey();
-  if (!key || !placeId) throw new Error('Place details need Google Places API key');
-  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
-  url.searchParams.set('place_id', placeId);
-  url.searchParams.set('fields', 'geometry,formatted_address,name');
-  url.searchParams.set('key', key);
-  const data = await fetchJson(url.toString());
-  if (data.status !== 'OK' || !data.result) {
-    throw new Error(data.error_message || `Place details: ${data.status}`);
-  }
-  const hit = data.result;
-  const lat = asNumber(hit.geometry?.location?.lat);
-  const lon = asNumber(hit.geometry?.location?.lng);
-  if (lat == null || lon == null) throw new Error('Place missing coordinates');
-  return {
-    provider: 'google',
-    lat,
-    lon,
-    address: hit.formatted_address || hit.name || placeId,
-    placeId,
-  };
-}

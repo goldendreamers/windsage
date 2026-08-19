@@ -52,7 +52,6 @@ export function StatusPanel({
       ? thresholdText
       : condition || 'Waiting for first check…';
 
-  const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
   const metaParts = [
     !paused && thresholdText && condition ? condition : null,
     result?.conditionMet
@@ -88,9 +87,6 @@ export function StatusPanel({
       </View>
 
       <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
-      {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
-        <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
-      ) : null}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>
   );

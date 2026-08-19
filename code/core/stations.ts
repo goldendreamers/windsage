@@ -117,8 +117,6 @@ export function detectProviderFromInput(input: string): StationProvider | null {
   if (!t) return null;
   if (t.includes('windguru.cz')) return 'windguru';
   if (t.includes('ndbc.noaa.gov') || t.includes('station_page.php')) return 'ndbc';
-  if (t.includes('tempest') || t.includes('weatherflow')) return 'tempest';
-  if (t.includes('windfinder.com')) return 'windfinder';
   if (t.includes('synoptic') || t.includes('mesowest')) return 'synoptic';
   if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(t)) return 'openmeteo';
   return null;
@@ -143,8 +141,12 @@ export function stationPageUrl(station: FollowedStation): string {
       return `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(id)}`;
     case 'openmeteo':
       return 'https://open-meteo.com/en/docs';
-    case 'synoptic':
-      return 'https://www.synopticdata.com/';
+    case 'synoptic': {
+      const sid = String(id || '').trim().toUpperCase();
+      return sid
+        ? `https://aviationweather.gov/data/metar/?ids=${encodeURIComponent(sid)}`
+        : 'https://aviationweather.gov/';
+    }
     case 'tempest':
       return `https://tempestwx.com/station/${encodeURIComponent(id)}`;
     case 'windfinder':

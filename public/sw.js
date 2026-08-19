@@ -1,9 +1,9 @@
 /* Windsage service worker — Web Push + static cache
- * v7: bump after overnight opt catch-up; keep network-first HTML shell.
+ * v8: unique push tags; client register cache-bust aligned.
  */
-const SW_VERSION = 'windsage-sw-v7';
-const STATIC_CACHE = 'windsage-static-v7';
-const SHELL_CACHE = 'windsage-shell-v7';
+const SW_VERSION = 'windsage-sw-v8';
+const STATIC_CACHE = 'windsage-static-v8';
+const SHELL_CACHE = 'windsage-shell-v8';
 const SHELL_URLS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {

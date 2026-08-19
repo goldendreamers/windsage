@@ -197,6 +197,7 @@ export function ensureDevice(store, deviceId, secret) {
       webPushSubscriptions: [],
       stations: [],
       pollIntervalMinutes: 10,
+      simpleMode: true,
       alertStates: {},
       snapshots: {},
       createdAt: Date.now(),
@@ -224,6 +225,7 @@ export function createUser(store, partial = {}) {
     sso: partial.sso ?? {},
     stations: partial.stations ?? [],
     pollIntervalMinutes: partial.pollIntervalMinutes ?? 10,
+    simpleMode: partial.simpleMode !== false,
     alertStates: partial.alertStates ?? {},
     snapshots: partial.snapshots ?? {},
     pushTokens: partial.pushTokens ?? [],
@@ -233,6 +235,14 @@ export function createUser(store, partial = {}) {
   };
   store.users[id] = user;
   return user;
+}
+
+export function simpleModeOf(bag) {
+  return bag?.simpleMode !== false;
+}
+
+export function applySimpleMode(bag, body) {
+  if (typeof body?.simpleMode === 'boolean') bag.simpleMode = body.simpleMode;
 }
 
 export function findUserByUsername(store, username) {
@@ -332,6 +342,9 @@ export function linkDeviceToUser(
   }
   if (mergeGuestStations && Array.isArray(device.stations) && device.stations.length) {
     user.stations = mergeStations(user.stations || [], device.stations || []);
+  }
+  if (mergeGuestStations && typeof device.simpleMode === 'boolean') {
+    user.simpleMode = device.simpleMode;
   }
   // Device bag is owned by the user while linked — never keep a second copy.
   device.stations = [];
@@ -458,6 +471,7 @@ export function publicUser(user) {
       apple: user.sso?.apple ? { linked: true } : null,
     },
     pollIntervalMinutes: user.pollIntervalMinutes || 10,
+    simpleMode: user.simpleMode !== false,
     stationCount: (user.stations || []).length,
   };
 }

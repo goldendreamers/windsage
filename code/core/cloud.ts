@@ -48,6 +48,7 @@ export type CloudUser = {
     apple: { linked: boolean } | null;
   };
   pollIntervalMinutes: number;
+  simpleMode?: boolean;
   stationCount: number;
 };
 
@@ -194,13 +195,14 @@ export async function fetchAuthProviders(): Promise<{
 export async function registerAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    simpleMode?: boolean;
   }>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -218,13 +220,14 @@ export async function registerAccount(
 export async function loginAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    simpleMode?: boolean;
   }>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -276,10 +279,14 @@ export async function pullMyStations(): Promise<AppSettings | null> {
   const data = await cloudFetch<{
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    simpleMode?: boolean;
   }>('/v1/me/stations', { method: 'GET', token });
   return {
     stations: data.stations || [],
-    pollIntervalMinutes: Math.max(10, data.pollIntervalMinutes || 10),
+    pollIntervalMinutes: Number.isFinite(Number(data.pollIntervalMinutes))
+      ? Number(data.pollIntervalMinutes)
+      : 10,
+    simpleMode: data.simpleMode !== false,
   };
 }
 
@@ -382,6 +389,7 @@ export async function syncStationsToCloud(
         stations: settings.stations,
         clearStations,
         pollIntervalMinutes: settings.pollIntervalMinutes,
+        simpleMode: settings.simpleMode !== false,
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
@@ -406,6 +414,7 @@ export async function syncStationsToCloud(
       stations: settings.stations,
       clearStations,
       pollIntervalMinutes: settings.pollIntervalMinutes,
+      simpleMode: settings.simpleMode !== false,
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
     }),
@@ -499,6 +508,7 @@ export async function fetchCloudSnapshot(): Promise<{
   lastPollAt: number | null;
   cloud: boolean;
   stations?: FollowedStation[];
+  simpleMode?: boolean;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -507,12 +517,14 @@ export async function fetchCloudSnapshot(): Promise<{
       lastPollAt: number | null;
       cloud: boolean;
       stations: FollowedStation[];
+      simpleMode?: boolean;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
       lastPollAt: data.lastPollAt ?? null,
       cloud: !!data.cloud,
       stations: data.stations,
+      simpleMode: data.simpleMode !== false,
     };
   }
 
@@ -522,6 +534,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: number | null;
     cloud: boolean;
     stations: FollowedStation[];
+    simpleMode?: boolean;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -531,6 +544,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: data.lastPollAt ?? null,
     cloud: !!data.cloud,
     stations: data.stations,
+    simpleMode: data.simpleMode !== false,
   };
 }
 

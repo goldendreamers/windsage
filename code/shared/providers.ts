@@ -8,12 +8,17 @@ export type StationProvider =
   | 'tempest'
   | 'windfinder';
 
+/** Sources shown in Add Station. Tempest / Windfinder stay in the type for old saves. */
 export const STATION_PROVIDERS: StationProvider[] = [
   'windguru',
   'location',
   'ndbc',
   'openmeteo',
   'synoptic',
+];
+
+const KNOWN_PROVIDERS: StationProvider[] = [
+  ...STATION_PROVIDERS,
   'tempest',
   'windfinder',
 ];
@@ -61,22 +66,22 @@ export const PROVIDER_META: Record<
   synoptic: {
     label: 'Synoptic / MesoWest',
     short: 'SYN',
-    hint: 'Mesonet station ID (needs SYNOPTIC_TOKEN on the server).',
-    placeholder: 'KSLC or stid from synopticdata.com',
-    needsToken: true,
+    hint: 'Airport ICAO or mesonet id. Example: LLBG or KSLC.',
+    placeholder: 'LLBG or KSLC',
+    needsToken: false,
   },
   tempest: {
     label: 'Tempest / WeatherFlow',
     short: 'TMP',
-    hint: 'Tempest station id (needs TEMPEST_TOKEN; usually your own stations).',
-    placeholder: '12345 or tempestwx.com/station/12345',
+    hint: 'Removed from Add Station (no account).',
+    placeholder: '',
     needsToken: true,
   },
   windfinder: {
     label: 'Windfinder',
     short: 'WF',
-    hint: 'Business API only — needs WINDFINDER_API_KEY on the server.',
-    placeholder: 'report/tarifa or windfinder.com/report/tarifa',
+    hint: 'Removed from Add Station (paid API).',
+    placeholder: '',
     needsToken: true,
   },
 };
@@ -85,7 +90,7 @@ export function normalizeProvider(value: unknown): StationProvider {
   const v = String(value || '')
     .trim()
     .toLowerCase();
-  if ((STATION_PROVIDERS as string[]).includes(v)) return v as StationProvider;
+  if ((KNOWN_PROVIDERS as string[]).includes(v)) return v as StationProvider;
   return 'windguru';
 }
 

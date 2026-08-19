@@ -5,7 +5,7 @@ import { Animated, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
 import { colors, space } from '../shared/theme';
 
-export function BrandHero({ hasStation }: { hasStation: boolean }) {
+export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; simpleMode?: boolean }) {
   const drift = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -53,11 +53,13 @@ export function BrandHero({ hasStation }: { hasStation: boolean }) {
           <Image source={brandImages.mark} style={styles.mark} contentFit="contain" />
           <Text style={styles.brand}>Windsage</Text>
         </View>
-        <Text style={styles.tagline}>
-          {hasStation
-            ? 'Your followed stations live here. Wald watches so your phone can sleep.'
-            : 'Follow stations from Windguru and other sources — get notified when conditions hold.'}
-        </Text>
+        {!hasStation ? (
+          <Text style={styles.tagline}>
+            {simpleMode
+              ? 'Add a station. Get a ping when the wind is up.'
+              : 'Follow a spot. Get notified when it holds.'}
+          </Text>
+        ) : null}
       </View>
     </View>
   );

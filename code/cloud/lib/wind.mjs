@@ -189,7 +189,7 @@ export async function findNearestLiveStation(lat, lon) {
 
 function formatLinkedWarning(linked) {
   const km = linked.distanceKm.toFixed(1);
-  return `No live sensor on this spot — showing forecast; alerts use nearest live ${linked.name} (#${linked.id}, ${km} km)`;
+  return `No live Windguru sensor on this spot — alerts use the model forecast. Nearest live for reference: ${linked.name} (#${linked.id}, ${km} km)`;
 }
 
 /** Look up official name for a live station id from Windguru station_list. */
@@ -209,7 +209,8 @@ async function lookupLiveStationName(liveStationId) {
 
 /**
  * Spot IDs resolve to a native live station when Windguru links one;
- * otherwise attach the geographically nearest live station and warn.
+ * otherwise attach the geographically nearest live station as a reference
+ * (alerts for those spots use the model forecast, not that live sensor).
  */
 export async function resolveWindguruId(inputId) {
   const id = String(inputId).trim();
@@ -380,13 +381,81 @@ export async function fetchCurrentReading(stationId) {
   return tryStationCurrent(resolved.liveStationId);
 }
 
-/**
- * Current (nearest-hour) GFS/model forecast for a Windguru spot.
- * Used when a spot has no native live sensor — UI shows forecast; alerts use nearest live.
- */
-export async function fetchSpotForecastNow(spotId, preferredModel = null) {
+const FORECAST_BUNDLE_TTL_MS = 5 * 60 * 1000;
+const forecastBundleCache = new Map();
+
+function pickForecastWaveAt(fcst, index) {
+  for (const key of ['HTsGW', 'HTSGW', 'SWELL1', 'wave_height']) {
+    if (Array.isArray(fcst[key])) {
+      const n = asNumber(fcst[key][index]);
+      if (n != null) return n;
+    }
+  }
+  return null;
+}
+
+function forecastPointsFromFcst(fcst) {
+  const initstamp = asNumber(fcst.initstamp) ?? 0;
+  const hours = Array.isArray(fcst.hours) ? fcst.hours.map((h) => asNumber(h) ?? 0) : [];
+  const windspd = Array.isArray(fcst.WINDSPD) ? fcst.WINDSPD : [];
+  const gust = Array.isArray(fcst.GUST) ? fcst.GUST : [];
+  const winddir = Array.isArray(fcst.WINDDIR) ? fcst.WINDDIR : [];
+  const tmp = Array.isArray(fcst.TMP)
+    ? fcst.TMP
+    : Array.isArray(fcst.TMPE)
+      ? fcst.TMPE
+      : [];
+  return hours.map((hour, i) => ({
+    unixtime: initstamp + hour * 3600,
+    hour,
+    wind_avg: asNumber(windspd[i]),
+    wind_max: asNumber(gust[i]),
+    wind_min: null,
+    wind_direction: asNumber(winddir[i]),
+    temperature: asNumber(tmp[i]),
+    wave_height: pickForecastWaveAt(fcst, i),
+  }));
+}
+
+function readingFromForecastPoint(point) {
+  return {
+    wind_avg: point.wind_avg,
+    wind_max: point.wind_max,
+    wind_min: point.wind_min,
+    wind_direction: point.wind_direction,
+    temperature: point.temperature,
+    wave_height: point.wave_height,
+    datetime: new Date(point.unixtime * 1000).toISOString(),
+    unixtime: point.unixtime,
+  };
+}
+
+function metricKeyFromForecast(metric) {
+  if (metric === 'wind_max') return 'wind_max';
+  if (metric === 'temperature') return 'temperature';
+  if (metric === 'wave_height') return 'wave_height';
+  return 'wind_avg';
+}
+
+function historyFromForecastPoints(points, metric, hours, nowSec) {
+  const windowSec = Math.max(1, Number(hours) || 6) * 3600;
+  const cutoff = nowSec - windowSec;
+  const rows = points.filter(
+    (p) => p.unixtime >= cutoff && p.unixtime <= nowSec + 1800,
+  );
+  const key = metricKeyFromForecast(metric);
+  return {
+    unixtime: rows.map((p) => p.unixtime),
+    values: rows.map((p) => p[key] ?? null),
+  };
+}
+
+async function fetchSpotForecastBundle(spotId, preferredModel = null) {
   const id = String(spotId || '').trim();
   if (!/^\d+$/.test(id)) throw new Error('Spot ID must be numeric');
+  const cacheKey = `${id}:${preferredModel == null ? 'auto' : preferredModel}`;
+  const cached = forecastBundleCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
 
   const spot = await fetchJson(`https://www.windguru.cz/${id}`, {
     q: 'spot',
@@ -418,66 +487,75 @@ export async function fetchSpotForecastNow(spotId, preferredModel = null) {
     throw new Error('Forecast data missing');
   }
 
-  const initstamp = asNumber(fcst.initstamp) ?? 0;
-  const hours = fcst.hours.map((h) => asNumber(h) ?? 0);
-  const nowSec = Date.now() / 1000;
-  let best = 0;
-  let bestDelta = Infinity;
-  for (let i = 0; i < hours.length; i += 1) {
-    const t = initstamp + hours[i] * 3600;
-    const delta = Math.abs(t - nowSec);
-    if (delta < bestDelta) {
-      bestDelta = delta;
-      best = i;
-    }
-  }
-
-  const unixtime = initstamp + hours[best] * 3600;
-  const windspd = Array.isArray(fcst.WINDSPD) ? fcst.WINDSPD : [];
-  const gust = Array.isArray(fcst.GUST) ? fcst.GUST : [];
-  const winddir = Array.isArray(fcst.WINDDIR) ? fcst.WINDDIR : [];
-  const tmp = Array.isArray(fcst.TMP)
-    ? fcst.TMP
-    : Array.isArray(fcst.TMPE)
-      ? fcst.TMPE
-      : [];
-  const waveKeys = ['HTsGW', 'HTSGW', 'SWELL1', 'wave_height'];
-  let wave = null;
-  for (const key of waveKeys) {
-    if (Array.isArray(fcst[key])) {
-      wave = asNumber(fcst[key][best]);
-      if (wave != null) break;
-    }
-  }
-
-  return {
-    reading: {
-      wind_avg: asNumber(windspd[best]),
-      wind_max: asNumber(gust[best]),
-      wind_min: null,
-      wind_direction: asNumber(winddir[best]),
-      temperature: asNumber(tmp[best]),
-      wave_height: wave,
-      datetime: new Date(unixtime * 1000).toISOString(),
-      unixtime,
-    },
+  const points = forecastPointsFromFcst(fcst);
+  if (!points.length) throw new Error('Forecast data missing');
+  const value = {
+    points,
+    idModel,
     modelName:
       fcst.model_name ||
       data?.wgmodel?.model_name ||
       data?.model ||
       `model ${idModel}`,
-    idModel,
-    hour: hours[best],
     spotName: typeof spot?.spotname === 'string' ? spot.spotname : undefined,
+  };
+  forecastBundleCache.set(cacheKey, {
+    expires: Date.now() + FORECAST_BUNDLE_TTL_MS,
+    value,
+  });
+  return value;
+}
+
+/**
+ * Current (nearest-hour) GFS/model forecast for a Windguru spot.
+ * Used when a spot has no native live sensor — UI and alerts both use this hour.
+ */
+export async function fetchSpotForecastNow(
+  spotId,
+  preferredModel = null,
+  metric = 'wind_avg',
+  hours = 6,
+) {
+  const bundle = await fetchSpotForecastBundle(spotId, preferredModel);
+  const nowSec = Date.now() / 1000;
+  let best = 0;
+  let bestDelta = Infinity;
+  for (let i = 0; i < bundle.points.length; i += 1) {
+    const delta = Math.abs(bundle.points[i].unixtime - nowSec);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+  const point = bundle.points[best];
+  return {
+    reading: readingFromForecastPoint(point),
+    modelName: bundle.modelName,
+    idModel: bundle.idModel,
+    hour: point.hour,
+    spotName: bundle.spotName,
+    history: historyFromForecastPoints(bundle.points, metric, hours, nowSec),
   };
 }
 
-/** Spot uses nearest-live fallback (no native sensor on the spot). */
+export async function fetchSpotForecastHistory(spotId, metric, hours = 6) {
+  const bundle = await fetchSpotForecastBundle(spotId);
+  return historyFromForecastPoints(bundle.points, metric, hours, Date.now() / 1000);
+}
+
+/** Spot has no native Windguru live sensor — alerts use the model forecast. */
 export function isForecastOnlySpot(station) {
   return (
     station?.kind === 'spot' &&
     !!(station.linkedLiveStation || station.liveLinkWarning)
   );
+}
+
+/** Stable alert-clock id. Forecast-only spots prefix so a switch from live→forecast resets hold. */
+export function alertEvalId(station) {
+  const sid = String(station?.stationId ?? '').trim();
+  if (isForecastOnlySpot(station) && sid) return `forecast:${sid}`;
+  return sid;
 }
 
 export async function fetchRecentHistory(stationId, metric, hours, avgMinutes = 10) {
@@ -613,7 +691,7 @@ export function alertConditionMet(reading, station) {
  */
 export function needsAlertHistory(reading, station, prev) {
   if (!alertConditionMet(reading, station)) return false;
-  const sid = String(station.stationId || '').trim();
+  const sid = alertEvalId(station);
   if (prev?.lastStationId && prev.lastStationId !== sid) return true;
   if (prev?.conditionSinceMs != null) return false;
   return true;
@@ -640,7 +718,8 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
 
-  if (prev.lastStationId && prev.lastStationId !== station.stationId) {
+  const evalId = alertEvalId(station);
+  if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
   }
@@ -705,7 +784,7 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       lastCheckMs: nowMs,
       lastValue: value,
       lastError: null,
-      lastStationId: station.stationId,
+      lastStationId: evalId,
     },
   };
 }

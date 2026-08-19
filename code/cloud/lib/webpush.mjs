@@ -94,10 +94,8 @@ export async function sendWebPush(subscription, { title, body, data } = {}) {
     await webpush.sendNotification(subscription, payload, {
       TTL: 60 * 60 * 6,
       urgency: 'high',
-      topic: 'windsage-alert',
       headers: {
         Urgency: 'high',
-        Topic: 'windsage-alert',
       },
     });
     return { ok: true };

@@ -87,9 +87,12 @@ export interface FollowedStation {
   liveLinkWarning?: string | null;
   /**
    * Location-blend follow (provider === 'location'): pin + nearby members
-   * weighted by distance × historical accuracy × user rating.
+   * weighted by steep inverse-distance × historical accuracy × user rating.
+   * Temperature uses a sharper local curve.
    */
   locationBlend?: LocationBlend | null;
+  /** Home-list favorite — starred follows sort to the top. */
+  starred?: boolean;
 }
 
 export interface LocationBlendMember {
@@ -119,6 +122,8 @@ export interface LocationBlend {
 export interface AppSettings {
   stations: FollowedStation[];
   pollIntervalMinutes: number;
+  /** Easy UI. Missing/undefined means on. Saved per account when signed in. */
+  simpleMode?: boolean;
 }
 
 export interface StationReading {
@@ -151,11 +156,11 @@ export interface AlertState {
 export type AlertStateMap = Record<string, AlertState>;
 
 export interface CheckResult {
-  /** Live sensor reading used for alert evaluation (native or nearest). */
+  /** Live or forecast reading used for alert evaluation. */
   reading: StationReading | null;
   /**
    * Spot model forecast “now” — set when the followed spot has no native live sensor.
-   * Home/detail show this; alerts still use `reading` from the nearest live station.
+   * Home/detail show this; alerts for those spots also use this forecast hour.
    */
   forecast?: StationReading | null;
   /** Windguru model label for `forecast` (e.g. GFS 13 km). */

@@ -26,7 +26,7 @@ import {
   type StationProvider,
 } from '../shared/providers';
 import { colors } from '../shared/theme';
-import type { FollowedStation, WindguruKind } from '../shared/types';
+import type { AlertRule, FollowedStation, LocationBlend, WindguruKind } from '../shared/types';
 import {
   detectProviderFromInput,
   followTargetFromResolved,
@@ -35,7 +35,12 @@ import {
 import { parseWindguruRef } from '../core/windguru';
 import { getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
-import type { LocationBlend } from '../shared/types';
+import { FirstTimeBanner } from './FirstTimeBanner';
+import { SimpleNotifyPicker } from './SimpleNotifyPicker';
+import {
+  DEFAULT_SIMPLE_NOTIFY_ID,
+  ruleFromSimplePreset,
+} from '../core/simpleMode';
 
 type Props = {
   visible: boolean;
@@ -52,11 +57,15 @@ type Props = {
       | 'liveLinkWarning'
       | 'sourceName'
       | 'locationBlend'
+      | 'rule'
     >,
   ) => void;
   onReuse: (followId: string) => void;
   existingStations: FollowedStation[];
   catalogStations?: CatalogStation[];
+  howto?: boolean;
+  onDismissHowto?: () => void;
+  simpleMode?: boolean;
 };
 
 export function AddStationModal({
@@ -66,6 +75,9 @@ export function AddStationModal({
   onReuse,
   existingStations,
   catalogStations = [],
+  howto = false,
+  onDismissHowto,
+  simpleMode = false,
 }: Props) {
   const [provider, setProvider] = useState<StationProvider>('windguru');
   const [stationId, setStationId] = useState('');
@@ -79,7 +91,16 @@ export function AddStationModal({
   const [locationPick, setLocationPick] = useState<LocationPick | null>(null);
   const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
+  const [notifyRule, setNotifyRule] = useState<AlertRule>(() =>
+    ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID),
+  );
   const nicknameInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!visible || !simpleMode) return;
+    setProvider('windguru');
+    setKind('station');
+  }, [visible, simpleMode]);
 
   useEffect(() => {
     if (!visible) return;
@@ -111,9 +132,7 @@ export function AddStationModal({
     !!pendingCatalog &&
     pendingCatalog.stationId.trim() === stationId.trim() &&
     normalizeProvider(pendingCatalog.provider) === provider;
-  const catalogNeedsNickname = catalogPending && !nickname.trim();
-  const addDisabled =
-    busy || catalogNeedsNickname || (provider === 'location' && !locationPick);
+  const addDisabled = busy || (provider === 'location' && !locationPick);
 
   const existingSuggestions = useMemo(
     () =>
@@ -123,9 +142,28 @@ export function AddStationModal({
     [existingStations, stationId, provider],
   );
   const catalogSuggestions = useMemo(
-    () => suggestCatalogStations(catalogStations, existingStations, stationId, 6, provider),
-    [catalogStations, existingStations, stationId, provider],
+    () => {
+      const rows = suggestCatalogStations(catalogStations, existingStations, stationId, 6, provider);
+      if (!simpleMode) return rows;
+      return rows.filter(
+        (entry) =>
+          normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
+      );
+    },
+    [catalogStations, existingStations, stationId, provider, simpleMode],
   );
+
+  const saveFollow = (
+    id: string,
+    name: string,
+    followKind: WindguruKind,
+    extras: Parameters<Props['onSave']>[3] = {},
+  ) => {
+    onSave(id, name, simpleMode ? 'station' : followKind, {
+      ...extras,
+      ...(simpleMode ? { rule: notifyRule } : {}),
+    });
+  };
 
   const reset = () => {
     setStationId('');
@@ -138,6 +176,7 @@ export function AddStationModal({
     setLocationPick(null);
     setPendingMembers(null);
     setPendingCatalog(null);
+    setNotifyRule(ruleFromSimplePreset(DEFAULT_SIMPLE_NOTIFY_ID));
   };
 
   const close = () => {
@@ -169,16 +208,14 @@ export function AddStationModal({
   /** Fill the form only — user nicknames, then taps Add to home. */
   const pickCatalog = (entry: CatalogStation) => {
     void Haptics.selectionAsync();
-    const entryProvider = normalizeProvider(entry.provider);
+    const entryProvider = simpleMode ? 'windguru' : normalizeProvider(entry.provider);
     setProvider(entryProvider);
     setStationId(entry.stationId);
-    setKind(entry.kind === 'spot' ? 'spot' : 'station');
+    setKind(simpleMode ? 'station' : entry.kind === 'spot' ? 'spot' : 'station');
     setNickname('');
     setPendingCatalog(entry);
     setError(null);
-    setLinkHint(
-      `Selected ${catalogLabel(entry)}. Add a nickname, then tap Add to home.`,
-    );
+    setLinkHint(null);
     setWarning(entry.liveLinkWarning ?? null);
     setTimeout(() => nicknameInputRef.current?.focus(), 50);
   };
@@ -189,6 +226,7 @@ export function AddStationModal({
     setError(null);
     setLinkHint(null);
     setWarning(null);
+    if (simpleMode) return;
     const detected = detectProviderFromInput(text);
     if (detected && detected !== provider) setProvider(detected);
     if (provider === 'windguru' || detected === 'windguru') {
@@ -222,7 +260,7 @@ export function AddStationModal({
           return;
         }
         const blend = (resolved as { locationBlend?: LocationBlend }).locationBlend || null;
-        onSave(target.stationId, nickname.trim() || target.sourceName || locationPick.address, 'station', {
+        saveFollow(target.stationId, nickname.trim() || target.sourceName || locationPick.address, 'station', {
           provider: 'location',
           sourceName: target.sourceName || locationPick.address,
           liveStationId: target.liveStationId,
@@ -251,9 +289,7 @@ export function AddStationModal({
       normalizeProvider(pendingCatalog.provider) === provider
     ) {
       if (!nickname.trim()) {
-        setError('Add a nickname before following this station');
-        nicknameInputRef.current?.focus();
-        return;
+        setWarning('No nickname — Home will use the official source name.');
       }
       const existing = findExistingFollow(existingStations, {
         stationId: pendingCatalog.stationId,
@@ -266,13 +302,18 @@ export function AddStationModal({
         return;
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSave(pendingCatalog.stationId, nickname.trim(), pendingCatalog.kind === 'spot' ? 'spot' : 'station', {
-        provider,
-        sourceName: pendingCatalog.sourceName ?? null,
-        liveStationId: pendingCatalog.liveStationId ?? null,
-        linkedLiveStation: pendingCatalog.linkedLiveStation ?? null,
-        liveLinkWarning: pendingCatalog.liveLinkWarning ?? null,
-      });
+      saveFollow(
+        pendingCatalog.stationId,
+        nickname.trim() || pendingCatalog.sourceName || pendingCatalog.stationId,
+        pendingCatalog.kind === 'spot' ? 'spot' : 'station',
+        {
+          provider,
+          sourceName: pendingCatalog.sourceName ?? null,
+          liveStationId: pendingCatalog.liveStationId ?? null,
+          linkedLiveStation: pendingCatalog.linkedLiveStation ?? null,
+          liveLinkWarning: pendingCatalog.liveLinkWarning ?? null,
+        },
+      );
       reset();
       return;
     }
@@ -317,7 +358,7 @@ export function AddStationModal({
       }
       if (target.liveLinkWarning) setWarning(target.liveLinkWarning);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSave(target.stationId, name, target.kind, {
+      saveFollow(target.stationId, name, target.kind, {
         provider: target.provider,
         liveStationId: target.liveStationId,
         linkedLiveStation: target.linkedLiveStation,
@@ -342,13 +383,30 @@ export function AddStationModal({
             return;
           }
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          onSave(id, nickname.trim() || `Spot ${id}`, 'spot', { provider: 'windguru' });
+          saveFollow(id, nickname.trim() || `Spot ${id}`, 'spot', { provider: 'windguru' });
           reset();
           return;
         }
       }
-      setError(e instanceof Error ? e.message : `Could not resolve ${meta.label}`);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg = e instanceof Error ? e.message : `Could not resolve ${meta.label}`;
+      const parsed = provider === 'windguru' ? parseWindguruRef(stationId)?.id : null;
+      const saveId = parsed || stationId.trim();
+      const existing = findExistingFollow(existingStations, {
+        stationId: saveId,
+        provider,
+      });
+      if (existing) {
+        void Haptics.selectionAsync();
+        reset();
+        onReuse(existing.id);
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      saveFollow(saveId, nickname.trim() || saveId, kind, {
+        provider,
+        liveLinkWarning: msg,
+      });
+      reset();
     } finally {
       setBusy(false);
     }
@@ -358,12 +416,25 @@ export function AddStationModal({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.title}>Follow a station</Text>
-          <Text style={styles.hint}>
-            Pick a data source, then paste an id or URL. Matching follows you already have open
-            instead of duplicating.
+          <Text style={styles.title}>
+            {simpleMode ? 'Add a station' : 'Follow a station'}
           </Text>
+          {howto && !simpleMode ? (
+            <FirstTimeBanner
+              embedded
+              simple={simpleMode}
+              screen="follow"
+              onDismiss={onDismissHowto}
+            />
+          ) : null}
 
+          {simpleMode ? (
+            <Text style={styles.hint}>
+              Open the live station on windguru.cz and paste the number from the address (or paste
+              the whole link).
+            </Text>
+          ) : (
+            <>
           <Text style={styles.label}>Source</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerScroll}>
             <View style={styles.providerRow}>
@@ -399,14 +470,15 @@ export function AddStationModal({
               })}
             </View>
           </ScrollView>
-          <Text style={styles.sourceHint}>{meta.hint}</Text>
           {!providerReady ? (
             <Text style={styles.warning}>
               {meta.label} needs a token on the Windsage server before it can poll.
             </Text>
           ) : null}
+            </>
+          )}
 
-          {provider === 'windguru' ? (
+          {simpleMode || provider !== 'windguru' ? null : (
             <>
               <Text style={[styles.label, styles.spaced]}>Type</Text>
               <View style={styles.segment}>
@@ -435,10 +507,10 @@ export function AddStationModal({
                 })}
               </View>
             </>
-          ) : null}
+          )}
 
           <Text style={[styles.label, styles.spaced]}>
-            {catalogPending ? 'Nickname (required)' : 'Nickname'}
+            {simpleMode ? 'Name (optional)' : catalogPending ? 'Nickname (optional)' : 'Nickname'}
           </Text>
           <TextInput
             ref={nicknameInputRef}
@@ -451,7 +523,9 @@ export function AddStationModal({
             placeholder={
               pendingCatalog
                 ? `Nickname for ${catalogLabel(pendingCatalog)}`
-                : 'Home reef / Spot name'
+                : simpleMode
+                  ? 'e.g. Home beach'
+                  : 'Home reef / Spot name'
             }
             placeholderTextColor={colors.muted}
             autoFocus={provider !== 'location'}
@@ -469,12 +543,14 @@ export function AddStationModal({
             />
           ) : (
             <>
-              <Text style={[styles.label, styles.spaced]}>{meta.label} URL or id</Text>
+              <Text style={[styles.label, styles.spaced]}>
+                {simpleMode ? 'Station number or link' : `${meta.label} URL or id`}
+              </Text>
               <TextInput
                 style={styles.input}
                 value={stationId}
                 onChangeText={applyIdText}
-                placeholder={meta.placeholder}
+                placeholder={simpleMode ? 'e.g. 12345' : meta.placeholder}
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -482,6 +558,10 @@ export function AddStationModal({
               />
             </>
           )}
+
+          {simpleMode ? (
+            <SimpleNotifyPicker rule={notifyRule} onChange={setNotifyRule} />
+          ) : null}
 
           {provider === 'location' && pendingMembers?.length ? (
             <Text style={styles.linkHint}>
@@ -513,7 +593,7 @@ export function AddStationModal({
 
           {catalogSuggestions.length > 0 ? (
             <View style={styles.suggestions}>
-              <Text style={styles.suggestLabel}>Suggested from house catalog</Text>
+              <Text style={styles.suggestLabel}>Catalog</Text>
               {catalogSuggestions.map((entry) => (
                 <Pressable
                   key={`cat_${entry.provider}_${entry.stationId}`}
@@ -537,9 +617,6 @@ export function AddStationModal({
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}
           {warning ? <Text style={styles.warning}>{warning}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {catalogNeedsNickname && !error ? (
-            <Text style={styles.linkHint}>Nickname required before Add to home</Text>
-          ) : null}
 
           <View style={styles.actions}>
             <Pressable style={styles.secondary} onPress={close} disabled={busy}>
@@ -553,9 +630,7 @@ export function AddStationModal({
               {busy ? (
                 <ActivityIndicator color="#042018" />
               ) : (
-                <Text style={styles.primaryText}>
-                  {catalogNeedsNickname ? 'Nickname required' : 'Add to home'}
-                </Text>
+                <Text style={styles.primaryText}>{simpleMode ? 'Add station' : 'Add to home'}</Text>
               )}
             </Pressable>
           </View>

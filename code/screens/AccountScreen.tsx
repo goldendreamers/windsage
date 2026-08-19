@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { openDeveloperEmail } from '../core/contact';
 import type { CloudUser } from '../core/cloud';
 import {
   CloudError,
@@ -28,18 +29,20 @@ import { isRunningAsInstalledApp } from '../core/pwaInstall';
 
 type Props = {
   onBack: () => void;
+  onOpenMenu?: () => void;
   onAuthed: (
     payload: {
       user: CloudUser;
       stations: import('../shared/types').FollowedStation[];
       pollIntervalMinutes: number;
+      simpleMode?: boolean;
     },
     opts?: { importLocalGuestFollows?: boolean },
   ) => void;
   onLoggedOut: () => void;
 };
 
-export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
+export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Props) {
   const [user, setUser] = useState<CloudUser | null>(null);
   const [providers, setProviders] = useState({ google: false, facebook: false, apple: false });
   const [username, setUsername] = useState('');
@@ -102,6 +105,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         user: me,
         stations: pulled?.stations || [],
         pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+        simpleMode: pulled?.simpleMode !== false,
       },
       // Google "login" to a brand-new SSO user already merged guest follows server-side
       // when created; never import leftover local guest lists for returning users.
@@ -123,23 +127,32 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable style={styles.back} onPress={onBack}>
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable style={styles.back} onPress={onBack}>
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <Text style={styles.title}>Account</Text>
-      <Text style={styles.sub}>
-        Optional. Sign in to sync stations across phones and browsers. Guest mode still works —
-        all data stays on your Wald home server.
-      </Text>
+      <Text style={styles.sub}>Sign in to sync across devices. Guest still works.</Text>
 
       {user ? (
         <Section title="Signed in" icon="station">
           <Text style={styles.label}>
             {user.username ? `@${user.username}` : user.sso.google?.email || 'SSO account'}
-          </Text>
-          <Text style={styles.hint}>
-            Google: {user.sso.google?.linked ? user.sso.google.email || 'linked' : 'not linked'}
           </Text>
           {providers.google && !user.sso.google?.linked ? (
             <Pressable
@@ -258,17 +271,8 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
                 <Text style={styles.btnPrimaryText}>Continue with Google</Text>
               </Pressable>
             ) : (
-              <Text style={styles.hint}>
-                Google sign-in is not configured on Wald yet (set GOOGLE_CLIENT_ID /
-                GOOGLE_CLIENT_SECRET). Username & password still work.
-              </Text>
+              <Text style={styles.hint}>Google sign-in isn’t configured on this server.</Text>
             )}
-            {providers.facebook ? (
-              <Text style={styles.hint}>Facebook available when configured.</Text>
-            ) : null}
-            {providers.apple ? (
-              <Text style={styles.hint}>Apple available when configured.</Text>
-            ) : null}
           </Section>
 
           <Pressable style={styles.guest} onPress={onBack}>
@@ -277,25 +281,15 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         </>
       )}
 
-      <Section
-        title="Phone alerts"
-        icon="bell"
-        hint="Must wake the lock screen — not only after you open the phone."
-      >
+      <Section title="Phone alerts" icon="bell">
         {!isInstalledPwa() && !isRunningAsInstalledApp() ? (
           <Text style={[styles.hint, styles.warnHint]}>
-            Open Windsage from the home-screen icon (installed app), not a Chrome tab. Lock-screen
-            wake is unreliable in a normal browser tab.
+            Install and open from the home-screen icon for lock-screen alerts.
           </Text>
-        ) : (
-          <Text style={styles.hint}>Running as installed app ✓</Text>
-        )}
+        ) : null}
         <Text style={styles.hint}>
-          Android (required for alerts while locked):{'\n'}
-          1. Settings → Apps → Windsage (and Chrome) → Battery → Unrestricted{'\n'}
-          2. Notifications → Lock screen → Show all / Alerting{'\n'}
-          3. Turn Adaptive Battery off if alerts still wait for unlock{'\n'}
-          Then lock the phone, wait 30s, and tap the test below.
+          Android: Apps → Windsage and Chrome → Battery → Unrestricted. Lock screen: show all
+          notifications.
         </Text>
         <Pressable
           style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
@@ -314,12 +308,10 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
               const result = await sendTestPhoneAlert();
               const lockHint =
                 !isInstalledPwa() && !isRunningAsInstalledApp()
-                  ? ' Tip: install + open from home screen, then set Battery → Unrestricted.'
-                  : ' Keep the phone locked — it should buzz without unlocking.';
+                  ? ' Install and open from the home screen.'
+                  : '';
               setPhoneAlertMsg(
-                result.delivered > 0
-                  ? `Test sent.${lockHint}`
-                  : 'Nothing was delivered.',
+                result.delivered > 0 ? `Test sent.${lockHint}` : 'Nothing was delivered.',
               );
               void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             })
@@ -329,6 +321,18 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         </Pressable>
         {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
       </Section>
+
+      <Pressable
+        style={[styles.btn, styles.btnSecondary]}
+        onPress={() => {
+          void Haptics.selectionAsync();
+          openDeveloperEmail();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Email the developer"
+      >
+        <Text style={styles.btnSecondaryText}>Email the developer</Text>
+      </Pressable>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
@@ -343,8 +347,26 @@ const styles = StyleSheet.create({
     paddingBottom: 44,
     gap: 14,
   },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   back: { alignSelf: 'flex-start', paddingVertical: 4 },
   backText: { color: colors.accent, fontSize: 16, fontWeight: '700' },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
   title: { color: colors.text, fontSize: 28, fontWeight: '800' },
   sub: { color: colors.muted, fontSize: 14, lineHeight: 20 },
   label: { color: colors.text, fontSize: 14, fontWeight: '600' },

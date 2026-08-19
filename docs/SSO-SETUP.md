@@ -1,6 +1,9 @@
 # Windsage SSO setup (Google / Facebook / Apple)
 
-Username & password already work. SSO buttons turn on only when secrets exist on Wald in `/data/windsage/oauth.env`.
+Username & password already work. **Google SSO is live.** Facebook and Apple buttons turn on only after secrets exist on Wald in `/data/windsage/oauth.env` **and** a short code pass.
+
+**Acquire every remaining key (Tempest, Synoptic, Windfinder, Facebook, Apple, Maps):**  
+`file:///Users/goldendreamers/windsage/docs/ACQUIRE-KEYS.md`
 
 Canonical public URL: **https://windsage.nimrod.bio**
 

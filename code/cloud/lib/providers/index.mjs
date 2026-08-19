@@ -5,6 +5,7 @@ import {
   fetchCurrentReading as wgCurrent,
   fetchRecentHistory as wgHistory,
   fetchSpotForecastNow as wgForecast,
+  fetchSpotForecastHistory as wgForecastHistory,
   fixSpotStations as wgFixSpots,
   isForecastOnlySpot as wgIsForecastOnly,
   normalizeWindguruFollowInput as wgResolve,
@@ -67,9 +68,7 @@ export function providerStatus() {
     ndbc: { ready: true, needsToken: false },
     openmeteo: { ready: true, needsToken: false },
     location: { ready: true, needsToken: false },
-    synoptic: { ready: synopticConfigured(), needsToken: true },
-    tempest: { ready: tempestConfigured(), needsToken: true },
-    windfinder: { ready: windfinderConfigured(), needsToken: true },
+    synoptic: { ready: synopticConfigured(), needsToken: false },
   };
 }
 
@@ -125,6 +124,19 @@ export async function fetchProviderCurrent(station, ctx = {}) {
       return fetchWindfinderCurrent(id);
     case 'windguru':
     default:
+      if (wgIsForecastOnly(station)) {
+        const metric = station.rule?.metric || 'wind_avg';
+        const hours = Math.max(
+          1,
+          Math.ceil(((Number(station.rule?.sustainedMinutes) || 20) + 20) / 60),
+        );
+        const fc = await wgForecast(String(station.stationId).trim(), null, metric, hours);
+        return {
+          ...fc.reading,
+          _forecastModel: fc.modelName,
+          _forecastHistory: fc.history,
+        };
+      }
       return wgCurrent(id);
   }
 }
@@ -147,6 +159,9 @@ export async function fetchProviderHistory(station, metric, hours = 6, avgMinute
       return fetchWindfinderHistory(id, metric, hours);
     case 'windguru':
     default:
+      if (wgIsForecastOnly(station)) {
+        return wgForecastHistory(String(station.stationId).trim(), metric, hours);
+      }
       return wgHistory(id, metric, hours, avgMinutes);
   }
 }

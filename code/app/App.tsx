@@ -2,8 +2,10 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Platform, SafeAreaView, Share, StyleSheet, Text, View } from 'react-native';
 import { BootScreen } from '../components/BootScreen';
+import { AppMenu } from '../components/AppMenu';
+import { FirstTimeBanner, dismissHowto, getHowtoDismissed, type HowtoScreen } from '../components/FirstTimeBanner';
 import { AccountScreen } from '../screens/AccountScreen';
 import { DownloadScreen } from '../screens/DownloadScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -14,12 +16,9 @@ import {
   consumeAuthRedirectParams,
   consumeAuthRedirectParamsFromUrl,
   fetchCatalogStations,
-  fetchAnnouncement,
   fetchCloudSnapshot,
   fetchMe,
   formatCloudAge,
-  getDismissedAnnouncementId,
-  dismissAnnouncement,
   pingCloud,
   pullMyStations,
   registerWithCloud,
@@ -28,14 +27,22 @@ import {
   sendAlertFeedback,
   snapshotsToLive,
   syncStationsToCloud,
-  type CloudAnnouncement,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, createFollowedStation, displayName, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, createFollowedStation, displayName, findExistingFollow, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
 import { initPwaInstallCapture } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
+import { followTargetFromResolved, resolveFollowInput } from '../core/stations';
+import {
+  beginShareConsume,
+  buildShareFollowUrl,
+  endShareConsume,
+  parseLatLonId,
+  parseShareFollowUrl,
+  stripShareFollowUrl,
+} from '../core/shareFollow';
 import { loadSettings, saveSettings } from '../core/storage';
 import { colors } from '../shared/theme';
 import type {
@@ -53,6 +60,7 @@ function withStationDefaults(stations: FollowedStation[] | null | undefined): Fo
     ...s,
     provider: normalizeProvider(s?.provider || 'windguru'),
     nickname: s?.nickname ?? '',
+    starred: s?.starred === true,
   }));
 }
 
@@ -119,14 +127,27 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [howtoDismissed, setHowtoDismissed] = useState(true);
+  const startedEmptyRef = useRef(false);
   const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
   const [catalogStations, setCatalogStations] = useState<CatalogStation[]>([]);
-  const [announcement, setAnnouncement] = useState<CloudAnnouncement | null>(null);
 
+  const [cloudWarmed, setCloudWarmed] = useState(false);
+  const [shareTick, setShareTick] = useState(0);
   const settingsRef = useRef(settings);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloudWarmedRef = useRef(false);
+  const pendingShareHrefRef = useRef<string | null>(null);
+  const shareBusyRef = useRef(false);
   settingsRef.current = settings;
+
+  const noteShareHref = useCallback((href: string | null | undefined) => {
+    if (!href || !parseShareFollowUrl(href)) return;
+    pendingShareHrefRef.current = href;
+    setShareTick((n) => n + 1);
+  }, []);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -138,22 +159,6 @@ export default function App() {
     const rows = await fetchCatalogStations();
     setCatalogStations(rows);
   }, []);
-
-  const loadAnnouncement = useCallback(async () => {
-    const next = await fetchAnnouncement();
-    if (!next) {
-      setAnnouncement(null);
-      return;
-    }
-    const dismissed = await getDismissedAnnouncementId();
-    setAnnouncement(dismissed === next.id ? null : next);
-  }, []);
-
-  const onDismissAnnouncement = useCallback(async () => {
-    if (!announcement) return;
-    await dismissAnnouncement(announcement.id);
-    setAnnouncement(null);
-  }, [announcement]);
 
   const applySnapshots = useCallback((snapshots: Record<string, LiveEntry>) => {
     setLive((prev) => {
@@ -197,10 +202,14 @@ export default function App() {
         const [snap] = await Promise.all([
           fetchCloudSnapshot(),
           loadCatalog().catch(() => undefined),
-          loadAnnouncement().catch(() => undefined),
         ]);
         setLastPollAt(snap.lastPollAt);
         setCloudStatus(`cloud · ${formatCloudAge(snap.lastPollAt)}`);
+        if (typeof snap.simpleMode === 'boolean' && snap.simpleMode !== settingsRef.current.simpleMode) {
+          const next = { ...settingsRef.current, simpleMode: snap.simpleMode };
+          setSettings(next);
+          await saveSettings(next);
+        }
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
@@ -212,7 +221,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [applySnapshots, loadAnnouncement, loadCatalog, showToast],
+    [applySnapshots, loadCatalog, showToast],
   );
 
   // Coalesce rapid persistSettings → one cloud sync (trailing debounce).
@@ -284,6 +293,7 @@ export default function App() {
         user: CloudUser;
         stations: FollowedStation[];
         pollIntervalMinutes: number;
+        simpleMode?: boolean;
       },
       opts?: { importLocalGuestFollows?: boolean },
     ) => {
@@ -303,7 +313,10 @@ export default function App() {
           : cloudStations;
       const next: AppSettings = {
         stations,
-        pollIntervalMinutes: Math.max(10, payload.pollIntervalMinutes || 10),
+        pollIntervalMinutes: Number.isFinite(Number(payload.pollIntervalMinutes))
+          ? Number(payload.pollIntervalMinutes)
+          : 10,
+        simpleMode: payload.simpleMode !== false,
       };
       setSettings(next);
       await saveSettings(next);
@@ -390,6 +403,10 @@ export default function App() {
     let cancelled = false;
     const handleUrl = async (url: string | null) => {
       if (!url || cancelled) return;
+      if (parseShareFollowUrl(url)) {
+        noteShareHref(url);
+        return;
+      }
       const oauth = await consumeAuthRedirectParamsFromUrl(url);
       if (!oauth || cancelled) return;
       if (oauth.error) {
@@ -404,6 +421,7 @@ export default function App() {
           user: me,
           stations: pulled?.stations || [],
           pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+          simpleMode: pulled?.simpleMode !== false,
         });
       }
     };
@@ -413,7 +431,7 @@ export default function App() {
       cancelled = true;
       sub.remove();
     };
-  }, [applyAccountPayload, showToast]);
+  }, [applyAccountPayload, noteShareHref, showToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -423,6 +441,10 @@ export default function App() {
         // Paint from local storage first — do not wait on push/cloud network.
         const loaded = await loadSettings();
         if (cancelled) return;
+        startedEmptyRef.current = (loaded.stations || []).length === 0;
+        const dismissed = await getHowtoDismissed().catch(() => false);
+        if (cancelled) return;
+        setHowtoDismissed(dismissed);
         setSettings(loaded);
         setLoading(false);
         await SplashScreen.hideAsync().catch(() => undefined);
@@ -444,6 +466,7 @@ export default function App() {
                   user: me,
                   stations: pulled.stations,
                   pollIntervalMinutes: pulled.pollIntervalMinutes,
+                  simpleMode: pulled.simpleMode !== false,
                 });
                 return;
               }
@@ -469,9 +492,14 @@ export default function App() {
             void ensureNotificationPermissions()
               .then((ok) => (ok ? registerWebPushSubscription() : null))
               .catch(() => null);
-            if (!cancelled) void refreshFromCloud('auto');
+            if (!cancelled) await refreshFromCloud('auto');
           } catch {
-            if (!cancelled) void refreshFromCloud('auto');
+            if (!cancelled) await refreshFromCloud('auto');
+          } finally {
+            if (!cancelled) {
+              cloudWarmedRef.current = true;
+              setCloudWarmed(true);
+            }
           }
         })();
       } catch {
@@ -521,7 +549,9 @@ export default function App() {
         | 'liveLinkWarning'
         | 'sourceName'
         | 'locationBlend'
+        | 'rule'
       >,
+      opts?: { fromLink?: boolean },
     ) => {
       const station = createFollowedStation(stationId, nickname, { kind, ...extras });
       const payload = {
@@ -531,8 +561,12 @@ export default function App() {
       await persistSettings(payload);
       setAddOpen(false);
       setActiveStationId(station.id);
-      const warn = extras?.liveLinkWarning ? ' · nearest live linked' : '';
-      showToast(`Following ${displayName(station)}${warn}`);
+      const warn = extras?.liveLinkWarning ? ' · forecast alerts' : '';
+      showToast(
+        opts?.fromLink
+          ? `Following ${displayName(station)} from link${warn}`
+          : `Following ${displayName(station)}${warn}`,
+      );
     },
     [persistSettings, showToast],
   );
@@ -546,6 +580,157 @@ export default function App() {
       showToast(`Already following — opened ${windguruName(existing)}`);
     },
     [showToast],
+  );
+
+  const consumeShareFollow = useCallback(async () => {
+    if (!cloudWarmedRef.current || shareBusyRef.current) return;
+    const href =
+      pendingShareHrefRef.current ||
+      (Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.href : null);
+    const payload = parseShareFollowUrl(href);
+    if (!payload || !beginShareConsume()) return;
+    shareBusyRef.current = true;
+    pendingShareHrefRef.current = null;
+    stripShareFollowUrl();
+    try {
+      const existing = findExistingFollow(settingsRef.current.stations, {
+        stationId: payload.stationId,
+        provider: payload.provider,
+      });
+      if (existing) {
+        reuseStation(existing.id);
+        return;
+      }
+
+      const coords = payload.provider === 'location' ? parseLatLonId(payload.stationId) : null;
+      try {
+        const extras: Record<string, unknown> = {};
+        if (payload.provider === 'location') {
+          if (payload.address) extras.address = payload.address;
+          if (coords) {
+            extras.lat = coords.lat;
+            extras.lon = coords.lon;
+          }
+        }
+        const resolved = await resolveFollowInput(payload.provider, payload.stationId, extras);
+        const target = followTargetFromResolved(payload.provider, payload.kind, resolved);
+        const again = findExistingFollow(settingsRef.current.stations, {
+          stationId: target.stationId,
+          provider: target.provider,
+        });
+        if (again) {
+          reuseStation(again.id);
+          return;
+        }
+        const blend = (resolved as { locationBlend?: FollowedStation['locationBlend'] }).locationBlend;
+        await addStation(
+          target.stationId,
+          payload.nickname || target.sourceName || '',
+          target.kind,
+          {
+            provider: target.provider,
+            liveStationId: target.liveStationId,
+            linkedLiveStation: target.linkedLiveStation,
+            liveLinkWarning: target.liveLinkWarning,
+            sourceName: target.sourceName,
+            locationBlend: blend ?? undefined,
+          },
+          { fromLink: true },
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Could not resolve station';
+        const again = findExistingFollow(settingsRef.current.stations, {
+          stationId: payload.stationId,
+          provider: payload.provider,
+        });
+        if (again) {
+          reuseStation(again.id);
+          return;
+        }
+        await addStation(
+          payload.stationId,
+          payload.nickname || payload.stationId,
+          payload.kind,
+          {
+            provider: payload.provider,
+            liveLinkWarning: msg,
+            sourceName: payload.address || null,
+            locationBlend:
+              payload.provider === 'location' && coords
+                ? {
+                    lat: coords.lat,
+                    lon: coords.lon,
+                    address: payload.address,
+                    radiusKm: 50,
+                    maxStations: 6,
+                    members: [],
+                  }
+                : undefined,
+          },
+          { fromLink: true },
+        );
+      }
+    } finally {
+      shareBusyRef.current = false;
+      endShareConsume();
+    }
+  }, [addStation, reuseStation]);
+
+  const shareStation = useCallback(
+    async (station: FollowedStation) => {
+      const url = buildShareFollowUrl(station);
+      const title = displayName(station);
+      if (Platform.OS === 'web') {
+        try {
+          if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+            await navigator.share({ title: `Follow ${title} on Windsage`, text: title, url });
+            return;
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') return;
+        }
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied');
+        } catch {
+          showToast('Could not copy link');
+        }
+        return;
+      }
+      try {
+        await Share.share({
+          message: `Follow ${title} on Windsage\n${url}`,
+          url,
+          title,
+        });
+      } catch (error) {
+        if (error instanceof Error && /cancel/i.test(error.message)) return;
+        showToast('Could not share link');
+      }
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    if (!cloudWarmed) return;
+    void consumeShareFollow();
+  }, [cloudWarmed, shareTick, consumeShareFollow]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onPopState = () => {
+      if (!cloudWarmedRef.current) return;
+      void consumeShareFollow();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [consumeShareFollow]);
+
+  const persistStationList = useCallback(
+    async (stations: FollowedStation[]) => {
+      await persistSettings({ ...settingsRef.current, stations });
+    },
+    [persistSettings],
   );
 
   const unfollow = useCallback(
@@ -578,12 +763,45 @@ export default function App() {
     return <BootScreen />;
   }
 
+  const simpleMode = settings.simpleMode !== false;
+  const howtoScreen: HowtoScreen = downloadOpen
+    ? 'install'
+    : accountOpen
+      ? 'account'
+      : activeStation
+        ? 'station'
+        : addOpen
+          ? 'follow'
+          : 'home';
+  const showHowto =
+    !howtoDismissed && (settings.stations.length === 0 || startedEmptyRef.current);
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
+      {showHowto && !addOpen ? (
+        <FirstTimeBanner
+          screen={howtoScreen}
+          simple={simpleMode}
+          onDismiss={() => {
+            setHowtoDismissed(true);
+            void dismissHowto();
+          }}
+          onFollow={
+            howtoScreen === 'home'
+              ? () => {
+                  setAddOpen(true);
+                  void loadCatalog();
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      <View style={styles.body}>
       {downloadOpen ? (
         <DownloadScreen
           onBack={closeDownload}
+          onOpenMenu={() => setMenuOpen(true)}
           onOpenApp={() => {
             closeDownload();
           }}
@@ -591,12 +809,14 @@ export default function App() {
       ) : accountOpen ? (
         <AccountScreen
           onBack={() => setAccountOpen(false)}
+          onOpenMenu={() => setMenuOpen(true)}
           onAuthed={(payload) => void applyAccountPayload(payload)}
           onLoggedOut={() => {
             setAccount(null);
             const cleared: AppSettings = {
               stations: [],
               pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
+              simpleMode: true,
             };
             setSettings(cleared);
             void saveSettings(cleared);
@@ -626,7 +846,7 @@ export default function App() {
               });
               showToast(
                 next.liveLinkWarning
-                  ? `Saved · ${displayName(next)} · nearest live linked`
+                  ? `Saved · ${displayName(next)} · forecast alerts`
                   : `Saved · ${displayName(next)}`,
               );
               void checkOne(next);
@@ -649,6 +869,10 @@ export default function App() {
             showToast(ok ? `Thanks — alert marked ${rating}` : 'Sign in to save feedback');
           }}
           onUnfollow={() => void unfollow(activeStation)}
+          shareUrl={buildShareFollowUrl(activeStation)}
+          onShare={() => void shareStation(activeStation)}
+          onOpenMenu={() => setMenuOpen(true)}
+          simpleMode={simpleMode}
         />
       ) : (
         <HomeScreen
@@ -668,20 +892,50 @@ export default function App() {
           catalogStations={catalogStations}
           onRefresh={() => void refreshFromCloud('manual')}
           onOpenStation={setActiveStationId}
-          onOpenAccount={() => setAccountOpen(true)}
-          onOpenDownload={openDownload}
-          announcement={announcement}
-          onDismissAnnouncement={() => void onDismissAnnouncement()}
-          accountLabel={
-            account
-              ? account.username
-                ? `@${account.username}`
-                : account.sso.google?.email || 'Account'
-              : 'Account'
+          onToggleStar={(id) => void persistStationList(toggleFollowStar(settingsRef.current.stations, id))}
+          onMoveFollow={(id, delta) =>
+            void persistStationList(moveFollow(settingsRef.current.stations, id, delta))
           }
+          onOpenMenu={() => setMenuOpen(true)}
+          showHowto={showHowto}
+          onDismissHowto={() => {
+            setHowtoDismissed(true);
+            void dismissHowto();
+          }}
           cloudStatus={cloudStatus}
+          simpleMode={simpleMode}
         />
       )}
+      </View>
+
+      <AppMenu
+        visible={menuOpen}
+        simpleMode={simpleMode}
+        onToggleSimple={(on) => {
+          void persistSettings({ ...settingsRef.current, simpleMode: on });
+        }}
+        accountLabel={
+          account
+            ? account.username
+              ? `@${account.username}`
+              : account.sso.google?.email || 'Account'
+            : 'Account'
+        }
+        onClose={() => setMenuOpen(false)}
+        onFollow={() => {
+          setAccountOpen(false);
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAddOpen(true);
+          void loadCatalog();
+        }}
+        onAccount={() => {
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAccountOpen(true);
+        }}
+        onInstall={openDownload}
+      />
 
       {toast ? (
         <View style={styles.toast}>
@@ -696,6 +950,9 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  body: {
+    flex: 1,
   },
   toast: {
     position: 'absolute',

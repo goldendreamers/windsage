@@ -13,6 +13,7 @@ import { colors } from '../shared/theme';
 
 type Suggestion = {
   description: string;
+  query?: string | null;
   placeId?: string | null;
   lat?: number | null;
   lon?: number | null;
@@ -58,8 +59,7 @@ function friendlyGeoError(raw: unknown, fallback: string): string {
 
 /**
  * Address search + map pin.
- * Search always resolves through Google Maps for coordinates (API key on Wald,
- * or Maps search URL). Autocomplete may use free suggestions; Go / pick re-geocodes.
+ * Search uses Google Maps embed (no billed key), then Photon / Open-Meteo.
  * Map tiles: Leaflet/OSM on web (no key). Native falls back to address-only.
  */
 export function LocationPicker({ onPicked, initial }: Props) {
@@ -166,23 +166,12 @@ export function LocationPicker({ onPicked, initial }: Props) {
     setError(null);
     setSuggestions([]);
     try {
-      // Always resolve through the server geocoder (Google Maps → coords),
-      // even if autocomplete already had lat/lon from a free provider.
-      if (s.placeId) {
-        const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ placeId: s.placeId }),
-        });
-        const data = (await res.json()) as {
-          lat?: number;
-          lon?: number;
-          address?: string;
-          error?: string;
+      if (Number.isFinite(s.lat) && Number.isFinite(s.lon)) {
+        const next = {
+          lat: s.lat as number,
+          lon: s.lon as number,
+          address: s.description,
         };
-        if (!res.ok) throw new Error(data.error || 'Geocode failed');
-        if (data.lat == null || data.lon == null) throw new Error('No coordinates for that place');
-        const next = { lat: data.lat, lon: data.lon, address: data.address || s.description };
         setPin(next);
         setQuery(next.address);
         onPicked(next);
@@ -191,7 +180,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
       const res = await fetch(`${getCloudBaseUrl()}/v1/geo/geocode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: s.description }),
+        body: JSON.stringify({ query: s.query || s.description }),
       });
       const data = (await res.json()) as {
         lat?: number;
@@ -244,16 +233,12 @@ export function LocationPicker({ onPicked, initial }: Props) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.meta}>
-        Search uses Google Maps for coordinates (no API key required). Paste a Maps
-        link or lat,lon too · pin blends nearby stations.
-      </Text>
       <View style={styles.row}>
         <TextInput
           style={styles.input}
           value={query}
           onChangeText={search}
-          placeholder="Address, place, Maps link, or 32.16, 34.80"
+          placeholder="Address, Maps link, or 32.16, 34.80"
           placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -287,9 +272,7 @@ export function LocationPicker({ onPicked, initial }: Props) {
           id="windsage-location-map"
         />
       ) : (
-        <Text style={styles.nativeHint}>
-          On phone, search an address above. Map pin is available in the browser / PWA.
-        </Text>
+        <Text style={styles.nativeHint}>Search an address — map pin is in the browser / PWA.</Text>
       )}
       {pin ? (
         <Text style={styles.pinMeta}>
