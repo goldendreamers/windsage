@@ -10,11 +10,11 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 2026-08-19 — Wald release: full Follow lookup + restore follows (PR #9)
+### 2026-08-19 — URGENT: Nimrod cannot see any latest changes (live is stale)
 
-Nimrod could not see all stations when looking them up (Follow search capped at 12, and phones often never loaded the ~6,900-name directory). Also earlier: about half of followed stations were deleted by a short-list sync.
+https://windsage.nimrod.bio/ is still the old Wald build. All of PR #9 (full Follow lookup, quieter simple mode, compass-word wind direction, station-loss fix, Install download) exists only on GitHub until you run `npm run release:web` on this Mac. Cloud agents cannot SSH to Wald.
 
-After `npm run release:web`, check lookup on https://windsage.nimrod.bio/ — type a common name (e.g. Haifa / Park). You should see **more than 12** hits when many match, and **More** when the list is long. Simple mode should be quieter: names and actions only, no tiny “N of M” / directory captions, no how-to banner, no Station # line on cards. Then if follow count is still short, merge from a daily backup (does not wipe users):
+After deploy, hard-refresh the phone (or delete the home-screen app and open https://windsage.nimrod.bio/ again) so the old service worker does not keep the previous JS.
 
 ```
 cd /Users/goldendreamers/windsage
@@ -26,20 +26,20 @@ npm run release:web
 
 node scripts/build-windguru-station-names.mjs --out public
 
-# Lookup: live directory search (should be ~6900, not a 12-hit cap)
 curl -sS "https://windsage.nimrod.bio/v1/catalog/stations?q=haifa&limit=40" | python3 -c "import sys,json; d=json.load(sys.stdin); print('hits',len(d.get('stations')or[]),'total',d.get('total'),'catalog',d.get('catalogSize'))"
+
+# Expect catalog around 6900 and total > 12 for haifa. Then open Follow, type a name, confirm More / compass From words / quieter simple mode.
 
 ssh wald-mc 'python3 -c "import json;d=json.load(open(\"/data/windsage/data/store.json\"));
 print(\"users\",len(d.get(\"users\")or{}), \"follows\", sum(len(u.get(\"stations\")or[]) for u in (d.get(\"users\")or{}).values()))"'
 
-# If follows are still short, pick a backup from before the drop:
+# If follows are still short vs before the drop:
 ssh wald-mc 'ls -lt /data/backups/windsage | head'
 ssh wald-mc 'node /data/windsage/restore-stations.mjs --live /data/windsage/data --from /data/backups/windsage/STOREFILE.json.gz'
 # Then: sudo systemctl restart windsage
 
 Never wipe /data/windsage/data/store.json.
-
-Email via scripts/notify-email.sh when live lookup shows the full directory and follow counts are restored.
+Email via scripts/notify-email.sh when live shows the new UI.
 ```
 
 ---
