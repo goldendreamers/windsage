@@ -113,6 +113,25 @@ export function formatReadingNumber(value: number | null | undefined): string {
   return formatThresholdNumber(Number(value));
 }
 
+/** Eight-point compass, meteorological “from”. 90 → east, 225 → south-west. */
+const COMPASS_8 = [
+  'north',
+  'north-east',
+  'east',
+  'south-east',
+  'south',
+  'south-west',
+  'west',
+  'north-west',
+] as const;
+
+export function windDirectionName(deg: number | null | undefined): string | null {
+  if (deg == null || !Number.isFinite(Number(deg))) return null;
+  const d = ((Number(deg) % 360) + 360) % 360;
+  const idx = Math.round(d / 45) % 8;
+  return COMPASS_8[idx];
+}
+
 export type HomeLiveStat = { label: string; value: string; unit: string };
 
 /**
@@ -181,9 +200,9 @@ export function formatAlertTrigger(
     extras.push(`spread ≤${formatThresholdNumber(rule.maxGustSpreadKnots ?? 5)} kt`);
   }
   if (rule.windDirEnabled) {
-    const from = Math.round(Number(rule.windDirFromDeg) || 0);
-    const to = Math.round(Number(rule.windDirToDeg) || 0);
-    extras.push(`dir ${from}–${to}°`);
+    const from = windDirectionName(rule.windDirFromDeg) || 'north';
+    const to = windDirectionName(rule.windDirToDeg) || 'north';
+    extras.push(from === to ? `from ${from}` : `from ${from}–${to}`);
   }
   const windPrimary = rule.metric === 'wind_avg' || rule.metric === 'wind_max';
   if (windPrimary && rule.maxWaveEnabled) {

@@ -1,4 +1,4 @@
-import { DEFAULT_ALERT_STATE } from '../shared/defaults';
+import { DEFAULT_ALERT_STATE, windDirectionName } from '../shared/defaults';
 import type {
   AlertState,
   CheckResult,
@@ -91,9 +91,9 @@ export function maxWindOk(
 }
 
 export function formatDirectionSector(fromDeg: number, toDeg: number): string {
-  const from = Math.round(normalizeDegrees(fromDeg));
-  const to = Math.round(normalizeDegrees(toDeg));
-  return `${from}–${to}°`;
+  const from = windDirectionName(fromDeg) || 'north';
+  const to = windDirectionName(toDeg) || 'north';
+  return from === to ? from : `${from}–${to}`;
 }
 
 /**

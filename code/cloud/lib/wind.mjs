@@ -692,10 +692,26 @@ function maxWindOk(reading, rule) {
   return reading.wind_avg <= Math.max(0, rule.maxWindKnots ?? 25);
 }
 
+function windDirectionName(deg) {
+  if (deg == null || !Number.isFinite(Number(deg))) return null;
+  const names = [
+    'north',
+    'north-east',
+    'east',
+    'south-east',
+    'south',
+    'south-west',
+    'west',
+    'north-west',
+  ];
+  const d = ((Number(deg) % 360) + 360) % 360;
+  return names[Math.round(d / 45) % 8];
+}
+
 function formatDirectionSector(fromDeg, toDeg) {
-  const from = Math.round(normalizeDegrees(fromDeg));
-  const to = Math.round(normalizeDegrees(toDeg));
-  return `${from}–${to}°`;
+  const from = windDirectionName(fromDeg) || 'north';
+  const to = windDirectionName(toDeg) || 'north';
+  return from === to ? from : `${from}–${to}`;
 }
 
 export function sustainedDurationMs(history, rule) {

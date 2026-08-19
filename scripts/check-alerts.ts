@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionName } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -122,12 +122,20 @@ assert.equal(formatAlertTrigger(station.rule, 'full'), '≥15 kt for 20 min');
 assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wind_max'), 'short'), '20 kt');
 assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'wave_height'), 'short'), '1 m');
 assert.equal(formatAlertTrigger(ruleForMetric(station.rule, 'temperature'), 'short'), '22 °C');
+assert.equal(windDirectionName(0), 'north');
+assert.equal(windDirectionName(90), 'east');
+assert.equal(windDirectionName(180), 'south');
+assert.equal(windDirectionName(225), 'south-west');
+assert.equal(windDirectionName(270), 'west');
+assert.equal(windDirectionName(360), 'north');
+assert.equal(windDirectionName(null), null);
+
 assert.match(
   formatAlertTrigger(
     { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },
     'full',
   ),
-  /dir 270–20°/,
+  /from west–north/,
 );
 
 const sampleReading = { wind_avg: 10.2, wind_max: 14.5, temperature: 21.4, wave_height: 1.35 };

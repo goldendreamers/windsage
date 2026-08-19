@@ -6,11 +6,20 @@ import { colors } from '../shared/theme';
 
 type Props = {
   title: string;
-  value: number | null | undefined;
+  value: number | string | null | undefined;
   unit: string;
   icon: ImageSourcePropType;
   emphasize?: boolean;
 };
+
+function pillText(value: number | string | null | undefined): string {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text || '—';
+  }
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  return Number(value).toFixed(1);
+}
 
 export const MetricPill = memo(function MetricPill({
   title,
@@ -19,14 +28,16 @@ export const MetricPill = memo(function MetricPill({
   icon,
   emphasize,
 }: Props) {
+  const text = pillText(value);
+  const words = typeof value === 'string';
   return (
     <View style={[styles.pill, emphasize && styles.pillActive]}>
       <View style={styles.top}>
         <Image source={icon} style={styles.icon} contentFit="contain" />
         <Text style={styles.pillTitle}>{title}</Text>
       </View>
-      <Text style={styles.pillValue}>{value == null ? '—' : value.toFixed(1)}</Text>
-      <Text style={styles.pillUnit}>{unit}</Text>
+      <Text style={[styles.pillValue, words && styles.pillValueWords]}>{text}</Text>
+      {unit ? <Text style={styles.pillUnit}>{unit}</Text> : null}
     </View>
   );
 });
@@ -64,6 +75,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 22,
     fontWeight: '700',
+  },
+  pillValueWords: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '800',
   },
   pillUnit: {
     color: colors.muted,

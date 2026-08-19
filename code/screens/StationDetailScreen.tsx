@@ -17,6 +17,7 @@ import {
   followSourceRef,
   formatAlertTrigger,
   ruleForMetric,
+  windDirectionName,
 } from '../shared/defaults';
 import {
   PROVIDER_META,
@@ -66,10 +67,7 @@ function metricReadingPills(
     maxWaveEnabled?: boolean;
   },
 ) {
-  const dir =
-    data?.wind_direction == null || !Number.isFinite(Number(data.wind_direction))
-      ? null
-      : Math.round(Number(data.wind_direction));
+  const dir = windDirectionName(data?.wind_direction);
 
   if (metric === 'temperature') {
     return [
@@ -93,9 +91,9 @@ function metricReadingPills(
         emphasize: opts.emphasize,
       },
       {
-        title: 'Dir',
+        title: 'From',
         value: dir,
-        unit: '°',
+        unit: '',
         icon: brandImages.wind,
         emphasize: opts.windDirEnabled,
       },
@@ -128,9 +126,9 @@ function metricReadingPills(
       emphasize: opts.emphasize && metric === 'wind_max',
     },
     {
-      title: 'Dir',
+      title: 'From',
       value: dir,
-      unit: '°',
+      unit: '',
       icon: brandImages.wind,
       emphasize: opts.windDirEnabled,
     },
