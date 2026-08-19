@@ -76,7 +76,7 @@ const FETCH_TIMEOUT_MS = 12_000;
 /** Concurrent identical Windguru iapi calls share one upstream response. */
 const inflightWg = new Map();
 
-async function fetchJson(refererUrl, query) {
+async function fetchJson(refererUrl, query, timeoutMs = FETCH_TIMEOUT_MS) {
   const url = new URL(BASE);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   const key = `${refererUrl}|${url.searchParams.toString()}`;
@@ -90,7 +90,7 @@ async function fetchJson(refererUrl, query) {
           Referer: refererUrl,
           Accept: 'application/json',
         },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
       if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
@@ -147,7 +147,7 @@ async function getStationList() {
   if (stationListCache && stationListCache.expires > Date.now()) {
     return stationListCache.list;
   }
-  const list = await fetchJson('https://www.windguru.cz/', { q: 'station_list' });
+  const list = await fetchJson('https://www.windguru.cz/', { q: 'station_list' }, 30_000);
   if (!Array.isArray(list)) throw new Error('Windguru station_list unavailable');
   stationListCache = { list, expires: Date.now() + STATION_LIST_TTL_MS };
   return list;
@@ -156,6 +156,36 @@ async function getStationList() {
 /** Public accessor for nearby-station search (location blend). */
 export async function getStationListForNearby() {
   return getStationList();
+}
+
+/**
+ * Compact live-station directory for Follow search (names + ids only).
+ * Fetched from Windguru station_list and cached in memory with that list.
+ */
+export async function windguruCatalogStations() {
+  const list = await getStationList();
+  const out = [];
+  const seen = new Set();
+  for (const row of list) {
+    const rawId = row?.id_station;
+    if (rawId == null || rawId === '') continue;
+    const n = Number(rawId);
+    if (!Number.isFinite(n)) continue;
+    const sid = String(Math.trunc(n));
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    const name = String(row.name || row.spotname || '').trim() || `Station ${sid}`;
+    out.push({
+      provider: 'windguru',
+      stationId: sid,
+      kind: 'station',
+      sourceName: name,
+      liveStationId: sid,
+      linkedLiveStation: null,
+      liveLinkWarning: null,
+    });
+  }
+  return out;
 }
 
 /** Nearest live station to a lat/lon from Windguru's public station_list. */

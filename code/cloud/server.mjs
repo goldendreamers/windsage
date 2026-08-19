@@ -23,7 +23,7 @@ import {
   cacheKey,
   mapsStatus,
 } from './lib/providers/index.mjs';
-import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
+import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
 import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
@@ -1381,12 +1381,33 @@ async function handleApi(req, res, pathname, url) {
     }
   }
 
-  // Shared catalog for follow suggestions only — never auto-added to user bags.
+  // Follow search directory: Windguru live names + this server's shared follows.
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
+    const shared = publicCatalogStations(store);
+    let windguru = [];
+    try {
+      windguru = await windguruCatalogStations();
+    } catch (e) {
+      console.error('[windsage-cloud] windguru directory failed', e);
+    }
+    const byKey = new Map();
+    for (const row of [...windguru, ...shared]) {
+      const provider = String(row?.provider || 'windguru').toLowerCase();
+      const sid = String(row?.stationId || '').trim();
+      if (!sid) continue;
+      const key = `${provider}:${sid}`;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, row);
+        continue;
+      }
+      // Prefer a real source name when merging shared follows onto the live list.
+      if (!prev.sourceName && row.sourceName) byKey.set(key, { ...prev, ...row, sourceName: row.sourceName });
+    }
     return json(res, 200, {
       ok: true,
-      stations: publicCatalogStations(store),
+      stations: [...byKey.values()],
     });
   }
 
@@ -1460,6 +1481,11 @@ server.listen(PORT, HOST, async () => {
   setTimeout(() => {
     pollAll().catch((e) => console.error(e));
   }, 5_000);
+  setTimeout(() => {
+    windguruCatalogStations()
+      .then((rows) => console.log(`[windsage-cloud] windguruDirectory=${rows.length}`))
+      .catch((e) => console.error('[windsage-cloud] windguru directory warmup failed', e));
+  }, 2_000);
 
   const tick = async () => {
     try {

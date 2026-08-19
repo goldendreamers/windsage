@@ -429,6 +429,7 @@ export async function syncStationsToCloud(
 export async function fetchCatalogStations(): Promise<
   Pick<
     FollowedStation,
+    | 'provider'
     | 'stationId'
     | 'kind'
     | 'sourceName'
@@ -440,6 +441,7 @@ export async function fetchCatalogStations(): Promise<
   try {
     const data = await cloudFetch<{
       stations: Array<{
+        provider?: FollowedStation['provider'];
         stationId: string;
         kind?: FollowedStation['kind'];
         sourceName?: string | null;
@@ -451,6 +453,7 @@ export async function fetchCatalogStations(): Promise<
     return (data.stations || [])
       .filter((s) => s.stationId?.trim())
       .map((s) => ({
+        provider: s.provider || 'windguru',
         stationId: String(s.stationId).trim(),
         kind: s.kind === 'spot' ? 'spot' : 'station',
         sourceName: s.sourceName ?? null,

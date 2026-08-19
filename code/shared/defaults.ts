@@ -400,10 +400,12 @@ export function suggestExistingFollows(
   const out: FollowedStation[] = [];
   for (const station of stations) {
     const label = windguruName(station).toLowerCase();
+    const nick = String(station.nickname ?? '').trim().toLowerCase();
     const sid = String(station.stationId ?? '').trim().toLowerCase();
     const live = String(station.liveStationId ?? '').trim().toLowerCase();
     const hit =
       label.includes(q) ||
+      (nick && nick.includes(q)) ||
       sid.includes(q) ||
       (live && live.includes(q)) ||
       (digits.length > 0 &&
@@ -436,18 +438,19 @@ export function suggestCatalogStations(
   catalog: CatalogStation[],
   existing: FollowedStation[],
   query: string,
-  limit = 6,
+  limit = 12,
   providerFilter?: StationProvider | null,
 ): CatalogStation[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const digits = q.replace(/\D/g, '');
+  if (q.length < 2 && digits.length < 1) return [];
   const taken = new Set<string>();
   for (const s of existing) {
     if (s.stationId?.trim()) taken.add(catalogKey(s.provider, s.stationId));
   }
   const wantProvider = providerFilter ? normalizeProvider(providerFilter) : null;
-  const out: CatalogStation[] = [];
+  const scored: { entry: CatalogStation; score: number }[] = [];
   for (const entry of catalog) {
     const sid = String(entry.stationId ?? '').trim();
     const provider = normalizeProvider(entry.provider);
@@ -468,16 +471,17 @@ export function suggestCatalogStations(
     } satisfies FollowedStation;
     const label = windguruName(asFollow).toLowerCase();
     const live = String(entry.liveStationId ?? '').trim().toLowerCase();
-    const hit =
-      label.includes(q) ||
-      sid.toLowerCase().includes(q) ||
-      (live && live.includes(q)) ||
-      (digits.length > 0 &&
-        (sid.includes(digits) || (live && live.includes(digits))));
-    if (hit) {
-      out.push(entry);
-      if (out.length >= limit) break;
-    }
+    const sidLower = sid.toLowerCase();
+    let score = 0;
+    if (label === q || sidLower === q) score = 100;
+    else if (label.startsWith(q) || sidLower.startsWith(q)) score = 90;
+    else if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) score = 80;
+    else if (digits && (sid === digits || sid.startsWith(digits))) score = 75;
+    else if (label.includes(q) || sidLower.includes(q)) score = 50;
+    else if (live && (live.includes(q) || (digits && live.includes(digits)))) score = 40;
+    else if (digits.length > 0 && sid.includes(digits)) score = 30;
+    if (score > 0) scored.push({ entry, score });
   }
-  return out;
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, Math.max(1, limit)).map((row) => row.entry);
 }
