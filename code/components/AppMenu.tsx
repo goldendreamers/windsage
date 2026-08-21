@@ -1,6 +1,8 @@
 import * as Haptics from 'expo-haptics';
+import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
-import { openDeveloperEmail } from '../core/contact';
+import { fetchAuthProviders } from '../core/cloud';
+import { openDeveloperEmail, openDiscordInvite } from '../core/contact';
 import { colors } from '../shared/theme';
 
 const PRIVACY_URL = 'https://windsage.nimrod.bio/privacy.html';
@@ -26,6 +28,23 @@ export function AppMenu({
   onAccount,
   onInstall,
 }: Props) {
+  const [discordInvite, setDiscordInvite] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    fetchAuthProviders()
+      .then((p) => {
+        if (!cancelled) setDiscordInvite(p.discordInvite);
+      })
+      .catch(() => {
+        if (!cancelled) setDiscordInvite(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
   const run = (fn: () => void) => {
     void Haptics.selectionAsync();
     onClose();
@@ -59,6 +78,14 @@ export function AppMenu({
       label: simpleMode ? 'Put on home screen' : 'Install app',
       sub: simpleMode ? undefined : 'Downloads the app onto this phone',
       onPress: () => run(onInstall),
+    });
+  }
+  if (discordInvite) {
+    rows.push({
+      key: 'discord',
+      label: 'Join Discord',
+      sub: simpleMode ? undefined : 'Windsage community',
+      onPress: () => run(() => openDiscordInvite(discordInvite)),
     });
   }
   if (!simpleMode) {

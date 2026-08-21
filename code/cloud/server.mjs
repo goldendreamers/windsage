@@ -36,6 +36,7 @@ import {
   findUserByUsername,
   suggestAvailableUsernames,
   findUserByGoogleSub,
+  findUserByDiscordId,
   createSession,
   getSession,
   revokeSession,
@@ -59,6 +60,8 @@ import {
   providersStatus,
   googleAuthUrl,
   exchangeGoogleCode,
+  discordAuthUrl,
+  exchangeDiscordCode,
   encodeOAuthState,
   decodeOAuthState,
   oauthConfig,
@@ -74,6 +77,8 @@ import {
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
+import { listClubSpots, matchClubSpot, readClubGlance, readClubWind } from './lib/club.mjs';
+import { holdWebhookEnabled, sendHoldWebhook } from './lib/discordHold.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -235,8 +240,11 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
       : { ok: false, skipped: true };
   if (emailed?.ok) delivered += 1;
 
+  const club = await sendHoldWebhook(station, result);
+  if (club?.ok) delivered += 1;
+
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length} email=${emailed?.ok ? 1 : 0}`,
+    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length} email=${emailed?.ok ? 1 : 0} discordHold=${club?.ok ? 1 : club?.skipped ? 'skip' : 0}`,
   );
   return { delivered, title, body };
 }
@@ -927,6 +935,98 @@ async function handleAuth(req, res, pathname, url) {
     }
   }
 
+  if (req.method === 'GET' && pathname === '/v1/auth/discord/start') {
+    const mode = url.searchParams.get('mode') || 'login';
+    const deviceId = url.searchParams.get('deviceId') || '';
+    const secret = url.searchParams.get('secret') || '';
+    const linkToken = url.searchParams.get('token') || '';
+    const returnTo = url.searchParams.get('returnTo') || '';
+    try {
+      const state = encodeOAuthState({ mode, deviceId, secret, linkToken, returnTo });
+      return redirect(res, discordAuthUrl(state));
+    } catch (error) {
+      return json(res, 503, { error: error.message || 'Discord not configured' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/auth/discord/callback') {
+    const code = url.searchParams.get('code');
+    const state = decodeOAuthState(url.searchParams.get('state'));
+    const pub = oauthConfig().publicUrl;
+    if (!code) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, { auth_error: 'Missing Discord code' }),
+      );
+    }
+    try {
+      const profile = await exchangeDiscordCode(code);
+      const store = await loadStore(DATA_DIR);
+      let user = findUserByDiscordId(store, profile.id);
+      const linkToken = state.linkToken || '';
+      const linkSession = linkToken ? getSession(store, linkToken) : null;
+
+      let created = false;
+      if (state.mode === 'link' && linkSession) {
+        user = store.users[linkSession.userId];
+        if (!user) throw new Error('Account not found for linking');
+        const other = findUserByDiscordId(store, profile.id);
+        if (other && other.id !== user.id) {
+          throw new Error('That Discord account is already linked to another user');
+        }
+        user.sso = user.sso || {};
+        user.sso.discord = {
+          id: profile.id,
+          username: profile.username,
+          email: profile.email,
+          name: profile.name,
+        };
+        user.updatedAt = Date.now();
+      } else if (!user) {
+        user = createUser(store, {
+          username: null,
+          sso: {
+            discord: {
+              id: profile.id,
+              username: profile.username,
+              email: profile.email,
+              name: profile.name,
+            },
+          },
+        });
+        created = true;
+      } else {
+        user.sso = user.sso || {};
+        user.sso.discord = {
+          id: profile.id,
+          username: profile.username,
+          email: profile.email,
+          name: profile.name,
+        };
+      }
+
+      await attachDeviceToUser(store, user, state.deviceId, state.secret, null, null, {
+        mergeGuestStations: created,
+      });
+      const token = createSession(store, user.id);
+      await saveStore(DATA_DIR, store);
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_token: token,
+          auth_mode: state.mode || 'login',
+        }),
+      );
+    } catch (error) {
+      return redirect(
+        res,
+        oauthReturnUrl(state.returnTo, pub, {
+          auth_error: error.message || 'Discord sign-in failed',
+        }),
+      );
+    }
+  }
+
   return false;
 }
 
@@ -1245,6 +1345,8 @@ async function handleApi(req, res, pathname, url) {
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
       alertEmail: alertEmailConfig().enabled,
+      club: true,
+      discordHold: holdWebhookEnabled(),
       // Stable-ish second bucket for short CDN/browser revalidation (not live ts).
       ts: Math.floor(Date.now() / 1000) * 1000,
     };
@@ -1291,6 +1393,46 @@ async function handleApi(req, res, pathname, url) {
       return json(res, 200, { ok: true, provider: 'windguru', ...resolved });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
+    }
+  }
+
+  // Public club dictionary + live wind (bot / PWA). Does not read or write store.json.
+  if (req.method === 'GET' && pathname === '/v1/club/spots') {
+    return json(res, 200, { ok: true, spots: listClubSpots() });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/club/wind') {
+    const ip = clientIp(req);
+    const limited = takeToken(`club-wind:${ip}`, { limit: 60, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many club wind requests. Try again later.' });
+    }
+    const q = String(url.searchParams.get('q') || '').trim();
+    if (!q) return json(res, 400, { error: 'Missing q (spot name)' });
+    if (!matchClubSpot(q)) {
+      return json(res, 404, { error: 'Unknown club spot', spots: listClubSpots().map((s) => s.labelHe) });
+    }
+    try {
+      const wind = await readClubWind(q);
+      return json(res, 200, { ok: true, ...wind });
+    } catch (error) {
+      return json(res, 502, { error: error.message || 'Could not read wind' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/club/glance') {
+    const ip = clientIp(req);
+    const limited = takeToken(`club-glance:${ip}`, { limit: 30, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many glance requests. Try again later.' });
+    }
+    try {
+      const rows = await readClubGlance();
+      return json(res, 200, { ok: true, rows });
+    } catch (error) {
+      return json(res, 502, { error: error.message || 'Could not build glance' });
     }
   }
 

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "freegull",
+    "labelHe": "פריגול",
+    "names": [
+      "פריגול",
+      "freegull",
+      "הרצליה",
+      "herzliya",
+      "herzlia",
+      "המרינה",
+      "marina"
+    ],
+    "provider": "windguru",
+    "stationId": "2259",
+    "kind": "station",
+    "windguruUrl": "https://www.windguru.cz/station/2259"
+  },
+  {
+    "id": "herzlia-scouts",
+    "labelHe": "צופי הרצליה",
+    "names": ["צופי הרצליה", "herzlia sea scouts", "scouts"],
+    "provider": "windguru",
+    "stationId": "73",
+    "kind": "station",
+    "windguruUrl": "https://www.windguru.cz/station/73"
+  },
+  {
+    "id": "haifa-knesiya",
+    "labelHe": "חיפה כנסיה",
+    "names": ["חיפה", "חיפה כנסיה", "haifa", "knesiya"],
+    "provider": "windguru",
+    "stationId": "2049",
+    "kind": "station",
+    "windguruUrl": "https://www.windguru.cz/station/2049"
+  }
+]

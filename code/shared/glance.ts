@@ -15,6 +15,8 @@ export type GlanceRow = {
   trend: GlanceTrend;
   wind: number | null;
   line: string;
+  /** מחזיק = hold met; עולה = climbing toward hold; מת = below. */
+  statusHe: 'מחזיק' | 'עולה' | 'מת';
 };
 
 function metricOf(
@@ -96,17 +98,20 @@ export function buildGlanceRows(
           ? 'm'
           : 'kt';
     let line: string;
+    let statusHe: 'מחזיק' | 'עולה' | 'מת' = 'מת';
     if (result?.shouldNotify || (holding && holdProgress >= 1)) {
-      line = `${name} · ready / holding ${arrow(trend)}`.trim();
+      statusHe = 'מחזיק';
+      line = `${name} · מחזיק ${arrow(trend)}`.trim();
     } else if (holding) {
+      statusHe = 'עולה';
       const mins = Math.max(1, Math.round((requiredMs - sustainedMs) / 60_000));
-      line = `${name} · holding · ${mins}m left ${arrow(trend)}`.trim();
+      line = `${name} · עולה · עוד ${mins} דק׳ ${arrow(trend)}`.trim();
     } else if (Number.isFinite(gap) && gap === 0) {
-      line = `${name} · at threshold ${arrow(trend)}`.trim();
+      line = `${name} · על הסף ${arrow(trend)}`.trim();
     } else if (Number.isFinite(gap)) {
-      line = `${name} · ${gap.toFixed(1)}${unit} shy ${arrow(trend)}`.trim();
+      line = `${name} · חסר ${gap.toFixed(1)}${unit} ${arrow(trend)}`.trim();
     } else {
-      line = `${name} · waiting on reading`;
+      line = `${name} · מחכה לקריאה`;
     }
     rows.push({
       id: station.id,
@@ -118,6 +123,7 @@ export function buildGlanceRows(
       trend,
       wind,
       line,
+      statusHe,
     });
   }
   rows.sort((a, b) => {
@@ -134,11 +140,11 @@ export function glanceHeadline(rows: GlanceRow[]): string | null {
   if (!rows.length) return null;
   const top = rows[0];
   if (top.notifying || (top.holding && top.holdProgress >= 1)) {
-    return `Going off: ${top.name}`;
+    return `מחזיק: ${top.name}`;
   }
-  if (top.holding) return `Closest: ${top.line.replace(/^.*?·\s*/, `${top.name} · `)}`;
+  if (top.holding) return `עולה: ${top.line.replace(/^.*?·\s*/, `${top.name} · `)}`;
   if (Number.isFinite(top.gap) && top.gap < Number.POSITIVE_INFINITY) {
-    return `Closest: ${top.line}`;
+    return `מת: ${top.line}`;
   }
-  return `Waiting on readings · ${rows.length} follow${rows.length === 1 ? '' : 's'}`;
+  return `מחכה לקריאות · ${rows.length} ספוטים`;
 }

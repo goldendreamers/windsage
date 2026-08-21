@@ -8,6 +8,7 @@ import {
   sustainedDurationMs,
 } from '../code/core/alerts';
 import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionName } from '../code/shared/defaults';
+import { buildGlanceRows, glanceHeadline } from '../code/shared/glance';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -223,5 +224,23 @@ assert.equal(parseLooseNumber('15,2'), 15.2);
 assert.equal(parseLooseNumber('abc'), null);
 assert.equal(parseLooseNumber('0'), 0);
 assert.equal(parseLooseNumber('-3'), -3);
+
+const glanceSpot = createFollowedStation('2259', 'פריגול', { id: 'club-freegull' });
+const glanceRows = buildGlanceRows([glanceSpot], {
+  'club-freegull': {
+    reading: reading(18, 22, 270),
+    result: {
+      reading: reading(18, 22, 270),
+      metricValue: 18,
+      conditionMet: true,
+      sustainedMs: 20 * 60 * 1000,
+      shouldNotify: true,
+      message: 'Alert',
+    },
+  },
+});
+assert.equal(glanceRows[0]?.statusHe, 'מחזיק');
+assert.match(glanceRows[0]?.line || '', /מחזיק/);
+assert.equal(glanceHeadline(glanceRows), 'מחזיק: פריגול');
 
 console.log('check-alerts: ok');

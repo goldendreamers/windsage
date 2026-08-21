@@ -1,0 +1,17 @@
+{
+  "name": "windsage-discord-helper",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Windsage Discord helper. Separate from website OAuth and from windsage.service.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test src/faq.test.mjs src/refuse.test.mjs src/tree.test.mjs src/club-api.test.mjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  }
+}

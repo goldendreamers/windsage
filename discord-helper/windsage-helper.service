@@ -1,0 +1,42 @@
+[Unit]
+Description=Windsage Discord helper (not windsage.service, not website OAuth)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=windsagehelper
+Group=windsagehelper
+WorkingDirectory=/usr/local/windsage-helper
+EnvironmentFile=/usr/local/windsage-helper/helper.env
+Environment=HOME=/usr/local/windsage-helper
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /usr/local/windsage-helper/src/index.mjs
+Restart=on-failure
+RestartSec=8
+Nice=15
+CPUQuota=10%
+MemoryMax=128M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+InaccessiblePaths=/data/windsage /root /home /data/projects
+ReadOnlyPaths=/usr/local/windsage-helper
+
+[Install]
+WantedBy=multi-user.target

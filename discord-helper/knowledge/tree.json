@@ -1,0 +1,285 @@
+{
+  "root": {
+    "prompt": "Windsage help — tap a topic. The next screen is a real answer.\nYou can also type a question: `/ask how do pings work`\nLive wind in this server: `/ruach` (a spot) or `/laan` (where to go).",
+    "options": [
+      { "id": "what", "label": "What is Windsage?", "goto": "what" },
+      { "id": "inst", "label": "Install", "goto": "install" },
+      { "id": "ping", "label": "Pings & alerts", "goto": "pings" },
+      { "id": "fol", "label": "Follow a station", "goto": "follow" },
+      { "id": "src", "label": "Weather sources", "goto": "sources" },
+      { "id": "rule", "label": "Rules & units", "goto": "rules" },
+      { "id": "acc", "label": "Sign-in", "goto": "account" },
+      { "id": "home", "label": "Home screen", "goto": "home" },
+      { "id": "brk", "label": "Something's broken", "goto": "broken" },
+      { "id": "bot", "label": "This Discord bot", "goto": "bot" }
+    ]
+  },
+  "what": {
+    "parent": "root",
+    "prompt": "What is Windsage?",
+    "answer": "Windsage is a free wind-alert app for people who chase wind with friends.\n\nYou follow a station (or a place). A cloud watcher checks it about every 10 minutes. If your rule holds for the full hold time — default **15 knots average for 20 minutes** — you get a push on the phone or in the browser.\n\nThe phone stays idle. It does **not** poll Windguru in the background, so this is not a live 10-minute refresh on the device.\n\nApp: https://windsage.nimrod.bio/\nCode: https://github.com/goldendreamers/windsage",
+    "options": [
+      {
+        "id": "w2",
+        "label": "Free / open source?",
+        "answer": "Yes. Free to use — no subscription in the app.\n\nApp: https://windsage.nimrod.bio/\nCode: https://github.com/goldendreamers/windsage\n\nIf you want to talk to a human about the product, use **Email the developer** in the app menu, or ping a mod here. Do not paste passwords or API keys in Discord."
+      },
+      {
+        "id": "w3",
+        "label": "App vs this Discord",
+        "answer": "Three different things that share a name:\n\n• **The app** is https://windsage.nimrod.bio/ (website / Home Screen icon). That is where you follow stations and get pings.\n• **This Discord** is the friend server. **Join Discord** in the app is only the invite into here.\n• **Continue with Discord** on Account is logging *into the app* with your Discord login. It does not replace Join Discord.\n\nThis helper answers how-to in #questions. Live club wind in this server is `/ruach` / `/laan`."
+      }
+    ]
+  },
+  "install": {
+    "parent": "root",
+    "prompt": "Install Windsage",
+    "answer": "The app **is** the site: https://windsage.nimrod.bio/\n\nYou can use it in a browser. For lock-screen pings, put it on the Home Screen:\n\n• **iPhone:** Safari (not Chrome) → Share → **Add to Home Screen**, then open from that icon and allow notifications.\n• **Android:** Chrome → menu → **Add to Home screen** / **Install app**.\n• **Computer:** just use the site; allow notifications if you want pings there.\n\nIf an old version looks stuck, delete the Home Screen icon / PWA and add it again (service workers get sticky).",
+    "options": [
+      {
+        "id": "i1",
+        "label": "iPhone",
+        "answer": "Use **Safari**, not Chrome or in-app browsers.\n\n1. Open https://windsage.nimrod.bio/\n2. Tap Share (the square with the arrow)\n3. **Add to Home Screen** → Add\n4. Open Windsage from the new icon (not from a Safari tab)\n5. When asked, **Allow** notifications. You can also send a test from Account.\n\nChrome on iPhone is weaker for lock-screen pings. If nothing arrives, iOS Settings → Notifications → Windsage (or Safari) → allow alerts, including Lock Screen."
+      },
+      {
+        "id": "i2",
+        "label": "Android",
+        "answer": "Use **Chrome**.\n\n1. Open https://windsage.nimrod.bio/\n2. Chrome menu (⋮) → **Add to Home screen** or **Install app**\n3. Open from the icon and allow notifications\n\nThere is also **Download** in the app menu if you want the installable file, then open that.\n\nIf pings fail: Android Settings → Apps → Windsage (or Chrome) → Notifications on. Battery savers sometimes delay pushes — don’t kill the app from recents if you want alerts."
+      },
+      {
+        "id": "i3",
+        "label": "Computer",
+        "answer": "Open https://windsage.nimrod.bio/ in a desktop browser. That is enough to follow stations and see Home.\n\nIf the browser offers **Install** / **Add to dock**, you can. Pings work in that browser if you allow notifications for the site (padlock / site settings → Notifications → Allow).\n\nA computer and a phone are different devices. Guest lists do not sync. Sign in if you want the same follows on both."
+      }
+    ]
+  },
+  "pings": {
+    "parent": "root",
+    "prompt": "Pings & alerts",
+    "answer": "Pings come from the **cloud**, not from the phone polling Windguru.\n\nAbout every **10 minutes** the cloud checks the stations you follow. If your rule is true for the **full hold time** (default 20 minutes at 15 kt average), you get a push.\n\nExample: wind hits 16 kt for 8 minutes, then drops to 12 kt — that is **not** a ping. The hold resets. One gust is never enough.\n\nThe phone stays idle. This is not a live tick on the device. After a ping, signed-in people can mark **Good** or **Meh** (feedback, not a new rule).",
+    "options": [
+      {
+        "id": "p2",
+        "label": "Default rule",
+        "answer": "Default on a new follow: **average wind 15 knots or more, holding for 20 minutes**.\n\nSimple presets on the station: 12 / 15 / 18 / 20 kt average, or **gusts 25 kt**. Pick what matches how you actually go out.\n\nWant a sea-breeze sector, a max wave, or a tighter gust spread? Use the advanced rule on the station (tap **Rules & units** in this menu).\n\nThe cloud will not check more often than about every 10 minutes (never under 1 minute)."
+      },
+      {
+        "id": "p3",
+        "label": "Why no ping?",
+        "goto": "noping"
+      },
+      {
+        "id": "p4",
+        "label": "Good / Meh",
+        "answer": "After an alert fires, signed-in users can mark **Good** or **Meh**. That is “was this ping useful?”, not a new wind threshold.\n\nGuest cannot save that feedback. Sign in first if you want it kept.\n\nIt does not change your 15 kt / 20 min rule by itself. Change the rule on the station if the ping was the wrong kind of wind."
+      },
+      {
+        "id": "p5",
+        "label": "Test notification",
+        "answer": "On **Account** in the app there is a test notification. Use it to see if the device can receive pushes at all.\n\nIf the test never arrives: notifications are blocked for Windsage / Chrome / Safari, or you are not opening the Home Screen icon (especially on iPhone). Fix that in phone settings, then test again.\n\nA successful test only proves the bell works. You still need a follow + a rule that actually held for the full time to get a real wind ping."
+      },
+      {
+        "id": "p6",
+        "label": "Battery / polling",
+        "answer": "Windsage does **not** sit there polling Windguru on the phone. Background fetch of the station on the device is off. The cloud watches; the phone only wakes for the push.\n\nThat is why it can stay idle, and also why you will not see a new reading every few seconds on the lock screen — Home’s “Right now” glance is the last cloud check, not a live cup."
+      }
+    ]
+  },
+  "noping": {
+    "parent": "pings",
+    "prompt": "No ping — check these",
+    "answer": "Work this list in order. Most misses are here, not a dead cloud.\n\n1. **Home Screen icon** — iPhone especially: Safari → Add to Home Screen, then open from the icon.\n2. **Notifications allowed** — test send from Account should arrive.\n3. **Still following** that station (unfollow by accident is common).\n4. **Rule actually held** the full time (default 20 minutes). One gust or 10 minutes of 16 kt is not enough.\n5. **Same account** — guest on the phone and Google on the computer are two lists.\n\nCloud checks ~10 minutes, so the ping can land a bit after the hold was met.",
+    "options": [
+      {
+        "id": "n1",
+        "label": "Install & permissions",
+        "answer": "iPhone: Safari → Share → Add to Home Screen. Open that icon. Allow notifications. Chrome-on-iPhone is the usual miss.\n\nAndroid: Chrome → Add to Home screen / Install, notifications on, battery saver not killing it.\n\nThen Account → test notification. If the test is silent, a real wind ping will be silent too. Fix the bell first."
+      },
+      {
+        "id": "n2",
+        "label": "Follow & rule",
+        "answer": "Open Home. Is the station still there? If not, add it again.\n\nOpen the station and read the rule. Default is 15 kt average for 20 minutes. If you wanted “any gust over 15”, that is a different preset (gusts), not the default.\n\nThe condition must stay true for the **whole** hold. Wind 18 kt for 12 minutes then 11 kt = no ping. Cloud look is about every 10 minutes, so be patient after a real hold."
+      },
+      {
+        "id": "n3",
+        "label": "Guest vs signed-in",
+        "answer": "Guest follows live **only on that device**. They are not in the cloud.\n\nSigned-in follows sync when the cloud is up. If you followed as guest on the phone, then signed into Google on the computer, the phone guest list and the Google list are different — the computer will not ping for the guest follows.\n\nFix: sign in on the phone (same Google/Discord/password) so one list syncs, or follow again on the device that should ping."
+      },
+      {
+        "id": "n4",
+        "label": "Still stuck",
+        "answer": "If the test notification works, you still follow the station, and you are sure the rule held for the full time, ping a **human mod** in this server.\n\nThis bot cannot see your account, cannot restart anything, and cannot change https://windsage.nimrod.bio/ . Say which station, guest or signed-in, and iPhone/Android."
+      }
+    ]
+  },
+  "follow": {
+    "parent": "root",
+    "prompt": "Follow a station",
+    "answer": "In the app: **Add a station** (or Follow).\n\nYou can paste:\n• a **Windguru** number or URL — **2259** is Freegull if you need something to try\n• an **NDBC / NOAA** buoy or C-MAN id (or the ndbc.noaa.gov page)\n• an **Open-Meteo** place name or coordinates (model “now”, not a mast)\n• a **Synoptic / ICAO** id (e.g. LLBG) if the cloud has that token\n• a **map pin / address** — blends nearby stations; not one physical cup\n\nGuest: this device only. Sign in to keep the same list on another phone.",
+    "options": [
+      {
+        "id": "f2",
+        "label": "Unfollow",
+        "answer": "Open the station from Home → **Unfollow station** (or **Unfollow map pin**). It drops off Home.\n\nIf you are signed in, that unfollow syncs to the cloud, so the other device should drop it too after refresh.\n\nGuest unfollow only affects this device. Signing out as a signed-in user clears the follow list on that device."
+      },
+      {
+        "id": "f3",
+        "label": "Share a follow",
+        "answer": "On the station screen, use **share**. That makes a Windsage link for the same target (same Windguru id, buoy, or pin).\n\nThe other person opens it **in Windsage** (the app / site), then can follow it themselves. Sharing does not force it onto their list.\n\nIf the link opens as a generic webpage, they should open it in the Windsage Home Screen icon or https://windsage.nimrod.bio/"
+      },
+      {
+        "id": "f4",
+        "label": "Star / reorder",
+        "answer": "On Home you can **star** a follow and drag / move it so your everyday spots stay at the top.\n\nStarring is for your list order. It is not a second alert rule. Each station still has its own 15/20 (or whatever you set)."
+      }
+    ]
+  },
+  "sources": {
+    "parent": "root",
+    "prompt": "Weather sources",
+    "answer": "Add Station currently offers:\n\n• **Windguru** — spots (forecast) and live stations (instruments). Example live: 2259 Freegull.\n• **Map / address** — drop a pin; Windsage blends nearby stations. Not one mast.\n• **NDBC / NOAA** — US buoys / C-MAN; wind plus waves when published.\n• **Open-Meteo** — weather-model “now” at a place. Useful without a station number. Not a cup anemometer.\n• **Synoptic / MesoWest** — ICAO / mesonet (LLBG, KSLC). Needs a cloud token; if that is off, use Windguru / NDBC / map.\n\n**Tempest** and **Windfinder** were removed (no account / paid API). Old saves may still show them.",
+    "options": [
+      {
+        "id": "s1",
+        "label": "Windguru",
+        "answer": "Paste the Windguru **URL or number**. Live stations are real instruments. Spots are the forecast page.\n\n**2259** is Freegull — a good first try.\n\nIf live data is missing, the app may warn and can still use **forecast** for alerts. That is weaker than a live cup, but it is better than a dead follow. Prefer a live station when you care about “is it up right now”."
+      },
+      {
+        "id": "s2",
+        "label": "Map / address",
+        "answer": "Type a place (e.g. a beach or town) or drop a pin. Windsage blends nearby stations by distance, accuracy, and rating inside a radius.\n\nThis is **not** one physical anemometer. Treat it as “wind in this area,” not “the mast at the harbour office.” You can open the pin in Google Maps from the station screen.\n\nIf a number/URL fails, map pin is the fallback — it does not need a station id."
+      },
+      {
+        "id": "s3",
+        "label": "NDBC / NOAA",
+        "answer": "US **buoy** or **C-MAN** station. Example id: **41009**. Paste the id or the full ndbc.noaa.gov station URL.\n\nYou get wind, and **waves** when that buoy publishes them — useful if your rule includes max wave.\n\nThese are real instruments on a schedule, not a phone GPS. If the buoy is down, the app will look empty / hiccup; try another nearby id or a map pin."
+      },
+      {
+        "id": "s4",
+        "label": "Open-Meteo",
+        "answer": "Open-Meteo is a **weather model “now”** at a lat,lon or place name. There is no cup on a mast.\n\nUse it when you have a place and no Windguru/NDBC number. Do not treat it as “the live station at the spot.” Windguru live and NDBC are instruments when they are actually live.\n\nAlerts on Open-Meteo still use your hold rule; they just watch the model, not a physical sensor."
+      },
+      {
+        "id": "s5",
+        "label": "Synoptic / airport",
+        "answer": "ICAO or mesonet ids, e.g. **LLBG** (Ben Gurion) or **KSLC**. This needs a Synoptic/MesoWest token on the Windsage cloud.\n\nIf that token is not configured, the follow will not resolve — use **Windguru**, **NDBC**, or **map** instead. This bot cannot turn the token on."
+      },
+      {
+        "id": "s6",
+        "label": "Tempest / Windfinder",
+        "answer": "Removed from Add Station (no account / paid API). If an old save still shows a Tempest or Windfinder follow, it may sit there, but you cannot add a new one.\n\nAdd a replacement with Windguru, map, NDBC, or Open-Meteo."
+      }
+    ]
+  },
+  "rules": {
+    "parent": "root",
+    "prompt": "Rules & units",
+    "answer": "Every follow has its own rule.\n\n**Default:** average wind **≥ 15 knots** for **20 minutes**.\n**Units:** wind in knots (kt), waves in meters, temperature in °C, direction **0–360°**.\n\nSimple presets: 12 / 15 / 18 / 20 kt average, or gusts 25 kt. Advanced: change the metric, hold minutes, optional max gust spread, direction window, max wave, max wind.\n\nCloud wait is at least 1 minute; usual check is about **10 minutes**. The hold must stay true the whole time — it resets if the wind drops below the rule.",
+    "options": [
+      {
+        "id": "r1",
+        "label": "Simple presets",
+        "answer": "On the station, simple notify:\n\n• 12 / 15 / 18 / 20 knots **average**\n• or **gusts 25 knots**\n\nDefault is **15 kt average for 20 minutes**. Use 12 if you go out in lighter stuff; 18–20 if you only want a proper howl; gusts 25 if you care about hits, not the average.\n\nThese still use the hold time. They are not “ping me the first second it touches 15.”"
+      },
+      {
+        "id": "r2",
+        "label": "Advanced rule",
+        "answer": "On the station (turn **simple mode** off if you cannot see the extra fields):\n\n• Metric: average wind, gust, waves, or temperature\n• Hold minutes (how long it must stay true)\n• Optional max gust spread (kt)\n• Direction window from°–to° (0–360, for a sea-breeze sector)\n• Max wave (m), max wind (kt)\n\nComparisons are at least / at most. Cloud will not wait under 1 minute. Usual poll ~10 minutes."
+      },
+      {
+        "id": "r3",
+        "label": "Units",
+        "answer": "The app is **knots**, not mph or km/h, for wind. Waves are **meters**. Temperature is **°C**. Direction is **0–360°** (meteorological: where the wind comes from).\n\nThere is no mph toggle in the helper’s cards. If you think in mph, 15 kt is about 17 mph; 20 kt is about 23 mph — but set the rule in knots in the app."
+      },
+      {
+        "id": "r4",
+        "label": "Change my rule",
+        "answer": "Open the station from Home (not this Discord). Change the simple preset or the advanced fields, then leave the screen — it saves on that follow.\n\nSigned-in: the new rule syncs with the cloud, so the watcher uses it on the next checks. Guest: only this device.\n\nThis bot cannot edit your rule. Changing it here in chat does nothing."
+      }
+    ]
+  },
+  "account": {
+    "parent": "root",
+    "prompt": "Sign-in & guest",
+    "answer": "**Guest** — follow on this device with no account. Fine for a first try. Signing out later clears that device’s list.\n\n**Sign in** — Account → Continue with **Google** or **Continue with Discord**, or username & password (password at least 8 characters). That syncs follows and Good/Meh across devices.\n\n**Join Discord** in the app is only the invite into this server. It does **not** log you into Windsage. This helper is not the login screen.\n\nPrivacy: https://windsage.nimrod.bio/privacy.html",
+    "options": [
+      {
+        "id": "a1",
+        "label": "Guest",
+        "answer": "No account needed. You can add stations and get pings **on this device** if notifications are allowed.\n\nGuest lists do not sync. A guest phone and a guest computer are two separate lists.\n\nSigning out / clearing site data wipes the guest follow list on that device. Sign in before you care about keeping the list."
+      },
+      {
+        "id": "a2",
+        "label": "Google / Discord / password",
+        "answer": "In the app, open **Account**:\n\n• **Continue with Google**\n• **Continue with Discord** (Discord login for the *app*, not Join Discord)\n• or username & password (min 8 characters)\n\nAfter that, follows sync when the cloud is reachable. Use the same method on the second device.\n\nThis helper cannot log you in and cannot reset a password. If Google/Discord’s own screen fails, that is their login, not #questions."
+      },
+      {
+        "id": "a3",
+        "label": "Join Discord vs sign-in",
+        "answer": "**Join Discord** = open the invite into *this* server (friends, #questions, /ruach). You can do that as a guest of the app.\n\n**Continue with Discord** = use your Discord account as the login *for Windsage the app*, so follows sync.\n\nYou can be in this Discord and still be a guest in the app. You can be signed into the app with Google and never open Discord. Different buttons, different jobs."
+      },
+      {
+        "id": "a4",
+        "label": "Privacy",
+        "answer": "Guest needs no account. Sign-in stores the follow list and Good/Meh so they can sync. Push needs a notification subscription on the device.\n\nWe do not need your precise GPS to run (station ids / a pin you chose). No ad trackers in the app. Policy: https://windsage.nimrod.bio/privacy.html\n\nDo **not** paste passwords, tokens, or API keys in Discord. This bot cannot see your Windsage password. To ask for account deletion, Email the developer in the app menu."
+      }
+    ]
+  },
+  "home": {
+    "parent": "root",
+    "prompt": "Home screen in the app",
+    "answer": "Home is your list of follows plus a **Right now** glance: last cloud check and a short trend (holding / climbing / quiet). Pull down to refresh.\n\nOpen a station for the full reading, forecast (when the source has it), and the rule.\n\n**Simple mode** is on by default — fewer labels. Turn it off for source names and extra rule fields.\n\nIf a weather source fails for about 2+ seconds, Home can show a **hiccup** banner. Brief gaps are ignored.",
+    "options": [
+      {
+        "id": "h2",
+        "label": "Simple mode",
+        "answer": "Simple mode is **on** by default: shorter labels, Add a station, Put on Home Screen — less noise.\n\nTurn it **off** when you want full source names and the extra rule fields (direction window, max wave, gust spread, and so on).\n\nIt does not change how pings work. It only changes how much the screens show."
+      },
+      {
+        "id": "h3",
+        "label": "Source hiccup",
+        "answer": "If Windguru / NDBC / etc. fails for about **2+ seconds**, Home may show a hiccup banner. Pull to refresh. Short blips are ignored on purpose so the UI does not flash.\n\nA hiccup is “the source did not answer,” not “your rule is wrong.” If it lasts, try another station or a map pin. This bot cannot restart the weather source."
+      }
+    ]
+  },
+  "broken": {
+    "parent": "root",
+    "prompt": "Something's broken",
+    "answer": "Start here before assuming the cloud is dead:\n\n• Home Screen install + notifications (test send on Account)\n• You still follow the station\n• The rule held for the **full** time, not one gust\n• Same sign-in on the device that should ping\n\nIf the app says the cloud is unreachable, your follow list stays as-is — pull to refresh later. This bot cannot restart the cloud or see your account.",
+    "options": [
+      { "id": "b1", "label": "No ping", "goto": "noping" },
+      {
+        "id": "b2",
+        "label": "Cloud unreachable",
+        "answer": "When the cloud is unreachable, the app **keeps your follow list as-is** on that device. It does not wipe it. Pull to refresh later.\n\nSigned-in sync resumes when it is up. Guest never used the cloud for the list anyway.\n\nThis bot cannot restart anything. If the site https://windsage.nimrod.bio/ itself will not load, say that to a human mod."
+      },
+      {
+        "id": "b3",
+        "label": "Can't resolve a station",
+        "answer": "For Windguru / NDBC: paste the **full URL** if a bare number fails. Check you did not swap digits (2259 not 2295).\n\nMap pin does not use a station id — pick the place on the map.\n\nOpen-Meteo wants a place name or coordinates. Synoptic needs the cloud token; if that is off, pick another source.\n\nTempest / Windfinder cannot be added anymore."
+      },
+      {
+        "id": "b4",
+        "label": "Ask a human",
+        "answer": "If these cards do not cover it, ping a **human mod**. Say: station / source, iPhone or Android, guest or signed-in, and whether the Account test ping works.\n\nI only know these written cards. I cannot see your account, change the app, or give Discord powers."
+      }
+    ]
+  },
+  "bot": {
+    "parent": "root",
+    "prompt": "This Discord bot",
+    "answer": "I am **Windsage Helper**. I am not an AI. Every how-to answer is a written card.\n\n**How-to (this menu)** — only in **#questions**:\n• `/ask` — buttons, first tap is an answer\n• `/ask how do pings work` — jump to that card\n• @Windsage Helper plus a question\n\n**Live club wind** (this server, same brain as the app):\n• `/ruach` + a spot (פריגול / Freegull, הרצליה, חיפה, …)\n• `/laan` — where to go, club glance\n\nOrdinary chat without `/ask` or @me is ignored.",
+    "options": [
+      {
+        "id": "t2",
+        "label": "What I will not do",
+        "answer": "I will not restart servers, share secrets, give Administrator, log you into the app, or change https://windsage.nimrod.bio/ .\n\nI cannot see your Windsage password or your follow list.\n\nMods use `/mod` in #moderator-only (Confirm required). App how-to stays `/ask` here. Product mail: Email the developer in the app menu."
+      },
+      {
+        "id": "t3",
+        "label": "Live wind commands",
+        "answer": "`/ruach` — live wind at a club spot. Required option: **spot**. Try Freegull / פריגול, Herzliya / הרצליה, Haifa / חיפה. Same data the app uses (https://windsage.nimrod.bio/v1), not an AI guess.\n\n`/laan` — club glance, “where to go” across those spots.\n\nThose commands are for *now*. Your **pings** still come from follows + rules in the app, not from typing `/ruach`."
+      }
+    ]
+  }
+}

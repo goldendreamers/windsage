@@ -9,10 +9,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { openDeveloperEmail } from '../core/contact';
+import { openDeveloperEmail, openDiscordInvite } from '../core/contact';
 import type { CloudUser } from '../core/cloud';
 import {
   CloudError,
+  EMPTY_AUTH_PROVIDERS,
   fetchAuthProviders,
   fetchMe,
   loginAccount,
@@ -20,6 +21,7 @@ import {
   pullMyStations,
   registerAccount,
   sendTestPhoneAlert,
+  startDiscordSignIn,
   startGoogleSignIn,
 } from '../core/cloud';
 import { colors } from '../shared/theme';
@@ -44,7 +46,7 @@ type Props = {
 
 export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Props) {
   const [user, setUser] = useState<CloudUser | null>(null);
-  const [providers, setProviders] = useState({ google: false, facebook: false, apple: false });
+  const [providers, setProviders] = useState(EMPTY_AUTH_PROVIDERS);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -59,7 +61,7 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
       try {
         const [me, prov] = await Promise.all([
           fetchMe().catch(() => null),
-          fetchAuthProviders().catch(() => ({ google: false, facebook: false, apple: false })),
+          fetchAuthProviders().catch(() => EMPTY_AUTH_PROVIDERS),
         ]);
         if (cancelled) return;
         setUser(me);
@@ -87,12 +89,12 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
     }
   }
 
-  async function finishGoogle(mode: 'login' | 'link') {
-    const result = await startGoogleSignIn(mode);
+  async function finishOAuth(provider: 'google' | 'discord', mode: 'login' | 'link') {
+    const result = provider === 'discord' ? await startDiscordSignIn(mode) : await startGoogleSignIn(mode);
     // Web navigates away; native AuthSession returns here.
     if (!result) return;
     if (result.error) throw new Error(result.error);
-    if (!result.token) throw new Error('Google sign-in returned no session');
+    if (!result.token) throw new Error(`${provider === 'discord' ? 'Discord' : 'Google'} sign-in returned no session`);
     const me = await fetchMe();
     if (!me) throw new Error('Signed in but could not load account');
     if (mode === 'link') {
@@ -107,11 +109,17 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
         pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
         simpleMode: pulled?.simpleMode !== false,
       },
-      // Google "login" to a brand-new SSO user already merged guest follows server-side
+      // SSO login to a brand-new user already merged guest follows server-side
       // when created; never import leftover local guest lists for returning users.
       { importLocalGuestFollows: false },
     );
   }
+
+  const signedInLabel = user
+    ? user.username
+      ? `@${user.username}`
+      : user.sso.google?.email || user.sso.discord?.username || user.sso.discord?.email || 'SSO account'
+    : '';
 
   if (loading) {
     return (
@@ -151,16 +159,23 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
 
       {user ? (
         <Section title="Signed in" icon="station">
-          <Text style={styles.label}>
-            {user.username ? `@${user.username}` : user.sso.google?.email || 'SSO account'}
-          </Text>
+          <Text style={styles.label}>{signedInLabel}</Text>
           {providers.google && !user.sso.google?.linked ? (
             <Pressable
               style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
               disabled={busy}
-              onPress={() => void run(async () => finishGoogle('link'))}
+              onPress={() => void run(async () => finishOAuth('google', 'link'))}
             >
               <Text style={styles.btnSecondaryText}>Link Google</Text>
+            </Pressable>
+          ) : null}
+          {providers.discord && !user.sso.discord?.linked ? (
+            <Pressable
+              style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+              disabled={busy}
+              onPress={() => void run(async () => finishOAuth('discord', 'link'))}
+            >
+              <Text style={styles.btnSecondaryText}>Link Discord</Text>
             </Pressable>
           ) : null}
           <Pressable
@@ -266,12 +281,23 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
               <Pressable
                 style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
                 disabled={busy}
-                onPress={() => void run(async () => finishGoogle('login'))}
+                onPress={() => void run(async () => finishOAuth('google', 'login'))}
               >
                 <Text style={styles.btnPrimaryText}>Continue with Google</Text>
               </Pressable>
             ) : (
               <Text style={styles.hint}>Google sign-in isn’t configured on this server.</Text>
+            )}
+            {providers.discord ? (
+              <Pressable
+                style={[styles.btn, styles.btnDiscord, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() => void run(async () => finishOAuth('discord', 'login'))}
+              >
+                <Text style={styles.btnDiscordText}>Continue with Discord</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.hint}>Discord sign-in isn’t configured on this server.</Text>
             )}
           </Section>
 
@@ -321,6 +347,20 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
         </Pressable>
         {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
       </Section>
+
+      {providers.discordInvite ? (
+        <Pressable
+          style={[styles.btn, styles.btnDiscord]}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            openDiscordInvite(providers.discordInvite);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Join Discord"
+        >
+          <Text style={styles.btnDiscordText}>Join Discord</Text>
+        </Pressable>
+      ) : null}
 
       <Pressable
         style={[styles.btn, styles.btnSecondary]}
@@ -415,6 +455,8 @@ const styles = StyleSheet.create({
     borderColor: colors.danger,
   },
   btnDangerText: { color: colors.danger, fontWeight: '700', fontSize: 15 },
+  btnDiscord: { backgroundColor: '#5865F2' },
+  btnDiscordText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   btnDisabled: { opacity: 0.55 },
   guest: { alignItems: 'center', paddingVertical: 12 },
   guestText: { color: colors.muted, fontWeight: '600' },

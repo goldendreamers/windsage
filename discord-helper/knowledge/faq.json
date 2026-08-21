@@ -1,0 +1,182 @@
+[
+  {
+    "q": "What is Windsage?",
+    "asks": ["what is windsage", "what's windsage", "whats windsage", "what does windsage do", "what does this app do", "explain windsage", "windsage meaning"],
+    "keywords": ["windsage", "what is this", "this app", "wind app", "wind alert"],
+    "a": "Windsage is a free wind-alert app. You follow a station. The cloud checks about every 10 minutes. If your rule holds (default 15 knots average for 20 minutes), you get a ping. The phone stays idle — it does not poll Windguru in the background. App: https://windsage.nimrod.bio/  Code: https://github.com/goldendreamers/windsage"
+  },
+  {
+    "q": "How do I talk to this bot?",
+    "asks": ["how do I ask", "how does the bot work", "talk to the bot", "how to use the helper"],
+    "keywords": ["/ask", "slash", "mention", "helper bot", "@windsage"],
+    "a": "How-to: in #questions type /ask (optionally add a question), or @Windsage Helper plus the question, or tap the topic buttons. Plain chat without /ask or @me is ignored. Live club wind anywhere in this server: /ruach (a spot) and /laan (where to go). I am not an AI — /ask answers are written cards."
+  },
+  {
+    "q": "How do pings / notifications work?",
+    "asks": ["how do pings work", "how do notifications work", "how do alerts work", "when do I get a ping", "push notification"],
+    "keywords": ["ping", "notify", "notification", "alert", "push", "lock screen"],
+    "a": "The phone stays idle. The cloud checks the station about every 10 minutes. If your rule holds for the full hold time (default: 15 knots average for 20 minutes), you get a push. One gust is not enough — if it drops mid-hold, the hold resets. This is not a live poll on the phone. After a ping, signed-in users can mark Good or Meh."
+  },
+  {
+    "q": "How do I install / Add to Home Screen?",
+    "asks": ["how do I install", "add to home screen", "install the app", "pwa", "download windsage"],
+    "keywords": ["install", "home screen", "safari", "iphone", "android", "chrome", "download"],
+    "a": "Open https://windsage.nimrod.bio/ . iPhone: Safari (not Chrome) → Share → Add to Home Screen, then open the icon and allow notifications — that is how lock-screen pings work best. Android: Chrome → menu → Add to Home screen / Install app. Or use Download in the app menu. Computer browser works too; allow site notifications if you want pings there."
+  },
+  {
+    "q": "How do I follow a station?",
+    "asks": ["how do I follow", "add a station", "add station", "follow windguru"],
+    "keywords": ["follow", "unfollow", "station", "2259", "freegull"],
+    "a": "In the app: Add a station. Paste a Windguru number or URL (2259 is Freegull), an NDBC buoy id, Open-Meteo place, Synoptic/ICAO, or drop a map pin / address. Guest works on this device only. Sign in to keep the same list on another phone. Unfollow from the station screen."
+  },
+  {
+    "q": "What is the default wind rule?",
+    "asks": ["default rule", "15 knots", "20 minutes", "what threshold"],
+    "keywords": ["default", "knots", "hold", "preset", "12 knots", "18 knots", "20 knots", "gust", "threshold"],
+    "a": "Default: average wind ≥ 15 knots for 20 minutes. Simple presets: 12 / 15 / 18 / 20 kt average, or gusts 25 kt. Advanced (on the station): metric (avg, gust, waves, temp), hold minutes, max gust spread, direction window, max wave, max wind. Cloud wait is at least 1 minute; usual poll is about 10 minutes. The hold resets if the wind drops below the rule."
+  },
+  {
+    "q": "Does the phone drain battery / poll Windguru?",
+    "asks": ["battery", "does the phone poll", "background fetch", "wake the phone"],
+    "keywords": ["battery", "background", "poll", "idle", "wake"],
+    "a": "No phone polling. Background Windguru on the device is off. The cloud watches; the phone only receives the push. That is why it can stay idle, and why lock-screen readings are not a live 10-second tick."
+  },
+  {
+    "q": "How do I sign in?",
+    "asks": ["how do I sign in", "login", "google login", "discord login", "create account"],
+    "keywords": ["sign in", "login", "google", "sso", "account", "password", "username"],
+    "a": "In the app, Account → Continue with Google or Continue with Discord, or username & password (min 8 characters). Sign-in syncs follows across devices. This Discord helper is not the login screen. Join Discord is only the server invite — it does not log you into the app."
+  },
+  {
+    "q": "Why no ping?",
+    "asks": ["why didn't I get a ping", "no notification", "alerts not working", "ping failed"],
+    "keywords": ["not working", "no ping", "silent", "blocked", "test alert"],
+    "a": "Check in order: Home Screen install (iPhone = Safari Add to Home Screen), notifications allowed (Account test send), still following the station, rule actually held for the full time (default 20 minutes — one gust is not enough), guest vs signed-in lists are per device. Cloud checks about every 10 minutes. Then ask a human mod; this bot cannot see your account."
+  },
+  {
+    "q": "Is it free / open source?",
+    "asks": ["is it free", "open source", "github", "does it cost"],
+    "keywords": ["free", "open source", "github", "license", "price", "paid"],
+    "a": "Free to use. Code: https://github.com/goldendreamers/windsage  App: https://windsage.nimrod.bio/  Email the developer is in the app menu if you need a human about the product."
+  },
+  {
+    "q": "What weather sources?",
+    "asks": ["what sources", "windguru or ndbc", "open meteo", "map pin", "synoptic"],
+    "keywords": ["windguru", "ndbc", "openmeteo", "open-meteo", "buoy", "map", "location", "address", "synoptic", "mesowest", "icao", "tempest", "windfinder"],
+    "a": "Add Station shows: Windguru (spots = forecast, live = instruments; 2259 Freegull), Map/Address (blends nearby stations, not one mast), NDBC/NOAA buoys, Open-Meteo (model now, not a physical anemometer), Synoptic/MesoWest (e.g. LLBG, KSLC — needs a cloud token). Tempest and Windfinder were removed from Add Station (no account / paid API). Old follows of those may still sit in a save."
+  },
+  {
+    "q": "What is Right now / glance?",
+    "asks": ["right now", "glance", "home wind", "spot forecast"],
+    "keywords": ["right now", "glance", "trend", "headline", "forecast"],
+    "a": "Home shows a Right now glance: last cloud check and a short trend (holding / climbing / quiet). Pull to refresh. Open a station for the full reading, forecast, and rule. Source hiccup banner only if a source fails for about 2+ seconds. Brief gaps are ignored."
+  },
+  {
+    "q": "Guest vs account?",
+    "asks": ["guest mode", "without an account", "do I need to sign in"],
+    "keywords": ["guest", "no login", "anonymous", "sync"],
+    "a": "Guest can follow on that device with no account. Sign in (Google, Discord, or password) to sync the list to another phone or computer. Guest phone and guest computer are two lists. Signing out clears the follow list on that device."
+  },
+  {
+    "q": "Good / Meh?",
+    "asks": ["good or meh", "alert feedback", "rate the alert"],
+    "keywords": ["good", "meh", "feedback", "rating"],
+    "a": "After an alert, signed-in users can mark Good or Meh. That is feedback on that ping (“was this useful?”), not a new wind rule. Guest cannot save it. Change the station rule in the app if the ping was the wrong kind of wind."
+  },
+  {
+    "q": "Units?",
+    "asks": ["knots or mph", "celsius", "wave meters", "what units"],
+    "keywords": ["knots", "kt", "celsius", "meters", "units", "mph", "kph"],
+    "a": "Wind is knots (kt), not mph. Waves in meters. Temperature in °C. Direction 0–360° (where the wind comes from). Roughly 15 kt ≈ 17 mph, 20 kt ≈ 23 mph — but you set the rule in knots in the app."
+  },
+  {
+    "q": "Share a station?",
+    "asks": ["share follow", "share link", "send someone a station"],
+    "keywords": ["share", "link", "invite follow"],
+    "a": "On the station screen, share the follow link. The other person opens it in Windsage (https://windsage.nimrod.bio/ or the Home Screen icon) and can follow the same target. Sharing does not force it onto their list."
+  },
+  {
+    "q": "Star / reorder follows?",
+    "asks": ["star a station", "favorite", "reorder"],
+    "keywords": ["star", "unstar", "favorite", "order"],
+    "a": "Star a follow and move it up/down on Home so everyday spots stay at the top. Starring is list order only — each station still has its own alert rule."
+  },
+  {
+    "q": "Simple mode?",
+    "asks": ["simple mode", "too many settings"],
+    "keywords": ["simple mode", "advanced", "nickname"],
+    "a": "Simple mode is on by default: fewer labels, Add a station, Put on home screen. Turn it off if you want full source names and extra rule fields (direction, max wave, gust spread). It does not change how pings work."
+  },
+  {
+    "q": "Map / address follow?",
+    "asks": ["map pin", "address", "herzliya", "google maps"],
+    "keywords": ["map", "pin", "address", "blend", "radius", "location"],
+    "a": "Map/Address: type a place or drop a pin. Windsage blends nearby stations by distance, accuracy, and rating inside a radius. Not one physical anemometer — treat it as wind in the area. You can open the pin in Google Maps. Use this when you have a place and no station number."
+  },
+  {
+    "q": "Open-Meteo vs live station?",
+    "asks": ["is open-meteo live", "model now", "not an anemometer"],
+    "keywords": ["open-meteo", "openmeteo", "model", "forecast"],
+    "a": "Open-Meteo is a weather model “now” at a lat,lon — not a cup anemometer on a mast. Windguru live / NDBC are real instruments when the station is live. Alerts on Open-Meteo still use your hold rule; they watch the model."
+  },
+  {
+    "q": "Windguru spot vs live?",
+    "asks": ["spot or live", "windguru station vs spot"],
+    "keywords": ["spot", "live station", "windguru id"],
+    "a": "Windguru has forecast spots and live stations (instruments). Paste the URL or number. 2259 is Freegull (live). If live data is missing, the app may warn and can still use forecast for alerts — weaker than a live cup, but the follow still works."
+  },
+  {
+    "q": "NDBC?",
+    "asks": ["what is ndbc", "noaa buoy"],
+    "keywords": ["ndbc", "noaa", "buoy", "cman", "41009"],
+    "a": "NDBC/NOAA: US buoy or C-MAN id (example 41009). Wind plus waves when the buoy publishes them. Paste the id or the ndbc.noaa.gov station page URL. Real instruments on a schedule, not phone GPS."
+  },
+  {
+    "q": "Synoptic / airport?",
+    "asks": ["synoptic", "mesowest", "icao", "llbg"],
+    "keywords": ["synoptic", "mesowest", "icao", "llbg", "kslc", "airport"],
+    "a": "Synoptic/MesoWest: airport ICAO or mesonet id, e.g. LLBG or KSLC. Needs the cloud token on the server; if it is not configured, pick Windguru/NDBC/map instead. This bot cannot turn that token on."
+  },
+  {
+    "q": "Custom rules (direction, waves, gust spread)?",
+    "asks": ["wind direction rule", "max wave", "gust spread", "max wind"],
+    "keywords": ["direction", "wave", "gust spread", "max wind", "temperature", "sustained"],
+    "a": "On the station (turn simple mode off if needed): average or gust, hold minutes, optional max gust spread (kt), direction window (from°–to°, 0–360), max wave (m), max wind (kt), temperature (°C). Comparisons are at least / at most. Cloud will not wait under 1 minute. Usual poll ~10 minutes."
+  },
+  {
+    "q": "How do I change my alert rule?",
+    "asks": ["change the rule", "edit threshold", "change notify", "change hold"],
+    "keywords": ["change rule", "edit rule", "my rule"],
+    "a": "Open the station from Home in the app (not Discord). Pick a simple preset or fill the advanced fields. Signed-in rules sync to the cloud for the next checks. Guest rules stay on that device. This bot cannot edit your rule."
+  },
+  {
+    "q": "Privacy?",
+    "asks": ["privacy", "what data do you keep", "is it tracking me"],
+    "keywords": ["privacy", "data", "tracking", "password"],
+    "a": "Guest needs no account. Sign-in is so follows and Good/Meh can sync. We do not need precise GPS (station ids / a pin you chose). No ad trackers. Policy: https://windsage.nimrod.bio/privacy.html  Do not paste passwords or API keys in Discord. This bot cannot see your Windsage password. Email the developer in the app to ask about account deletion."
+  },
+  {
+    "q": "Website vs Discord?",
+    "asks": ["is this the app", "discord vs windsage", "join discord button"],
+    "keywords": ["website", "pwa", "this server", "join discord"],
+    "a": "The app is https://windsage.nimrod.bio/ . This Discord is the friend server. Continue with Discord = log into the app. Join Discord = enter this server. @Windsage Helper / /ask = how-to in #questions. /ruach and /laan = live club wind in this server."
+  },
+  {
+    "q": "Cloud unreachable / sync?",
+    "asks": ["cloud unreachable", "sync failed", "list kept as-is"],
+    "keywords": ["cloud", "sync", "unreachable", "refresh"],
+    "a": "If the cloud is unreachable, the app keeps your follow list as-is. Pull to refresh later. Signed-in users sync from the cloud when it is up. Guest lists never lived in the cloud. This bot cannot restart the cloud."
+  },
+  {
+    "q": "Who made it?",
+    "asks": ["who made windsage", "developer", "email the developer"],
+    "keywords": ["developer", "who built", "contact", "email"],
+    "a": "Open source at https://github.com/goldendreamers/windsage . In the app menu: Email the developer. Privacy: https://windsage.nimrod.bio/privacy.html  For app how-to, ask here first (/ask in #questions)."
+  },
+  {
+    "q": "Live wind in Discord /ruach /laan?",
+    "asks": ["ruach", "laan", "where to go", "live wind discord", "club wind"],
+    "keywords": ["ruach", "laan", "פריגול", "herc", "haifa", "where to go"],
+    "a": "/ruach plus a spot (Freegull / פריגול, Herzliya / הרצליה, Haifa / חיפה, …) shows live wind from the same Windsage /v1 the app uses — not an AI. /laan is the club glance (where to go). Pings still come from follows + rules in the app, not from typing /ruach."
+  }
+]

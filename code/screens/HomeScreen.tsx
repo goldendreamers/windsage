@@ -138,7 +138,7 @@ export function HomeScreen({
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.heading}>{simpleMode ? 'Your stations' : 'Your follows'}</Text>
+            <Text style={styles.heading}>{simpleMode ? 'לאן לצאת' : 'Your follows'}</Text>
             {simpleMode ? null : hasStations ? (
               <Text style={styles.sub}>
                 {`${stations.length}${starredCount ? ` · ${starredCount} starred` : ''}${
@@ -186,7 +186,7 @@ export function HomeScreen({
               if (top) onOpenStation(top.id);
             }}
           >
-            {simpleMode ? null : <Text style={styles.glanceLabel}>Right now</Text>}
+            {simpleMode ? null : <Text style={styles.glanceLabel}>לאן לצאת</Text>}
             <Text style={styles.glanceHeadline} numberOfLines={2}>
               {headline}
             </Text>
@@ -201,9 +201,9 @@ export function HomeScreen({
           </Pressable>
         ) : hasStations ? (
           <View style={styles.glance}>
-            {simpleMode ? null : <Text style={styles.glanceLabel}>Right now</Text>}
+            {simpleMode ? null : <Text style={styles.glanceLabel}>לאן לצאת</Text>}
             <Text style={styles.glanceHeadline} numberOfLines={2}>
-              {simpleMode ? 'Waiting for wind…' : 'Waiting for first readings…'}
+              {simpleMode ? 'מחכה לרוח…' : 'מחכה לקריאה ראשונה…'}
             </Text>
           </View>
         ) : null}
