@@ -33,8 +33,9 @@ PR: https://github.com/goldendreamers/windsage/pull/11
 אם אתה cloud agent בלי הענף: קרא את הקבצים מ־GitHub על הענף הזה.
 
 ## חובה לקרוא לפני עמדה
+- docs/FRIEND_GROUP_VISION_2026-08-21.md     ← פתיח הדוח: רעיונות ועקרונות לגזירת אפיונים (דיסקורד + בוט בלי טוקנים)
 - docs/RECOMMENDATIONS_2026-08-21.md          ← מסמך ההמלצות לביקורת
-- docs/ISRAEL_KITE_PRODUCT_2026-08-21.md     ← הרחבה: מוצר לקהל קיט ישראלי + מתחרים
+- docs/ISRAEL_KITE_PRODUCT_2026-08-21.md     ← רקע שוק ישראלי (לא פריים של תחרות)
 - docs/WEEKLY_REVIEW_2026-08-21.md
 - docs/OUTSTANDING.md
 - CLOUD_AGENT_CONTEXT.md
