@@ -10,7 +10,11 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 0) After VAPID: do **not** merge PR #9 as-is
+### 0) שקד: סשן בחינת המלצות + דוח סופי
+
+פרומפט מוכן: `docs/SHAKED_REVIEW_PROMPT.md`. מסמך לביקורת: `docs/RECOMMENDATIONS_2026-08-21.md`. שקד מדביק את הבלוק בסשן Cursor חדש על `cursor/weekly-progress-review-5b2b` (PR #11).
+
+### 0b) After VAPID: do **not** merge PR #9 as-is
 
 https://github.com/goldendreamers/windsage/pull/9 is a 69-file draft (Follow live-directory search, follow-list merge, simple mode, install download, optional Resend alert-email). `StationDetailScreen.tsx` has a broken ternary (`cond ? null : (JSX) : null`) that breaks the Metro web bundle. Split/fix before merge. Details: `file:///Users/goldendreamers/windsage/docs/WEEKLY_REVIEW_2026-08-21.md`.
 
