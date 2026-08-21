@@ -1,5 +1,6 @@
 # Docs
 
+- **שקד (קבוע על `main`):** [`docs/SHAKED.md`](SHAKED.md) → [`docs/shaked/decision-brief.md`](shaked/decision-brief.md)
 - `file:///Users/goldendreamers/windsage/README.md` — run / layout guide
 - `file:///Users/goldendreamers/windsage/docs/OUTSTANDING.md` — still needed from user / blocked items
 - `file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md` — paste-ready **local Mac** prompts (phone env, Wald, VAPID)

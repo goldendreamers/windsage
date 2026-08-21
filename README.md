@@ -1,5 +1,7 @@
 # Windsage
 
+**שקד / סשן Cursor:** אחרי `git checkout main && git pull` התחל ב־[`docs/SHAKED.md`](docs/SHAKED.md). דוח מחליט: [`docs/shaked/decision-brief.md`](docs/shaked/decision-brief.md) (לא PDF — Cursor מציג PDF ריק).
+
 Mobile app that watches [Windguru](https://www.windguru.cz) stations and notifies you when a parameter stays past a threshold long enough.
 
 **Default rule:** average wind **≥ 15 knots for 20 minutes**  

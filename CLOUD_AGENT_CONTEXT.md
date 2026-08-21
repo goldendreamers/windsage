@@ -9,6 +9,7 @@
 | **GitHub** | https://github.com/goldendreamers/windsage |
 | **Clone** | `git clone https://github.com/goldendreamers/windsage.git` |
 | **Default branch** | `main` |
+| **Shaked / spec sessions** | Always `main`. Start at `docs/SHAKED.md` then `docs/shaked/decision-brief.md` (not the PDF — Cursor shows an empty tab). |
 | **Local Mac path** (if available) | `/Users/goldendreamers/windsage` |
 
 ```bash
