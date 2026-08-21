@@ -4,22 +4,24 @@ Start with [`CLOUD_AGENT_CONTEXT.md`](./CLOUD_AGENT_CONTEXT.md) and [`README.md`
 
 ## Local phone-app environment
 
-This is an **Expo phone app** (PWA + Expo Go). Cloud agents do **not** set up the phone — they append a paste-ready prompt to [`docs/MAC_AGENT_PROMPTS.md`](./docs/MAC_AGENT_PROMPTS.md) (Pending item 0).
+This is an **Expo phone app** (PWA + Expo Go). Cloud agents do **not** set up the phone — they append a paste-ready prompt to [`docs/MAC_AGENT_PROMPTS.md`](./docs/MAC_AGENT_PROMPTS.md).
 
-On the Mac:
+On this Mac the checkout is `file:///Users/nimrod/Documents/AOS_V5/Shaked-WindSage/windsage` (there is no `/Users/goldendreamers/windsage`). Wald SSH is `waldhomeserver` (`nimrodw@100.125.98.56`), not `wald-mc`. Home LAN is `10.0.0.0/24` — Expo Go can use `exp://<mac-lan-ip>:8081` without Tailscale when the iPhone is on the same Wi-Fi.
 
 ```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd /Users/nimrod/Documents/AOS_V5/Shaked-WindSage/windsage
 npm install
 npm install --prefix code/cloud
-EXPO_PUBLIC_WINDSAGE_URL=https://windsage.nimrod.bio npm start   # Expo Go QR
-# optional local API:
+EXPO_PUBLIC_WINDSAGE_URL=https://windsage.nimrod.bio npm start   # Metro :8081, Expo Go QR
+# optional local API (do not rsync code/cloud/data to Wald):
 npm run cloud
 EXPO_PUBLIC_WINDSAGE_URL=http://127.0.0.1:8787 npm run web
 ```
 
 - Cloud data: `code/cloud/data/store.json` (gitignored). Never wipe Wald users/stations.
 - Checks: `npm run check`. Also `node scripts/check-geo.mjs`.
-- Do not run `npm run release:web` from a cloud VM (needs Tailscale/`wald-mc`).
+- Do not run `npm run release:web` from a cloud VM (needs Tailscale/`waldhomeserver`).
 
 ## Cursor Cloud specific instructions
 

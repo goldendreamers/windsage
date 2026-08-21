@@ -38,6 +38,9 @@ yarn-error.*
 .env
 .env.smtp
 
+# local agent screenshots / Metro QR (not product)
+artifacts/
+
 # typescript
 *.tsbuildinfo
 
