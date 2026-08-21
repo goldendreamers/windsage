@@ -38,6 +38,9 @@ yarn-error.*
 .env
 .env.smtp
 
+# local agent screenshots / Metro QR (not product)
+artifacts/
+
 # typescript
 *.tsbuildinfo
 
@@ -47,5 +50,8 @@ yarn-error.*
 code/cloud/data/
 releases/local-zips/
 
-# Agent runtime state
-.cursor/
+# Agent runtime state — keep Cursor rules + environment.json in git
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/environment.json
