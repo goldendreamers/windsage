@@ -34,6 +34,7 @@ PR: https://github.com/goldendreamers/windsage/pull/11
 
 ## חובה לקרוא לפני עמדה
 - docs/RECOMMENDATIONS_2026-08-21.md          ← מסמך ההמלצות לביקורת
+- docs/ISRAEL_KITE_PRODUCT_2026-08-21.md     ← הרחבה: מוצר לקהל קיט ישראלי + מתחרים
 - docs/WEEKLY_REVIEW_2026-08-21.md
 - docs/OUTSTANDING.md
 - CLOUD_AGENT_CONTEXT.md
