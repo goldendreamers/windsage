@@ -29,6 +29,8 @@
   },
   "scripts": {
     "start": "expo start",
+    "dev": "bash scripts/dev-local.sh",
+    "cloud": "bash scripts/dev-local.sh --cloud",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

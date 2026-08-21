@@ -6,6 +6,8 @@
 > A nicer-formatted version of the same content exists as a private Claude artifact; ask Nimrod
 > if you want that link too. This file is the one that doesn't need anyone to click "Share."
 
+> **Superseding snapshot:** `docs/WEEKLY_REVIEW_2026-08-21.md` (2026-08-21) covers what shipped after this pass (multi-source, glance, backups, PR #8/#9). Keep this file for the 12 Aug research notes and competitive landscape.
+
 **Date:** 2026-08-12 · **Reviewed:** commit `0a18a73` (6 commits, `7e73bc5` → `0a18a73`, first
 commit 13:18, latest 17:50+ the same day) · **Scope:** full read of the cloud backend
 (`code/cloud/`), the app core/screens (`code/app`, `code/core`, `code/screens`), the data model

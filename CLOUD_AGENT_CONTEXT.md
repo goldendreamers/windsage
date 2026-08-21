@@ -17,8 +17,9 @@ git fetch origin && git checkout main && git pull
 git log -5 --oneline
 ```
 
-Baseline when this file was written: `dbfd02e` on `main`  
-(*Ship overnight reliability, glance UX, and plain alert copy.*)
+Baseline when this file was written: `325b51d` on `main`  
+(*PR #8 merged; Mac still needs VAPID + Wald `release:web`.*)  
+Weekly audit: `docs/WEEKLY_REVIEW_2026-08-21.md` (2026-08-21). Draft PR #9 is **not** on `main`.
 
 ## What the product is
 
@@ -64,6 +65,23 @@ npm run release:web                 # export + snapshot + rsync cloud+web + rest
 
 `scripts/release-web.py` rsyncs `code/cloud/` → `/data/windsage/` (excludes `data`, `web`, `node_modules`, `oauth.env`, `scripts`) and `dist/` → `/data/windsage/web/`.
 
+## Local phone environment (Mac — not this cloud VM)
+
+The product **is the phone app**. Cloud agents cannot run Expo Go or iPhone Safari. Paste **Pending item 0** from `docs/MAC_AGENT_PROMPTS.md` into a **local** Mac Cursor chat.
+
+On the Mac, after `npm install`:
+
+```bash
+# Real phone (Expo Go) against live Wald:
+EXPO_PUBLIC_WINDSAGE_URL=https://windsage.nimrod.bio npm start
+
+# Or local cloud + Expo web (no phone):
+npm run cloud                 # http://127.0.0.1:8787/health
+EXPO_PUBLIC_WINDSAGE_URL=http://127.0.0.1:8787 npm run web
+```
+
+Cursor Cloud VMs: `.cursor/environment.json` only starts the **cloud backend** (`scripts/dev-local.sh --cloud`). Do not treat Expo web in the VM as a lock-screen / Expo Go test.
+
 ## Mandatory agent rules (repo)
 
 1. After a finished product step: run `npm run release:web` (don’t leave `dist/` stale).
@@ -92,12 +110,15 @@ npm run release:web                 # export + snapshot + rsync cloud+web + rest
 
 See `docs/OUTSTANDING.md`. Highlights:
 
+- **Operator:** VAPID on Wald + `npm run release:web` + locked-phone Web Push test (PR #8). Confirm store backup cron.
+- Draft **PR #9** (Follow name search, follow-list merge, simple mode, …) — fix StationDetail ternary; do not merge the 69-file draft blindly. Optional Resend wind-alert email in that PR contradicts “no user alert emails.”
+- Close stale drafts: PR #3 (Maps paste — already on `main`), likely PR #1 (context file).
 - Optional tokens: Synoptic / Tempest / Windfinder
 - Optional `GOOGLE_MAPS_API_KEY` on Wald (Places autocomplete only — Map search works without it via Maps URLs)
 - Optional paid apex domain
 - Deferred: “who’s out” social, SQLite, CI Actions
 
-External research notes: `docs/PROGRESS_REVIEW.md` (Windguru-only SPOF is **outdated** — multi-source exists).
+External research notes: `docs/PROGRESS_REVIEW.md` (12 Aug; Windguru-only SPOF is **outdated** — multi-source exists). Newer snapshot: `docs/WEEKLY_REVIEW_2026-08-21.md`.
 
 ## Smoke checks
 
@@ -126,9 +147,11 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 | File | Purpose |
 | --- | --- |
 | `README.md` | Product + ops overview |
-| **`docs/MAC_AGENT_PROMPTS.md`** | **Running paste-ready prompts for Mac Cursor (Wald deploy / Tailscale)** |
+| **`docs/MAC_AGENT_PROMPTS.md`** | **Running paste-ready prompts for Mac Cursor (phone env / Wald / Tailscale)** |
+| `AGENTS.md` | Cloud vs Mac: local phone env lives on the Mac |
 | `docs/OUTSTANDING.md` | Blocked / needed from operator |
-| `docs/PROGRESS_REVIEW.md` | External review (partially superseded) |
+| `docs/WEEKLY_REVIEW_2026-08-21.md` | 2026-08-21 progress, gaps, problems |
+| `docs/PROGRESS_REVIEW.md` | External review 12 Aug (partially superseded) |
 | `docs/SSO-SETUP.md` | Google/Facebook/Apple OAuth |
 | `docs/STORE-PUBLISH.md` | Store publish notes (PWA-first) |
 | `docs/AGENTS.md` | Expo version doc reminder |

@@ -47,5 +47,8 @@ yarn-error.*
 code/cloud/data/
 releases/local-zips/
 
-# Agent runtime state
-.cursor/
+# Agent runtime state — keep Cursor rules + environment.json in git
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/environment.json
