@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>Windsage — המלצות לצוות מייעץ לשקד</title>
+  <style>
+    @font-face {
+      font-family: "Noto Sans Hebrew";
+      src: url("fonts/NotoSansHebrew-Regular.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Noto Sans Hebrew";
+      src: url("fonts/NotoSansHebrew-Medium.ttf") format("truetype");
+      font-weight: 500;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Noto Sans Hebrew";
+      src: url("fonts/NotoSansHebrew-Bold.ttf") format("truetype");
+      font-weight: 700;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Noto Sans Hebrew";
+      src: url("fonts/NotoSansHebrew-ExtraBold.ttf") format("truetype");
+      font-weight: 800;
+      font-style: normal;
+    }
+    :root {
+      --ink: #13232b;
+      --muted: #4d646d;
+      --line: #d5e3e7;
+      --paper: #f7fafb;
+      --card: #ffffff;
+      --teal: #0e8f7c;
+      --teal-deep: #0b6e60;
+      --navy: #061821;
+      --gold: #b45309;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Noto Sans Hebrew", "Arial Hebrew", "Arial Unicode MS", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      font-size: 11pt;
+      line-height: 1.55;
+    }
+    .latin { font-family: "Noto Sans Hebrew", Arial, Helvetica, sans-serif; direction: ltr; unicode-bidi: isolate; }
+    @page {
+      size: A4;
+      margin: 16mm 16mm 18mm 16mm;
+    }
+    header.hero {
+      background: var(--navy);
+      color: #e8fbff;
+      padding: 28px 32px 26px;
+      border-radius: 0 0 18px 18px;
+      margin-bottom: 22px;
+    }
+    header.hero .kicker {
+      color: #2ec4a8;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      font-size: 10pt;
+      margin: 0 0 8px;
+    }
+    header.hero h1 {
+      margin: 0 0 8px;
+      font-size: 26pt;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    header.hero p.sub {
+      margin: 0;
+      color: #b7d4d8;
+      font-size: 11.5pt;
+      max-width: 42em;
+    }
+    header.hero .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin-top: 16px;
+      font-size: 9.5pt;
+      color: #8fb8be;
+    }
+    main { padding: 0 8px 24px; }
+    h2 {
+      font-size: 16pt;
+      font-weight: 800;
+      color: var(--navy);
+      margin: 26px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 3px solid var(--teal);
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 12.5pt;
+      font-weight: 800;
+      color: var(--teal-deep);
+      margin: 16px 0 8px;
+      page-break-after: avoid;
+    }
+    p { margin: 0 0 8px; }
+    .lead {
+      background: #e7f6f3;
+      border: 1px solid #c6ebe4;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin: 0 0 18px;
+    }
+    .item {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px 10px;
+      margin: 0 0 12px;
+      page-break-inside: avoid;
+    }
+    .item h3 { margin-top: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 4.2em 1fr;
+      gap: 8px 10px;
+      margin: 0 0 6px;
+      align-items: start;
+    }
+    .tag {
+      font-size: 8.5pt;
+      font-weight: 800;
+      color: #fff;
+      background: var(--navy);
+      border-radius: 999px;
+      padding: 2px 8px;
+      text-align: center;
+      margin-top: 2px;
+    }
+    .tag.why { background: var(--teal); }
+    .tag.arg { background: #1c4a55; }
+    .tag.ex { background: var(--gold); }
+    ol.order, ul.out {
+      margin: 8px 0 12px;
+      padding: 0 1.3em 0 0;
+    }
+    ol.order li, ul.out li { margin: 0 0 6px; }
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      page-break-inside: avoid;
+    }
+    .box {
+      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .box.do { border-color: #9ed9cf; background: #f3fbf9; }
+    .box.dont { border-color: #f0d0b8; background: #fff8f2; }
+    .box h3 { margin: 0 0 8px; font-size: 12pt; }
+    .box.dont h3 { color: #9a3412; }
+    footer {
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 9pt;
+    }
+    a { color: var(--teal-deep); text-decoration: none; }
+    .small { font-size: 9.5pt; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <p class="kicker">Windsage · צוות מייעץ · 21 באוגוסט 2026</p>
+    <h1>המלצות לשקד</h1>
+    <p class="sub">
+      מסמך ייעוץ לקבוצת חברים קטנה — כלי התראות רוח לטלפון (PWA / Expo), לא סטארט‑אפ.
+      מבוסס על הקוד ב־GitHub, הסקירה השבועית, והסביבה החיה בטלפון.
+    </p>
+    <div class="meta">
+      <span>חי: <span class="latin">https://windsage.nimrod.bio/</span></span>
+      <span>בריאות: <span class="latin">webPush: true</span></span>
+      <span>ענף ייעוץ: <span class="latin">cursor/weekly-progress-review-5b2b</span></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="lead">
+      <p><strong>מסגרת.</strong> המוצר הנכון כבר קיים: הענן בודק כל כ־10 דקות, הטלפון ישן, וההתראה אמורה להגיע למסך נעול. הייעוץ כאן מדורג לפי ערך לקבוצה — לא לפי היקף קוד.</p>
+      <p class="small" style="margin:0">שלושה פרקים: טכני־מקצועי · חוויית משתמש · פיצ’רים והמשך פיתוח. בכל סעיף: מה לעשות, למה, טיעון, ודוגמה.</p>
+    </div>
+
+    <h2>1. טכני־מקצועי</h2>
+
+    <div class="item">
+      <h3>1.1 להוכיח את ההבטחה: הטלפון רוטט כשהרוח מחזיקה</h3>
+      <div class="row"><span class="tag">מה</span><div>Safari → הוסף למסך הבית → חשבון → <strong>Send test phone alert</strong>, עם המסך נעול. אחר כך <span class="latin">npm run release:web</span> אם ה־PWA החי עדיין העותק הישן.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>כל הארכיטקטורה בנויה על כך שהענן בודק והטלפון ישן. בלי באזז במסך נעול, Windsage הוא דשבורד של Windguru — לא כלי התראות.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>בריאות חיה כבר מראה <span class="latin">"webPush": true</span> — מפתחות VAPID על Wald קיימים. מה שחסר הוא אימות משתמש, לא עוד קוד. ה־PWA החי עדיין מציג “Add a Windguru station”; ב־Metro כבר “Follow your first spot”. GitHub קדימה מהטלפון של החברים.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>שקד נועל את האייפון, לוחץ טסט, מרגיש רטט. בלי זה אי אפשר לייעץ על “התראות” — רק על ממשק.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>1.2 לא למזג את PR #9 כמו שהוא</h3>
+      <div class="row"><span class="tag">מה</span><div>לפצל לשלושה: (א) תיקון מחיקת follows, (ב) חיפוש שם תחנה, (ג) השאר. לתקן ternary שבור ב־<span class="latin">StationDetailScreen.tsx</span> לפני כל מיזוג.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>טיוטה אחת עם כ־69 קבצים מערבבת באג־דאטה, חיפוש, simple mode, התקנה, ומייל התראות. הביטוי <span class="latin">cond ? null : (JSX) : null</span> שובר את באנדל Metro.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>מיזוג עכשיו ישבור את מה שעובד בטלפון. תיקון ה־wipe לבד הוא ערך גבוה בלי סיכון ממשק.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>מכשיר א׳ עם 4 ספוטים מסנכרן בטעות רשימה קצרה → Wald מחליף את כל התיק. זה עדיין חור ב־<span class="latin">main</span>.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>1.3 לסגור טיוטות ישנות ולצמצם בלבול</h3>
+      <div class="row"><span class="tag">מה</span><div>לסגור PR #1 ו־PR #3. להחליט על #2 (Facebook/Apple). לא לגעת ב־EAS או בחנויות.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>חמישה דראפטים חופפים גורמים לסוכן הבא “לתקן” דברים שכבר ב־<span class="latin">main</span>.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>#3 כבר ב־<span class="latin">main</span> (הדבקת קישור Maps). #1 הוחלף ב־<span class="latin">CLOUD_AGENT_CONTEXT.md</span>. כל שעת בלבול כאן היא שעה שלא הולכת לבאג בטלפון.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>סוכן רואה “paste Google Maps” כפתוח וכותב שוב את <span class="latin">mapsUrl.mjs</span>.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>1.4 לאשר שקרונו הגיבוי על Wald באמת רץ</h3>
+      <div class="row"><span class="tag">מה</span><div>לבדוק ש־<span class="latin">/data/scripts/backup-windsage-store.sh</span> כותב ל־<span class="latin">/data/backups/windsage/</span> (14 יום). הסקריפט בקוד; ההתקנה על השרת היא פעולת מפעיל.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>כל המשתמשים ב־<span class="latin">store.json</span> אחד. כבר יש סירוב ל־wipe ריק, תור שמירה, ו־<span class="latin">.bak</span>. בלי קרון זה רק תקווה שהדיסק לא נמחק.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>לקבוצת חברים JSON מספיק. SQLite עכשיו הוא החלפת מנוע בלי משתמשי־עומס. גיבוי יומי זול יותר ובטוח יותר.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div><span class="latin">ls /data/backups/windsage/</span> מראה קבצים מהימים האחרונים — או שלא.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>1.5 CI קטן על <span class="latin">npm run check</span> — לא פלטפורמת בדיקות</h3>
+      <div class="row"><span class="tag">מה</span><div>GitHub Action אחד: <span class="latin">npm run check</span> (ואופציונלי <span class="latin">check-geo.mjs</span>). אין Action על <span class="latin">main</span> היום.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>הבדיקות המקומיות עברו; הן לא רצות על כל PR. ה־ternary של #9 היה נתפס אחרי באנדל, לא אחרי סקירה ידנית.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>בלי CI, “עובד אצלי” הוא כל האיכות. Action אחד בלי מטריצת מכשירים מספיק לגודל הזה.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>PR עם syntax שבור נכשל ב־Metro / <span class="latin">expo export</span> לפני מיזוג.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>1.6 לא לשדרג מנוע בלי כאב אמיתי</h3>
+      <div class="row"><span class="tag">מה</span><div>להישאר עם JSON + תור + cache. לא SQLite, לא חנויות, לא Facebook SSO — עד שיש בעיה חיה.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>תלות אחת בבית (Wald + WAN ביתי) היא סיכון ידוע. החלפת אחסון לא פותרת נפילת הבית.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>הסיכון המבני הוא Wald כבוי, לא “שני חברים כותבים יחד”. NDBC ו־Open‑Meteo מורידים תלות ב־Windguru — לא בשרת.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>הפסקת חשמל בבית = אין התראות. Redis/SQLite לא משנים את זה; Cloudflare Tunnel ותהליך <span class="latin">windsage.service</span> כן.</div></div>
+    </div>
+
+    <h2>2. חוויית משתמש</h2>
+
+    <div class="item">
+      <h3>2.1 דרך ההתקנה חייבת להיות משפט אחד</h3>
+      <div class="row"><span class="tag">מה</span><div>במסך Download: “באייפון רק Safari → הוסף למסך הבית. Chrome באייפון לא מקבל התראות.” Expo Go הוא לסביבת פיתוח, לא לחברים.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>Web Push ב־iOS עובד רק מ־PWA שנוסף מ־Safari. בלבול כאן הורג את הפיצ’ר המרכזי.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>יש שני עותקים חיים: PWA ישן מול Metro חדש. שקד צריך נתיב אחד ברור לחברים, לא “תלוי מאיפה נכנסת”.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>חבר פותח ב־Chrome iOS, מאשר התראות, לא מקבל כלום, ומוחק את האפליקציה.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.2 Follow לפי שם, לא לפי מספר</h3>
+      <div class="row"><span class="tag">מה</span><div>חיפוש “Parkstone” / “הרצליה” במקום <span class="latin">2259</span> או URL. הקוד ב־PR #9; לא חי.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>מזהה Windguru הוא שפת מפתחים. קבוצת גלישה מדברת בשמות ספוטים.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>מסך Follow כבר מציע WG / MAP / NDBC / OM / SYN / TMP. בלי חיפוש שם, רוב האנשים נתקעים במספר או מוותרים.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>במקום להדביק <span class="latin">https://www.windguru.cz/station/2259</span>, כותבים “Freegull” ובוחרים מהרשימה.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.3 להחביא מקורות שאין להם מפתח</h3>
+      <div class="row"><span class="tag">מה</span><div>SYN / TMP / Windfinder מופיעים ב־UI גם כש־<span class="latin">needsToken: true</span>. להציג אותם רק כשהענן באמת <span class="latin">ready</span>.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>כפתור מת הוא רעש, לא עוצמה.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>בחירת מקור היא החלטה של שקד, לא של כל משתמש. מדף הבית צריכים שלושה מקורות חינמיים ומפה.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>ליד MAP: “הדבק קישור Google Maps”. ליד SYN עדיף לא להראות בכלל עד שיש טוקן.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.4 Simple mode לקבוצה, לא לכלים למפעיל</h3>
+      <div class="row"><span class="tag">מה</span><div>מצב שקט: בלי כיתובי עזר, בלי מגזר כיוון, בלי פיזור גוסט — רק סף רוח וזמן החזקה.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>ברירת המחדל (15 קשר / 20 דקות) היא המוצר. השאר הוא כוונון למשוגעים.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>מסך Station Detail כבר ארוך מאוד. כל שדה נוסף מעלה סיכוי שחבר ישנה סף בלי להבין.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>בית: “התראה מעל 15 קשר ל־20 דקות”. מתקדם מאחורי “עוד כללים”.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.5 כיוון רוח במילים, לא במעלות</h3>
+      <div class="row"><span class="tag">מה</span><div>“צפון־מערב” במקום <span class="latin">337°</span>. גם זה ב־PR #9.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>גולשים מדברים ברוחות שמיים. מעלות שייכות לגרף, לא למבט ראשון.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div><span class="latin">8.7 kt</span> כבר בשפה פשוטה. הכיוון צריך אותו סטנדרט — גם במסך נעול.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>“8.7 קשר, צפון־מערב, מתחת לסף 15” במקום <span class="latin">wind_avg 8.73 @ 337</span>.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.6 לאחד את שפת הבית בין מה שחי למה שבפיתוח</h3>
+      <div class="row"><span class="tag">מה</span><div>PWA חי: “Your stations” / “Add a Windguru station”. Metro: “Your follows” / “Follow your first spot”. לבחור אחת ולשחרר.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>שני קולות = שני מוצרים. “Follow” מדויק יותר (ספוט, מצוף, נקודת מפה).</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>אחרי <span class="latin">release:web</span> החברים יראו את העותק החדש בלי הסבר. עד אז כל ייעוץ חייב לציין איזה מסך שקד רואה.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>צילום מהטלפון של שקד מול Metro — אם הכותרות שונות, קודם משחררים, אחר כך מתווכחים על מיקרו־קופי.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>2.7 Glance כבר נכון — לא לדחוס עוד סטטיסטיקה לבית</h3>
+      <div class="row"><span class="tag">מה</span><div>להשאיר “עכשיו” + טרנד. לא מפה מלאה בבית, לא גרף מודל.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>המוצר הוא התראה, לא Windy. הבית צריך לענות: “יש משהו שקורה אצלי?”</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>כרטיס שמראה סף 15 kt במקום רוח חיה 10.2 kt כבר תוקן. להחזיר “רוח חיה בעמודה” זו רגרסיה.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>שלושה follows: אחד מחזיק, אחד רחוק, אחד נכבה — שורה אחת לכל אחד; פירוט בתוך הכרטיס.</div></div>
+    </div>
+
+    <h2>3. פיצ’רים והמשך פיתוח</h2>
+    <p>סדר: קודם מה שמציל דאטה וחיפוש, אחר כך נוחות, ורק בסוף “מוצר חברתי / חנות”.</p>
+
+    <div class="item">
+      <h3>3.1 עכשיו — חיפוש ספרייה + אי־מחיקת follows (מתוך #9, מפוצל)</h3>
+      <div class="row"><span class="tag">מה</span><div>חיפוש על <span class="latin">station_list</span> החי של Windguru, ו־PUT שלא מחליף תיק ארוך ברשימה קצרה.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>זה הפיצ’ר שמשנה onboarding, והבאג שעלול למחוק תיק של חבר.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>השאר ב־#9 (mobileconfig, Resend למייל התראות, simple mode) יכול לחכות. מייל התראות סותר כלל מוצר שכבר נקבע: Windsage לא שולח מיילי רוח למשתמש.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>PR קטן בשם <span class="latin">fix-follow-merge-and-search</span>, בלי StationDetail השבור.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.2 אחר כך — קישור שיתוף לספוט</h3>
+      <div class="row"><span class="tag">מה</span><div>קישור כמו <span class="latin">https://windsage.nimrod.bio/?follow=2259</span>. החבר מאשר “להוסיף Freegull”.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>ככה הקבוצה גדלה בלי ללמד מזהים. יש התחלה ב־#9.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>עדיף על “מי בחוץ”: אין רשת חברתית, יש הפצה של follows.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>שקד שולח וואטסאפ; החבר נכנס ורואה Freegull עם סף 15/20 כבר ממולא.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.3 לא עכשיו — מייל התראות למשתמש, Facebook/Apple, Play / App Store</h3>
+      <div class="row"><span class="tag">מה</span><div>להשאיר PWA. Google SSO כבר חי. חנויות = 25$ חד־פעמי + 99$/שנה + 12 בודקים ל־Play.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>ההתראה כבר צריכה להגיע ל־lock screen. מייל הוא ערוץ שני (תחזוקה וספאם). חנות לא משפרת באזז — היא מוסיפה ביקורת אפל.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>Expo Go / EAS הם למפתח. לחברים: אייקון במסך הבית מ־Safari, בחינם.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>“למה אין ב־App Store?” → “כי זה כלי לקבוצה, וההתראות עובדות ממסך הבית.”</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.4 רק אם מישהו בקבוצה באמת צריך — Synoptic / Tempest / Windfinder</h3>
+      <div class="row"><span class="tag">מה</span><div>הטוקנים אופציונליים. מקורות חינם כבר מכסים Windguru, מצופי NOAA, מודל Open‑Meteo, ופינ מפה.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>כל מקור = כשל, לימיט, ו־UI. בלי משתמש שמביא תחנת Tempest, זה קוד מת.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>פינ מפה כבר מערבב תחנות קרובות. זה פותר “אין לי ID” יותר טוב מ־API בתשלום.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>חבר בארה״ב עם NDBC 46026 — כבר עובד בלי טוקן. חבר עם WeatherFlow אישי — רק אז Tempest.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.5 במכוון אחרון — “מי בחוץ” / צ’ק־אין</h3>
+      <div class="row"><span class="tag">מה</span><div>נשאר דחוי במסמכים. לא לבנות.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>זה משנה את המוצר מ־“תגיד לי מתי הרוח מחזיקה” לרשת חברתית: פרטיות, נוכחות, לחץ חברתי.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>קודם באזז אמין לשבועיים. אחר כך אפשר וואטסאפ. אין צורך בפיד.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>התראה “15 קשר בפריגול 20 דק’” → שקד כותב בקבוצה “יוצא”. Windsage לא צריך לדעת מי במים.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.6 רעיון טוב אחרי שהליבה יציבה — השתקה / שעות שקטות</h3>
+      <div class="row"><span class="tag">מה</span><div>“השתק עד מחר בבוקר” או חלון 07:00–20:00. אין את זה היום.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>סף 15/20 בלילה יוצר באזזים שמנתקים התראות לגמרי.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>זה לא פיצ’ר גדילה; זה שומר על אמון. זול יחסית: דגל במשתמש + בדיקה בפול.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>אחרי התראה ב־02:00, כפתור בלוח: “לא להעיר עד 07:00”.</div></div>
+    </div>
+
+    <div class="item">
+      <h3>3.7 לא לבנות — השוואת מודלים GFS מול ECMWF</h3>
+      <div class="row"><span class="tag">מה</span><div>Windguru כבר בוחר מודל. Windsage הוא שכבת התראה על מדידה חיה, עם תחזית כהקשר לספוט בלי חיישן.</div></div>
+      <div class="row"><span class="tag why">למה</span><div>זה להפוך ל־Windy: תחזוקה גבוהה, ערך נמוך להתראה.</div></div>
+      <div class="row"><span class="tag arg">טיעון</span><div>אם אין חיישן — כבר מוצגים תחזית + התראה מהתחנה החיה הקרובה. שני מודלים לא משנים את הבאזז.</div></div>
+      <div class="row"><span class="tag ex">דוגמה</span><div>ספוט תחזית בלבד: “המודל אומר 18 מחר; האזעקה על תחנה חיה 3 ק״מ מכאן.”</div></div>
+    </div>
+
+    <h2>סדר עבודה מומלץ</h2>
+    <div class="two">
+      <div class="box do">
+        <h3>לעשות, לפי הסדר</h3>
+        <ol class="order">
+          <li>באזז במסך נעול על ה־PWA החי (Safari).</li>
+          <li><span class="latin">release:web</span> — ליישר את הטלפון של החברים עם Metro.</li>
+          <li>PR קטן: merge־follows + חיפוש שם. <strong>לא</strong> את #9 המלא.</li>
+          <li>סגירת PR #1 ו־#3.</li>
+          <li>אימות קרון גיבוי על Wald.</li>
+          <li>רק אז: simple mode, כיוון במילים, קישור שיתוף.</li>
+        </ol>
+      </div>
+      <div class="box dont">
+        <h3>לא בתור</h3>
+        <ul class="out">
+          <li>מיילי רוח למשתמש (Resend)</li>
+          <li>חנות אפל / גוגל</li>
+          <li>Facebook / Apple SSO</li>
+          <li>“מי בחוץ” / צ’ק־אין חברתי</li>
+          <li>SQLite / החלפת מנוע אחסון</li>
+          <li>השוואת מודלי תחזית</li>
+        </ul>
+      </div>
+    </div>
+
+    <footer>
+      מקורות: סקירה שבועית <span class="latin">docs/WEEKLY_REVIEW_2026-08-21.md</span> ·
+      <span class="latin">docs/OUTSTANDING.md</span> · בריאות חיה
+      <span class="latin">https://windsage.nimrod.bio/health</span> ·
+      סביבת טלפון מקומית (Metro SDK 57 מול Wald).
+      המסמך הוא ייעוץ; לא מיזוג ולא שחרור.
+    </footer>
+  </main>
+</body>
+</html>
