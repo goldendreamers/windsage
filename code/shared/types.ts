@@ -107,6 +107,10 @@ export interface LocationBlendMember {
   lat?: number;
   lon?: number;
   virtual?: boolean;
+  /** Metres above sea level when the source reports it. */
+  elevM?: number | null;
+  /** water | land | coast | pin | unknown */
+  surface?: string;
 }
 
 export interface LocationBlend {

@@ -305,6 +305,8 @@ export async function loadAwcNearbyStations(lat, lon, radiusKm = 50, limit = 4) 
       distanceKm,
       lat: sLat,
       lon: sLon,
+      elevM: asNumber(st.elev ?? st.elevation),
+      surface: 'land',
     });
   }
   out.sort((a, b) => a.distanceKm - b.distanceKm);

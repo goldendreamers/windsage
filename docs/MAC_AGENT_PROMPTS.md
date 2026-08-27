@@ -12,7 +12,7 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ### 2026-08-27 — URGENT: Wald release (PR #9 + richer map-pin blend)
 
-https://windsage.nimrod.bio/ is still the old Wald build. PR #9 now also enriches Map/Address blends: nearby Windguru + NDBC buoys + AWC airport METARs, plus an always-on Open-Meteo pin model (wind + marine waves). Live sensors still outrank the model. Cloud agents cannot SSH to Wald.
+https://windsage.nimrod.bio/ is still the old Wald build. PR #9 map pins now blend only the closest accurate live sensors (not one of every network), with weights for distance, coast vs inland, elevation, and wind-axis. Pin model still fills waves. Cloud agents cannot SSH to Wald.
 
 After deploy, hard-refresh the phone (or delete the home-screen app and open https://windsage.nimrod.bio/ again) so the old service worker does not keep the previous JS. Open a map-pin follow (not simple mode) and check Blend members for airports + “pin model”.
 
@@ -29,7 +29,7 @@ node scripts/build-windguru-station-names.mjs --out public
 curl -sS "https://windsage.nimrod.bio/v1/catalog/stations?q=haifa&limit=40" | python3 -c "import sys,json; d=json.load(sys.stdin); print('hits',len(d.get('stations')or[]),'total',d.get('total'),'catalog',d.get('catalogSize'))"
 
 # Expect catalog around 6900 and total > 12 for haifa. Then open Follow, type a name, confirm More / compass From words / quieter simple mode.
-# Map pin (advanced mode): Blend members should list nearby WG/NDBC/airports plus “pin model”.
+# Map pin (advanced mode): Blend members should be the closest accurate sensors, plus “pin model” — not one of every network.
 
 ssh wald-mc 'python3 -c "import json;d=json.load(open(\"/data/windsage/data/store.json\"));
 print(\"users\",len(d.get(\"users\")or{}), \"follows\", sum(len(u.get(\"stations\")or[]) for u in (d.get(\"users\")or{}).values()))"'
