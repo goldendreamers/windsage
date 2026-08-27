@@ -72,19 +72,38 @@ function parseId(stationId) {
   return coords;
 }
 
-export async function fetchOpenMeteoCurrent(stationId) {
-  const { lat, lon } = parseId(stationId);
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
+/** Prefer combined sea state; fall back to swell when combined height is missing. */
+export function marineWaveHeightFromCurrent(current) {
+  return asNumber(current?.wave_height) ?? asNumber(current?.swell_wave_height);
+}
+
+export async function fetchOpenMeteoMarineCurrent(lat, lon) {
+  const url = new URL('https://marine-api.open-meteo.com/v1/marine');
   url.searchParams.set('latitude', String(lat));
   url.searchParams.set('longitude', String(lon));
-  url.searchParams.set(
+  url.searchParams.set('current', 'wave_height,swell_wave_height');
+  url.searchParams.set('timezone', 'UTC');
+  const data = await fetchJson(url.toString());
+  return marineWaveHeightFromCurrent(data?.current);
+}
+
+export async function fetchOpenMeteoCurrent(stationId) {
+  const { lat, lon } = parseId(stationId);
+  const weatherUrl = new URL('https://api.open-meteo.com/v1/forecast');
+  weatherUrl.searchParams.set('latitude', String(lat));
+  weatherUrl.searchParams.set('longitude', String(lon));
+  weatherUrl.searchParams.set(
     'current',
     'wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m',
   );
-  url.searchParams.set('wind_speed_unit', 'kn');
-  url.searchParams.set('timezone', 'UTC');
-  const data = await fetchJson(url.toString());
-  const c = data?.current || {};
+  weatherUrl.searchParams.set('wind_speed_unit', 'kn');
+  weatherUrl.searchParams.set('timezone', 'UTC');
+
+  const [weather, wave_height] = await Promise.all([
+    fetchJson(weatherUrl.toString()),
+    fetchOpenMeteoMarineCurrent(lat, lon).catch(() => null),
+  ]);
+  const c = weather?.current || {};
   const time = typeof c.time === 'string' ? c.time : null;
   const unixtime = time ? Math.floor(Date.parse(`${time}Z`) / 1000) : null;
   return reading({
@@ -92,6 +111,7 @@ export async function fetchOpenMeteoCurrent(stationId) {
     wind_max: asNumber(c.wind_gusts_10m),
     wind_direction: asNumber(c.wind_direction_10m),
     temperature: asNumber(c.temperature_2m),
+    wave_height,
     datetime: time ? `${time}Z` : null,
     unixtime,
   });
@@ -99,11 +119,37 @@ export async function fetchOpenMeteoCurrent(stationId) {
 
 export async function fetchOpenMeteoHistory(stationId, metric, hours = 6) {
   const { lat, lon } = parseId(stationId);
+  const past = String(Math.max(1, Math.min(48, hours)));
+  if (metric === 'wave_height') {
+    try {
+      const url = new URL('https://marine-api.open-meteo.com/v1/marine');
+      url.searchParams.set('latitude', String(lat));
+      url.searchParams.set('longitude', String(lon));
+      url.searchParams.set('hourly', 'wave_height,swell_wave_height');
+      url.searchParams.set('past_hours', past);
+      url.searchParams.set('forecast_hours', '1');
+      url.searchParams.set('timezone', 'UTC');
+      const data = await fetchJson(url.toString());
+      const times = data?.hourly?.time || [];
+      const pairs = [];
+      for (let i = 0; i < times.length; i++) {
+        const t = times[i];
+        pairs.push({
+          unixtime: Math.floor(Date.parse(`${t}Z`) / 1000),
+          wave_height:
+            asNumber(data.hourly.wave_height?.[i]) ?? asNumber(data.hourly.swell_wave_height?.[i]),
+        });
+      }
+      return historyFromPairs(pairs, 'wave_height');
+    } catch {
+      return emptyHistory();
+    }
+  }
   const url = new URL('https://api.open-meteo.com/v1/forecast');
   url.searchParams.set('latitude', String(lat));
   url.searchParams.set('longitude', String(lon));
   url.searchParams.set('hourly', 'wind_speed_10m,wind_gusts_10m,temperature_2m');
-  url.searchParams.set('past_hours', String(Math.max(1, Math.min(48, hours))));
+  url.searchParams.set('past_hours', past);
   url.searchParams.set('forecast_hours', '1');
   url.searchParams.set('wind_speed_unit', 'kn');
   url.searchParams.set('timezone', 'UTC');

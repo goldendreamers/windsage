@@ -45,7 +45,7 @@ export const PROVIDER_META: Record<
   location: {
     label: 'Map / Address',
     short: 'MAP',
-    hint: 'Pick an address or drop a pin — blends nearby stations by distance, accuracy & rating.',
+    hint: 'Pick an address or drop a pin — blends nearby Windguru, buoys, airports, and the pin’s wave/wind model.',
     placeholder: 'Herzliya Marina or tap the map',
     needsToken: false,
   },

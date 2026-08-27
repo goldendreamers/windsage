@@ -243,3 +243,70 @@ export function synopticStationUrl(id) {
   const icao = icaoFromSynopticId(id) || String(id || '').trim().toUpperCase();
   return `https://aviationweather.gov/data/metar/?ids=${encodeURIComponent(icao)}`;
 }
+
+function haversineKm(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const toR = Math.PI / 180;
+  const dLat = (bLat - aLat) * toR;
+  const dLon = (bLon - aLon) * toR;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+export function bboxFromRadiusKm(lat, lon, radiusKm) {
+  const r = Math.max(1, Number(radiusKm) || 50);
+  const dLat = r / 111;
+  const cos = Math.max(0.2, Math.cos((Number(lat) * Math.PI) / 180));
+  const dLon = r / (111 * cos);
+  return {
+    lat0: Math.max(-90, Number(lat) - dLat),
+    lon0: Math.max(-180, Number(lon) - dLon),
+    lat1: Math.min(90, Number(lat) + dLat),
+    lon1: Math.min(180, Number(lon) + dLon),
+  };
+}
+
+function hasMetar(st) {
+  const types = st?.siteType;
+  if (types == null) return true;
+  const list = Array.isArray(types) ? types : [types];
+  return list.some((t) => String(t).toUpperCase().includes('METAR'));
+}
+
+/** Nearby ICAO / METAR sites for location blend (no Synoptic token). */
+export async function loadAwcNearbyStations(lat, lon, radiusKm = 50, limit = 4) {
+  const box = bboxFromRadiusKm(lat, lon, radiusKm);
+  const url = new URL('https://aviationweather.gov/api/data/stationinfo');
+  url.searchParams.set(
+    'bbox',
+    `${box.lat0.toFixed(3)},${box.lon0.toFixed(3)},${box.lat1.toFixed(3)},${box.lon1.toFixed(3)}`,
+  );
+  url.searchParams.set('format', 'json');
+  const rows = await fetchJson(url.toString(), AWC_HEADERS);
+  const list = Array.isArray(rows) ? rows : [];
+  const out = [];
+  const seen = new Set();
+  for (const st of list) {
+    if (!hasMetar(st)) continue;
+    const icao = String(st.icaoId || st.id || '').trim().toUpperCase();
+    const sLat = asNumber(st.lat);
+    const sLon = asNumber(st.lon);
+    if (!icao || sLat == null || sLon == null || seen.has(icao)) continue;
+    const distanceKm = haversineKm(lat, lon, sLat, sLon);
+    if (distanceKm > radiusKm) continue;
+    seen.add(icao);
+    const site = String(st.site || st.name || icao).trim();
+    out.push({
+      provider: 'synoptic',
+      stationId: icao,
+      name: site && site !== icao ? `${site} (${icao})` : icao,
+      distanceKm,
+      lat: sLat,
+      lon: sLon,
+    });
+  }
+  out.sort((a, b) => a.distanceKm - b.distanceKm);
+  return out.slice(0, Math.max(1, limit));
+}

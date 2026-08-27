@@ -7,7 +7,11 @@
 import { asNumber, emptyHistory, historyFromPairs, reading } from './common.mjs';
 import { fetchNdbcCurrent } from './ndbc.mjs';
 import { fetchOpenMeteoCurrent } from './openmeteo.mjs';
+import { fetchSynopticCurrent, loadAwcNearbyStations } from './synoptic.mjs';
 import { fetchCurrentReading as wgCurrent } from '../wind.mjs';
+
+/** Treat the pin’s weather model as if it sat this far away so live sensors still win. */
+export const PIN_MODEL_EQUIV_KM = 14;
 
 const MS_TO_KT = 1.943844;
 
@@ -58,7 +62,9 @@ export function distanceWeight(distanceKm, metric = 'wind') {
 
 export function memberWeight(member, trust, opts = {}) {
   const metric = opts.metric === 'temperature' ? 'temperature' : 'wind';
-  const distW = distanceWeight(member.distanceKm, metric);
+  const rawDist = Number(member.distanceKm) || 0;
+  const dist = member.virtual ? Math.max(PIN_MODEL_EQUIV_KM, rawDist) : rawDist;
+  const distW = distanceWeight(dist, metric);
   const key = trustKey(member.provider, member.stationId);
   const t = trust?.[key];
   const accWind = accuracyScoreFromMae(t?.maeWind, t?.samples || 0);
@@ -142,35 +148,66 @@ async function loadNdbcCandidates(lat, lon, radiusKm, limit) {
   return out.slice(0, limit);
 }
 
-/** Pick nearest mix of WG + NDBC within radius. */
-export async function findNearbyStations(lat, lon, { radiusKm = 50, maxStations = 6 } = {}) {
-  const perSource = Math.max(3, maxStations);
-  const [wg, ndbc] = await Promise.all([
-    loadWindguruCandidates(lat, lon, radiusKm, perSource).catch(() => []),
-    loadNdbcCandidates(lat, lon, radiusKm, perSource).catch(() => []),
-  ]);
-  const merged = [...wg, ...ndbc].sort((a, b) => a.distanceKm - b.distanceKm);
+/** Pin-local Open-Meteo (wind/temp) + Marine (waves). Always in the blend. */
+export function pinModelMember(lat, lon) {
+  return {
+    provider: 'openmeteo',
+    stationId: `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`,
+    name: 'Pin model (wind + waves)',
+    distanceKm: 0,
+    lat,
+    lon,
+    virtual: true,
+  };
+}
+
+/**
+ * Round-robin the closest station from each live network so a dense Windguru
+ * cluster cannot crowd buoys or airports out of the cap.
+ */
+export function mixNearbyMembers(groups, maxStations) {
+  const cap = Math.max(1, Number(maxStations) || 6);
   const seen = new Set();
   const out = [];
-  for (const m of merged) {
+  const queues = (Array.isArray(groups) ? groups : []).map((g) =>
+    Array.isArray(g) ? g.slice() : [],
+  );
+  const add = (m) => {
+    if (!m) return false;
     const k = trustKey(m.provider, m.stationId);
-    if (seen.has(k)) continue;
+    if (seen.has(k)) return false;
     seen.add(k);
     out.push(m);
-    if (out.length >= maxStations) break;
+    return true;
+  };
+  let progressed = true;
+  while (out.length < cap && progressed) {
+    progressed = false;
+    for (const q of queues) {
+      if (out.length >= cap) break;
+      while (q.length) {
+        if (add(q.shift())) {
+          progressed = true;
+          break;
+        }
+      }
+    }
   }
-  // Always include Open-Meteo model point as a low-weight virtual member if few sensors.
-  if (out.length < 2) {
-    out.push({
-      provider: 'openmeteo',
-      stationId: `${lat.toFixed(4)},${lon.toFixed(4)}`,
-      name: 'Open-Meteo model',
-      distanceKm: 0.01,
-      lat,
-      lon,
-      virtual: true,
-    });
-  }
+  return out;
+}
+
+/** Pick nearest mix of WG + NDBC + nearby METARs, plus the pin model. */
+export async function findNearbyStations(lat, lon, { radiusKm = 50, maxStations = 6 } = {}) {
+  const perSource = Math.max(3, maxStations);
+  const [wg, ndbc, awc] = await Promise.all([
+    loadWindguruCandidates(lat, lon, radiusKm, perSource).catch(() => []),
+    loadNdbcCandidates(lat, lon, radiusKm, perSource).catch(() => []),
+    loadAwcNearbyStations(lat, lon, radiusKm, 6).catch(() => []),
+  ]);
+  const out = mixNearbyMembers([wg, ndbc, awc], maxStations);
+  const seen = new Set(out.map((m) => trustKey(m.provider, m.stationId)));
+  const pin = pinModelMember(lat, lon);
+  if (!seen.has(trustKey(pin.provider, pin.stationId))) out.push(pin);
   return out;
 }
 
@@ -208,6 +245,7 @@ function weightedMean(values, weights) {
 async function fetchMemberReading(member) {
   if (member.provider === 'ndbc') return fetchNdbcCurrent(member.stationId);
   if (member.provider === 'openmeteo') return fetchOpenMeteoCurrent(member.stationId);
+  if (member.provider === 'synoptic') return fetchSynopticCurrent(member.stationId);
   return wgCurrent(member.stationId);
 }
 
@@ -235,11 +273,18 @@ export async function fetchLocationCurrent(station, trustMap = {}) {
     : [];
 
   const blendUpdatedAt = Number(station.locationBlend?.updatedAt) || 0;
+  const hasPinModel = members.some(
+    (m) => m.virtual || (m.provider === 'openmeteo' && (Number(m.distanceKm) || 0) < 1),
+  );
   const membersFresh =
-    members.length > 0 && blendUpdatedAt > 0 && Date.now() - blendUpdatedAt < 30 * 60 * 1000;
+    members.length > 0 &&
+    hasPinModel &&
+    blendUpdatedAt > 0 &&
+    Date.now() - blendUpdatedAt < 30 * 60 * 1000;
 
   if (!membersFresh) {
-    // Full nearby re-search when members missing or cache older than 30 min.
+    // Full nearby re-search when members missing, cache older than 30 min,
+    // or the saved blend predates the pin model / airport mix.
     const ratingByKey = new Map(
       members.map((m) => [trustKey(m.provider, m.stationId), m.rating]),
     );
@@ -249,22 +294,28 @@ export async function fetchLocationCurrent(station, trustMap = {}) {
       rating: ratingByKey.get(trustKey(m.provider, m.stationId)) ?? m.rating ?? null,
     }));
   }
-  // else: reuse cached members; still fetch readings below.
 
-  const readings = [];
+  const fetched = await Promise.all(
+    members.map(async (m) => {
+      try {
+        const r = await fetchMemberReading(m);
+        return { m: { ...m, ok: true }, r };
+      } catch {
+        return { m: { ...m, weight: 0, ok: false }, r: null };
+      }
+    }),
+  );
   const used = [];
-  for (const m of members) {
-    try {
-      const r = await fetchMemberReading(m);
-      readings.push(r);
-      used.push({ ...m, ok: true });
-    } catch {
-      used.push({ ...m, weight: 0, ok: false });
+  const okMembers = [];
+  const readings = [];
+  for (const row of fetched) {
+    used.push(row.m);
+    if (row.m.ok && row.r) {
+      okMembers.push(row.m);
+      readings.push(row.r);
     }
   }
   if (!readings.length) throw new Error('No nearby stations returned readings');
-
-  const okMembers = used.filter((u) => u.ok);
   const windWeights = okMembers.map((m) => memberWeight(m, trustMap));
   const tempWeights = robustifyMetricWeights(
     readings.map((r) => r.temperature),
@@ -407,7 +458,7 @@ export async function resolveLocation(input, extras = {}) {
     spotName: label,
     sourceName: label,
     linkedLiveStation: null,
-    liveLinkWarning: `Blends ${members.length} nearby stations (closer sensors count much more).`,
+    liveLinkWarning: `Blends ${members.length} nearby sources (live sensors beat the pin model; waves from buoys or Open-Meteo Marine).`,
     lat: coords.lat,
     lon: coords.lon,
     locationBlend: {

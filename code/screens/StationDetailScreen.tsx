@@ -307,7 +307,10 @@ export function StationDetailScreen({
                 <View style={{ flex: 1 }}>
                   <Text style={styles.memberName}>{m.name}</Text>
                   <Text style={styles.memberMeta}>
-                    {m.provider} #{m.stationId} · {m.distanceKm.toFixed(1)} km
+                    {PROVIDER_META[normalizeProvider(m.provider)]?.short || m.provider}
+                    {m.virtual
+                      ? ' · pin model'
+                      : ` · ${Number(m.distanceKm || 0).toFixed(1)} km`}
                     {m.weightNorm != null ? ` · ${(m.weightNorm * 100).toFixed(0)}%` : ''}
                     {m.ok === false ? ' · offline' : ''}
                   </Text>
