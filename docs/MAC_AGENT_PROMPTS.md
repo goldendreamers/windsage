@@ -30,6 +30,7 @@ curl -sS "https://windsage.nimrod.bio/v1/catalog/stations?q=haifa&limit=40" | py
 
 # Expect catalog around 6900 and total > 12 for haifa. Then open Follow, type a name, confirm More / compass From words / quieter simple mode.
 # Map pin (advanced mode): Blend members should be the closest accurate sensors, plus “pin model” — not one of every network.
+# Live From pill: advanced = degrees (247°); simple = words (south-west).
 
 ssh wald-mc 'python3 -c "import json;d=json.load(open(\"/data/windsage/data/store.json\"));
 print(\"users\",len(d.get(\"users\")or{}), \"follows\", sum(len(u.get(\"stations\")or[]) for u in (d.get(\"users\")or{}).values()))"'

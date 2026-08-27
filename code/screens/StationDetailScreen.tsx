@@ -17,7 +17,7 @@ import {
   followSourceRef,
   formatAlertTrigger,
   ruleForMetric,
-  windDirectionName,
+  formatWindFromDisplay,
 } from '../shared/defaults';
 import {
   PROVIDER_META,
@@ -65,9 +65,10 @@ function metricReadingPills(
     windDirEnabled: boolean;
     maxWindEnabled?: boolean;
     maxWaveEnabled?: boolean;
+    simpleMode?: boolean;
   },
 ) {
-  const dir = windDirectionName(data?.wind_direction);
+  const dir = formatWindFromDisplay(data?.wind_direction, !!opts.simpleMode);
 
   if (metric === 'temperature') {
     return [
@@ -92,8 +93,8 @@ function metricReadingPills(
       },
       {
         title: 'From',
-        value: dir,
-        unit: '',
+        value: dir.value,
+        unit: dir.unit,
         icon: brandImages.wind,
         emphasize: opts.windDirEnabled,
       },
@@ -127,8 +128,8 @@ function metricReadingPills(
     },
     {
       title: 'From',
-      value: dir,
-      unit: '',
+      value: dir.value,
+      unit: dir.unit,
       icon: brandImages.wind,
       emphasize: opts.windDirEnabled,
     },
@@ -535,6 +536,7 @@ export function StationDetailScreen({
               windDirEnabled: !!station.rule.windDirEnabled,
               maxWindEnabled: !!station.rule.maxWindEnabled,
               maxWaveEnabled: !!station.rule.maxWaveEnabled,
+              simpleMode,
             }).map((pill) => (
               <MetricPill
                 key={`fcst-${pill.title}`}
@@ -606,6 +608,7 @@ export function StationDetailScreen({
             windDirEnabled: !!station.rule.windDirEnabled,
             maxWindEnabled: !!station.rule.maxWindEnabled,
             maxWaveEnabled: !!station.rule.maxWaveEnabled,
+            simpleMode,
           }).map((pill) => (
             <MetricPill
               key={`live-${pill.title}`}

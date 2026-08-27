@@ -18,7 +18,9 @@ function pillText(value: number | string | null | undefined): string {
     return text || '—';
   }
   if (value == null || !Number.isFinite(Number(value))) return '—';
-  return Number(value).toFixed(1);
+  const n = Number(value);
+  if (Math.abs(n - Math.round(n)) < 1e-6) return String(Math.round(n));
+  return n.toFixed(1);
 }
 
 export const MetricPill = memo(function MetricPill({

@@ -7,7 +7,7 @@ import {
   maxWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionName } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -129,6 +129,11 @@ assert.equal(windDirectionName(225), 'south-west');
 assert.equal(windDirectionName(270), 'west');
 assert.equal(windDirectionName(360), 'north');
 assert.equal(windDirectionName(null), null);
+assert.equal(windDirectionDeg(247.4), 247);
+assert.equal(windDirectionDeg(360), 0);
+assert.deepEqual(formatWindFromDisplay(247.4, true), { value: 'south-west', unit: '' });
+assert.deepEqual(formatWindFromDisplay(247.4, false), { value: 247, unit: '°' });
+assert.deepEqual(formatWindFromDisplay(null, false), { value: null, unit: '' });
 
 assert.match(
   formatAlertTrigger(
@@ -136,6 +141,14 @@ assert.match(
     'full',
   ),
   /from west–north/,
+);
+assert.match(
+  formatAlertTrigger(
+    { ...station.rule, windDirEnabled: true, windDirFromDeg: 270, windDirToDeg: 20 },
+    'full',
+    { directionWords: false },
+  ),
+  /from 270–20°/,
 );
 
 const sampleReading = { wind_avg: 10.2, wind_max: 14.5, temperature: 21.4, wave_height: 1.35 };

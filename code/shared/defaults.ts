@@ -132,6 +132,22 @@ export function windDirectionName(deg: number | null | undefined): string | null
   return COMPASS_8[idx];
 }
 
+/** Meteorological “from” in whole degrees, 0–359. */
+export function windDirectionDeg(deg: number | null | undefined): number | null {
+  if (deg == null || !Number.isFinite(Number(deg))) return null;
+  return Math.round(((Number(deg) % 360) + 360) % 360) % 360;
+}
+
+/** Simple mode: compass words. Advanced: exact degrees. */
+export function formatWindFromDisplay(
+  deg: number | null | undefined,
+  simpleMode: boolean,
+): { value: string | number | null; unit: string } {
+  if (simpleMode) return { value: windDirectionName(deg), unit: '' };
+  const n = windDirectionDeg(deg);
+  return { value: n, unit: n == null ? '' : '°' };
+}
+
 export type HomeLiveStat = { label: string; value: string; unit: string };
 
 /**
@@ -180,6 +196,7 @@ export function homeLiveStatColumns(
 export function formatAlertTrigger(
   rule: AlertRule,
   style: 'short' | 'full' = 'short',
+  opts?: { directionWords?: boolean },
 ): string {
   const cmp = rule.comparison === 'lte' ? '≤' : '≥';
   const unit = metricUnitShort(rule.metric);
@@ -200,9 +217,16 @@ export function formatAlertTrigger(
     extras.push(`spread ≤${formatThresholdNumber(rule.maxGustSpreadKnots ?? 5)} kt`);
   }
   if (rule.windDirEnabled) {
-    const from = windDirectionName(rule.windDirFromDeg) || 'north';
-    const to = windDirectionName(rule.windDirToDeg) || 'north';
-    extras.push(from === to ? `from ${from}` : `from ${from}–${to}`);
+    const words = opts?.directionWords !== false;
+    if (words) {
+      const from = windDirectionName(rule.windDirFromDeg) || 'north';
+      const to = windDirectionName(rule.windDirToDeg) || 'north';
+      extras.push(from === to ? `from ${from}` : `from ${from}–${to}`);
+    } else {
+      const from = windDirectionDeg(rule.windDirFromDeg) ?? 0;
+      const to = windDirectionDeg(rule.windDirToDeg) ?? 0;
+      extras.push(from === to ? `from ${from}°` : `from ${from}–${to}°`);
+    }
   }
   const windPrimary = rule.metric === 'wind_avg' || rule.metric === 'wind_max';
   if (windPrimary && rule.maxWaveEnabled) {
