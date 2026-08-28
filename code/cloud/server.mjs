@@ -25,8 +25,8 @@ import {
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
 import { persistWindguruNameFiles, NAME_FILES } from './lib/windguruNames.mjs';
-import { mergeCatalogRows, searchCatalogStations } from './lib/catalogSearch.mjs';
-import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
+import { mergeCatalogRows, nearbyCatalogStations, searchCatalogStations, unionCatalogHits } from './lib/catalogSearch.mjs';
+import { autocompletePlaces, geocodeAddress, geocodePlaceName } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
@@ -1423,11 +1423,28 @@ async function handleApi(req, res, pathname, url) {
         catalogSize: merged.length,
       });
     }
-    const found = searchCatalogStations(merged, q, { limit, provider, kind });
+    const found = searchCatalogStations(merged, q, { limit: Math.max(limit, 80), provider, kind });
+    let extra = [];
+    if (!/^\d+$/.test(q) && found.total < 12) {
+      try {
+        const geo = await geocodePlaceName(q);
+        if (geo?.lat != null && geo?.lon != null) {
+          extra = nearbyCatalogStations(merged, geo.lat, geo.lon, {
+            radiusKm: 80,
+            limit: 80,
+            provider,
+            kind,
+          });
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] catalog place expand failed', e);
+      }
+    }
+    const combined = unionCatalogHits(found.stations, extra, limit);
     return json(res, 200, {
       ok: true,
-      stations: found.stations,
-      total: found.total,
+      stations: combined.stations,
+      total: combined.total,
       catalogSize: merged.length,
       query: q,
       limit,

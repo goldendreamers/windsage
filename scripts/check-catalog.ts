@@ -10,7 +10,9 @@ import {
 } from '../code/shared/defaults';
 import {
   foldSearchText as foldMjs,
+  nearbyCatalogStations,
   searchCatalogStations as searchMjs,
+  unionCatalogHits,
 } from '../code/cloud/lib/catalogSearch.mjs';
 
 const catalog = [
@@ -64,6 +66,43 @@ const catalog = [
 assert.equal(foldSearchText('Bobík'), 'bobik');
 assert.equal(foldMjs('Bobík'), 'bobik');
 assert.equal(foldSearchText('Haïfa'), 'haifa');
+
+const hebrewHaifa = [
+  {
+    provider: 'windguru' as const,
+    stationId: '2049',
+    kind: 'station' as const,
+    sourceName: 'חיפה כנסיה',
+    liveStationId: '2049',
+    linkedLiveStation: null,
+    liveLinkWarning: null,
+  },
+];
+assert.equal(searchCatalogStations(hebrewHaifa, 'haifa').total, 1);
+assert.equal(searchMjs(hebrewHaifa, 'haifa').total, 1);
+
+const nearHaifa = [
+  {
+    provider: 'windguru',
+    stationId: '1',
+    kind: 'station',
+    sourceName: 'Akko',
+    lat: 32.93,
+    lon: 35.08,
+  },
+  {
+    provider: 'windguru',
+    stationId: '2',
+    kind: 'station',
+    sourceName: 'Far away',
+    lat: 50,
+    lon: 0,
+  },
+];
+assert.equal(nearbyCatalogStations(nearHaifa, 32.8, 34.99, { radiusKm: 80 }).length, 1);
+assert.equal(nearbyCatalogStations(nearHaifa, 32.8, 34.99, { radiusKm: 80 })[0].stationId, '1');
+const united = unionCatalogHits(hebrewHaifa, nearbyCatalogStations(nearHaifa, 32.8, 34.99, { radiusKm: 80 }), 40);
+assert.equal(united.total, 2);
 
 assert.deepEqual(suggestCatalogStations(catalog, [], '', 12, 'windguru'), []);
 assert.deepEqual(suggestCatalogStations(catalog, [], 'p', 12, 'windguru'), []);

@@ -85,7 +85,10 @@ async function photonSearch(query, limit = 6) {
   url.searchParams.set('q', query);
   url.searchParams.set('limit', String(Math.max(limit, 8)));
   url.searchParams.set('lang', 'en');
-  const israelHint = /israel|ישראל|\bil\b/i.test(query);
+  const israelHint =
+    /israel|ישראל|\bil\b|haifa|חיפה|tel.?aviv|תל אביב|eilat|herzliya|netanya|ashkelon|ashdod|jerusalem|tiberias|akko|acre|עכו/i.test(
+      query,
+    );
   if (israelHint) {
     url.searchParams.set('lat', '32.8');
     url.searchParams.set('lon', '35.2');
@@ -147,6 +150,29 @@ async function openMeteoSearch(query, count = 6) {
   } catch {
     return [];
   }
+}
+
+const PLACE_GEO_TTL_MS = 30 * 60 * 1000;
+const placeGeoCache = new Map();
+
+/** Fast place pin for Follow search — Photon / Open-Meteo, no Maps scrape. */
+export async function geocodePlaceName(query) {
+  const q = String(query || '').trim();
+  if (q.length < 2 || /^\d+$/.test(q)) return null;
+  const key = q.toLowerCase();
+  const cached = placeGeoCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.value;
+  let hits = await photonSearch(q, 1);
+  if (!hits.length) hits = await openMeteoSearch(q, 1);
+  const value = hits[0]
+    ? { lat: hits[0].lat, lon: hits[0].lon, address: hits[0].address || q }
+    : null;
+  if (placeGeoCache.size > 200) {
+    const first = placeGeoCache.keys().next().value;
+    if (first) placeGeoCache.delete(first);
+  }
+  placeGeoCache.set(key, { value, expires: Date.now() + PLACE_GEO_TTL_MS });
+  return value;
 }
 
 export async function geocodeAddress(query) {

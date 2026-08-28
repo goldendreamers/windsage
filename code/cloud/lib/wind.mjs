@@ -170,6 +170,8 @@ function catalogFromStationList(list) {
     if (!sid || seen.has(sid)) continue;
     seen.add(sid);
     const name = String(row.name || row.spotname || '').trim();
+    const lat = asNumber(row.lat);
+    const lon = asNumber(row.lon);
     out.push({
       provider: 'windguru',
       stationId: sid,
@@ -178,6 +180,7 @@ function catalogFromStationList(list) {
       liveStationId: sid,
       linkedLiveStation: null,
       liveLinkWarning: null,
+      ...(lat != null && lon != null ? { lat, lon } : {}),
     });
   }
   return out;

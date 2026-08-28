@@ -3,6 +3,25 @@
  * Keep scoring in sync with code/shared/defaults.ts (foldSearchText / searchCatalogStations).
  */
 
+/**
+ * Latin city spellings → native-script substrings used on Windguru live names.
+ * Keep in sync with code/shared/defaults.ts PLACE_NAME_ALIASES.
+ */
+export const PLACE_NAME_ALIASES = {
+  haifa: ['חיפה'],
+  'tel aviv': ['תל אביב'],
+  telaviv: ['תל אביב'],
+  herzliya: ['הרצליה'],
+  eilat: ['אילת'],
+  ashkelon: ['אשקלון'],
+  ashdod: ['אשדוד'],
+  netanya: ['נתניה'],
+  acre: ['עכו'],
+  akko: ['עכו'],
+  jerusalem: ['ירושלים'],
+  tiberias: ['טבריה'],
+};
+
 export function foldSearchText(value) {
   let s = String(value ?? '')
     .normalize('NFD')
@@ -39,9 +58,13 @@ export function mergeCatalogRows(groups) {
         byKey.set(key, row);
         continue;
       }
-      if (!prev.sourceName && row.sourceName) {
-        byKey.set(key, { ...prev, ...row, sourceName: row.sourceName });
+      const next = { ...prev };
+      if (!prev.sourceName && row.sourceName) next.sourceName = row.sourceName;
+      if (prev.lat == null && row.lat != null && row.lon != null) {
+        next.lat = row.lat;
+        next.lon = row.lon;
       }
+      byKey.set(key, next);
     }
   }
   return [...byKey.values()];
@@ -64,12 +87,70 @@ export function catalogMatchScore(entry, query) {
   if (label === q || sidFold === q) return 100;
   if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
   if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
+  const aliases = PLACE_NAME_ALIASES[q];
+  if (aliases?.some((alias) => String(entry?.sourceName || '').includes(alias))) return 70;
   if (digits && (sid === digits || sid.startsWith(digits))) return 75;
   if (label.includes(q) || sidFold.includes(q)) return 50;
   if (qCompact.length >= 2 && labelCompact.includes(qCompact)) return 45;
   if (live && (live.includes(q) || (digits && live.includes(digits)))) return 40;
   if (digits.length > 0 && sid.includes(digits)) return 30;
   return 0;
+}
+
+export function haversineKm(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const toR = Math.PI / 180;
+  const dLat = (bLat - aLat) * toR;
+  const dLon = (bLon - aLon) * toR;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+/** Live stations near a geocoded place (Follow city search). */
+export function nearbyCatalogStations(catalog, lat, lon, opts = {}) {
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+  const radiusKm = Number(opts.radiusKm) > 0 ? Number(opts.radiusKm) : 80;
+  const limitRaw = Number(opts.limit);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 80;
+  const wantProvider = opts.provider ? String(opts.provider).toLowerCase() : null;
+  const wantKind = opts.kind && opts.kind !== 'any' ? String(opts.kind) : null;
+  const scored = [];
+  for (const entry of catalog || []) {
+    const sid = String(entry?.stationId || '').trim();
+    if (!sid) continue;
+    const provider = String(entry?.provider || 'windguru').toLowerCase();
+    if (wantProvider && provider !== wantProvider) continue;
+    if (wantKind && String(entry?.kind || 'station') !== wantKind) continue;
+    const eLat = Number(entry?.lat);
+    const eLon = Number(entry?.lon);
+    if (!Number.isFinite(eLat) || !Number.isFinite(eLon)) continue;
+    const distanceKm = haversineKm(latitude, longitude, eLat, eLon);
+    if (distanceKm > radiusKm) continue;
+    scored.push({ entry, distanceKm });
+  }
+  scored.sort((a, b) => a.distanceKm - b.distanceKm);
+  return scored.slice(0, limit).map((row) => row.entry);
+}
+
+/** Name hits first, then nearby extras. `total` is the unique union size. */
+export function unionCatalogHits(primaryStations, extraStations, limit = 40) {
+  const limitRaw = Number(limit);
+  const cap = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+  const seen = new Set();
+  const out = [];
+  for (const row of [...(primaryStations || []), ...(extraStations || [])]) {
+    const sid = String(row?.stationId || '').trim();
+    if (!sid) continue;
+    const key = catalogKey(row.provider, sid);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return { stations: out.slice(0, cap), total: out.length };
 }
 
 /**

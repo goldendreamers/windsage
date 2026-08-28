@@ -49,6 +49,8 @@ export function compactStationsFromCatalog(rows) {
     if (!stationId || seen.has(stationId)) continue;
     seen.add(stationId);
     const sourceName = String(row?.sourceName ?? row?.name ?? row?.spotname ?? '').trim();
+    const lat = Number(row?.lat);
+    const lon = Number(row?.lon);
     out.push({
       provider: 'windguru',
       stationId,
@@ -57,6 +59,7 @@ export function compactStationsFromCatalog(rows) {
       liveStationId: stationId,
       linkedLiveStation: null,
       liveLinkWarning: null,
+      ...(Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : {}),
     });
   }
   return out;

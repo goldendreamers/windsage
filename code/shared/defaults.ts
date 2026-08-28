@@ -474,6 +474,22 @@ export function findExistingFollow(
   return null;
 }
 
+/** Latin city spellings → native-script Windguru names. Keep in sync with catalogSearch.mjs. */
+export const PLACE_NAME_ALIASES: Record<string, string[]> = {
+  haifa: ['חיפה'],
+  'tel aviv': ['תל אביב'],
+  telaviv: ['תל אביב'],
+  herzliya: ['הרצליה'],
+  eilat: ['אילת'],
+  ashkelon: ['אשקלון'],
+  ashdod: ['אשדוד'],
+  netanya: ['נתניה'],
+  acre: ['עכו'],
+  akko: ['עכו'],
+  jerusalem: ['ירושלים'],
+  tiberias: ['טבריה'],
+};
+
 /** Fold accents so "bobik" matches "Bobík" and "haifa" matches "Haïfa". */
 export function foldSearchText(value: string): string {
   let s = String(value ?? '')
@@ -578,6 +594,8 @@ export function catalogMatchScore(entry: CatalogStation, query: string): number 
   if (label === q || sidFold === q) return 100;
   if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
   if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
+  const aliases = PLACE_NAME_ALIASES[q];
+  if (aliases?.some((alias) => String(entry.sourceName || '').includes(alias))) return 70;
   if (digits && (sid === digits || sid.startsWith(digits))) return 75;
   if (label.includes(q) || sidFold.includes(q)) return 50;
   if (qCompact.length >= 2 && labelCompact.includes(qCompact)) return 45;
