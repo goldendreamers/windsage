@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
-import { openDeveloperEmail } from '../core/contact';
+import { openDeveloperEmail, openWindsageKofi } from '../core/contact';
 import { colors } from '../shared/theme';
 
 const PRIVACY_URL = 'https://windsage.nimrod.bio/privacy.html';
@@ -69,6 +69,12 @@ export function AppMenu({
       onPress: () => run(openDeveloperEmail),
     });
   }
+  rows.push({
+    key: 'support',
+    label: 'Support Windsage',
+    sub: simpleMode ? undefined : 'Keeps the app running',
+    onPress: () => run(openWindsageKofi),
+  });
   rows.push({
     key: 'privacy',
     label: 'Privacy',

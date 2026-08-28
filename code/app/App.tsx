@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Linking, Platform, SafeAreaView, Share, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Platform, Pressable, SafeAreaView, Share, StyleSheet, Text, View } from 'react-native';
 import { BootScreen } from '../components/BootScreen';
 import { AppMenu } from '../components/AppMenu';
 import { FirstTimeBanner, dismissHowto, getHowtoDismissed, type HowtoScreen } from '../components/FirstTimeBanner';
@@ -44,6 +44,7 @@ import {
   stripShareFollowUrl,
 } from '../core/shareFollow';
 import { loadSettings, saveSettings } from '../core/storage';
+import { openWindsageKofi } from '../core/contact';
 import { colors } from '../shared/theme';
 import type {
   AlertState,
@@ -975,6 +976,19 @@ export default function App() {
         onInstall={openDownload}
       />
 
+      <Pressable
+        style={styles.donateBar}
+        onPress={() => {
+          void hapticLight();
+          openWindsageKofi();
+        }}
+        accessibilityRole="link"
+        accessibilityLabel="Support Windsage"
+        accessibilityHint="Opens the Windsage Ko-fi page"
+      >
+        <Text style={styles.donateBarText}>Support Windsage</Text>
+      </Pressable>
+
       {toast ? (
         <View style={styles.toast}>
           <Text style={styles.toastText}>{toast}</Text>
@@ -992,11 +1006,25 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
   },
+  donateBar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  donateBarText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
   toast: {
     position: 'absolute',
     left: 20,
     right: 20,
-    bottom: 28,
+    bottom: 56,
     backgroundColor: '#123B48',
     borderRadius: 14,
     paddingHorizontal: 16,
