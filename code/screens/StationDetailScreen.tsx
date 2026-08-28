@@ -289,7 +289,7 @@ export function StationDetailScreen({
             </Text>
           </Pressable>
         </View>
-      ) : null}
+      )}
 
       {simpleMode || normalizeProvider(station.provider) !== 'location' || !station.locationBlend?.members?.length ? null : (
         <Section
