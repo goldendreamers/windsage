@@ -19,12 +19,11 @@ import {
   logoutAccount,
   pullMyStations,
   registerAccount,
-  sendTestPhoneAlert,
   startGoogleSignIn,
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
-import { registerWebPushSubscription, ensureNotificationPermissions, isInstalledPwa } from '../core/notifications';
+import { isInstalledPwa } from '../core/notifications';
 import { isRunningAsInstalledApp } from '../core/pwaInstall';
 
 type Props = {
@@ -51,7 +50,6 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
   const [error, setError] = useState<string | null>(null);
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [phoneAlertMsg, setPhoneAlertMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -291,35 +289,6 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
           Android: Apps → Windsage and Chrome → Battery → Unrestricted. Lock screen: show all
           notifications.
         </Text>
-        <Pressable
-          style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
-          disabled={busy}
-          onPress={() =>
-            void run(async () => {
-              setPhoneAlertMsg(null);
-              const allowed = await ensureNotificationPermissions();
-              if (!allowed) {
-                throw new CloudError(
-                  'Notifications are blocked. Enable them in phone settings for Windsage / Chrome.',
-                  400,
-                );
-              }
-              await registerWebPushSubscription();
-              const result = await sendTestPhoneAlert();
-              const lockHint =
-                !isInstalledPwa() && !isRunningAsInstalledApp()
-                  ? ' Install and open from the home screen.'
-                  : '';
-              setPhoneAlertMsg(
-                result.delivered > 0 ? `Test sent.${lockHint}` : 'Nothing was delivered.',
-              );
-              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            })
-          }
-        >
-          <Text style={styles.btnPrimaryText}>Send test phone alert</Text>
-        </Pressable>
-        {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
       </Section>
 
       <Pressable
