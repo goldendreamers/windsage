@@ -12,7 +12,7 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ### 0) Install the local Windsage agent on the Samsung Galaxy S22 (Termux)
 
-**Why:** Cursor Cloud VMs cannot reach the phone. The S22 needs Termux + Tailscale + copied secrets. Script: `file:///Users/goldendreamers/windsage/scripts/s22-termux-bootstrap.sh`
+**Why:** Cursor Cloud VMs cannot reach the phone. Tailscale is already on the S22 (same account / tailnet as Wald). Remaining: Termux + copied secrets. Script: `file:///Users/goldendreamers/windsage/scripts/s22-termux-bootstrap.sh`
 
 On the S22, in Termux (not a Cloud agent):
 
@@ -25,7 +25,7 @@ git checkout cursor/s22-local-agent-a1e3
 bash scripts/s22-termux-bootstrap.sh
 ```
 
-Then copy `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`, put the printed pubkey on Wald (or copy the Mac `wald-mc` key), confirm Tailscale shows the S22 next to Wald, and run `bash scripts/device-agent-preflight.sh`.
+Then copy `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`, put the printed pubkey on Wald (or copy the Mac `wald-mc` key), and run `bash scripts/device-agent-preflight.sh`. Tailscale is already connected — do not reinstall it.
 
 remember discord bot alerts
 

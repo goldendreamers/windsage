@@ -3,7 +3,8 @@
 # Safe to re-run. Never prints secret file contents or private keys.
 #
 # Cloud agents cannot run this for you — paste it into Termux on the phone.
-# Official Tailscale Android app must already be on the same tailnet as Wald.
+# Tailscale Android is already on this S22 (same account / tailnet as Wald).
+# Do not reinstall Tailscale. This script only sets up Termux + wald-mc SSH + clone.
 #
 # Usage (on the S22, in Termux):
 #   bash scripts/s22-termux-bootstrap.sh
@@ -97,7 +98,7 @@ if [[ -f "$CLONE/package-lock.json" ]]; then
 fi
 
 say ""
-say "=== 5) preflight (expected MISS until secrets + Tailscale) ==="
+say "=== 5) preflight (expected MISS until .env.smtp + wald-mc key) ==="
 if [[ -x "$CLONE/scripts/device-agent-preflight.sh" ]]; then
   bash "$CLONE/scripts/device-agent-preflight.sh" || true
 else
@@ -110,12 +111,11 @@ cat "$KEY.pub"
 say "=== end public key ==="
 
 say ""
-say "BLOCKED until Nimrod does the phone-side leftover steps:"
-say "  1. Play Store / F-Droid: install Tailscale, join the same tailnet as Wald (100.125.98.56)."
-say "  2. Copy /Users/goldendreamers/windsage/.env.smtp → $CLONE/.env.smtp and chmod 600."
-say "  3. Either copy the Mac wald-mc private key to $KEY, or add the public key above on Wald."
-say "  4. From the Mac: ssh -p $SSH_PORT $(whoami)@<s22-tailscale-ip>"
-say "  5. Then: ssh wald-mc 'hostname; systemctl is-active windsage'"
-say "  6. Cursor CLI worker is unofficial on Android. To *control* agents from the S22:"
+say "BLOCKED until leftover secrets (Tailscale is already on this S22):"
+say "  1. Copy /Users/goldendreamers/windsage/.env.smtp → $CLONE/.env.smtp and chmod 600."
+say "  2. Either copy the Mac wald-mc private key to $KEY, or add the public key above on Wald."
+say "  3. From the Mac: ssh -p $SSH_PORT $(whoami)@<s22-tailscale-ip>"
+say "  4. Then: ssh wald-mc 'hostname; systemctl is-active windsage'"
+say "  5. Cursor CLI worker is unofficial on Android. To *control* agents from the S22:"
 say "     Chrome → https://cursor.com/agents → Add to Home screen."
 say "remember discord bot alerts"

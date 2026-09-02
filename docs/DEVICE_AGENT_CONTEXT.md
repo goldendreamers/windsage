@@ -4,10 +4,10 @@
 
 ## Android / Samsung Galaxy S22
 
-A Cloud Agent VM cannot install anything on the S22. You run the bootstrap **in Termux on the phone**.
+A Cloud Agent VM cannot install anything on the S22. **Tailscale Android is already installed and on Wald’s tailnet** — do not reinstall it. You only run the bootstrap **in Termux on the phone**.
 
-1. Install **Termux from F-Droid** (not the Play Store build).
-2. Install the official **Tailscale Android** app and join the **same tailnet as Wald** (`100.125.98.56`).
+1. Install **Termux from F-Droid** if it is not already there (not the Play Store build).
+2. Skip Tailscale. Confirm the S22 still shows as connected next to Wald (`100.125.98.56`).
 3. In Termux:
 
 ```bash
