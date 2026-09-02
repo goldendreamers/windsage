@@ -127,6 +127,8 @@ When Nimrod asks for a Mac prompt (deploy / `npm run release:web`), include this
 
 remember discord bot alerts
 
+After you give the prompt, clear **Pending** in [`docs/MAC_AGENT_PROMPTS.md`](docs/MAC_AGENT_PROMPTS.md) (leave it empty — do not stack old recipes).
+
 ## Suggested first prompt for a new cloud agent
 
 > Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md` and `docs/OUTSTANDING.md`. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. Cloud VMs cannot Tailscale to Wald — if a live deploy is needed, put one paste-ready prompt in chat for Nimrod (do not keep a prompts file in the repo).
