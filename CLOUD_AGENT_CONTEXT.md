@@ -40,7 +40,7 @@ code/shared/        types, defaults, providers, glance, theme, assets
 code/cloud/         Node server on Wald (server.mjs, lib/*, providers/*)
 public/             PWA (sw.js, icons, privacy)
 scripts/            release-web.py, notify-email.sh, backup-windsage-store.sh, checks
-docs/               OUTSTANDING.md, PROGRESS_REVIEW.md, SSO-SETUP.md, STORE-PUBLISH.md
+docs/               DEVICE_AGENT_CONTEXT.md (local SSH/.env), OUTSTANDING.md, SSO-SETUP.md, …
 releases/           local web snapshots / zips (often gitignored)
 ```
 
@@ -144,4 +144,6 @@ After you give the prompt, clear **Pending** in [`docs/MAC_AGENT_PROMPTS.md`](do
 | `docs/STORE-PUBLISH.md` | Store publish notes (PWA-first) |
 | `docs/AGENTS.md` | Expo version doc reminder |
 | `docs/SIMPLE-MODE.md` | What belongs in simple vs advanced |
+| `docs/DEVICE_AGENT_CONTEXT.md` | Local/device agent: Tailscale, SSH `wald-mc`, `.env.smtp`, Wald `oauth.env` |
+| `docs/MAC_AGENT_PROMPTS.md` | Pending/done Mac-or-device paste prompts |
 | `.cursor/rules/*.mdc` | Email + web-export rules (local Cursor) |

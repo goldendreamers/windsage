@@ -17,3 +17,5 @@ Lint / test: `npm run check` (root) runs 8 fixture-based smoke checks (alerts, s
 **Deploy is operator-only:** `npm run release:web` / the `eas:*` scripts require Wald SSH + Tailscale (or EAS credentials) and cannot run in the cloud VM — do not attempt them here.
 
 **Simple vs advanced:** new controls default to advanced unless they are a core “get an alert” action. Canonical note: [`docs/SIMPLE-MODE.md`](docs/SIMPLE-MODE.md). When writing a Mac deploy prompt, include the exact line `remember discord bot alerts`.
+
+A **local agent on a real machine** (SSH + `.env`) starts from [`docs/DEVICE_AGENT_CONTEXT.md`](docs/DEVICE_AGENT_CONTEXT.md). Cloud agents cannot use that path.
