@@ -21,9 +21,7 @@ git checkout cursor/s22-local-agent-a1e3
 bash scripts/s22-termux-bootstrap.sh
 ```
 
-4. Copy gitignored secrets from the Mac (do not commit them):
-   - `/Users/goldendreamers/windsage/.env.smtp` → `~/windsage/.env.smtp` (`chmod 600`)
-   - Either the Mac `wald-mc` private key, **or** add the Termux pubkey the script prints to `~nimrodw/.ssh/authorized_keys` on Wald
+4. SSH config is the Mac’s `Host wald-mc` / `wald-mc-v6` (see [`docs/ssh-config.wald-mc.example`](ssh-config.wald-mc.example)). Copy the private key `/Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519` onto the phone at `~/.ssh/shaked_waldhomeserver_ed25519` (`chmod 600`). Copy `/Users/goldendreamers/windsage/.env.smtp` → `~/windsage/.env.smtp`. Never commit those files.
 5. Termux `sshd` listens on port **8022**. From the Mac: `ssh -p 8022 u0_aXXX@100.124.6.109`
 6. To **control** Cursor agents from the S22 (supported): Chrome → https://cursor.com/agents → Add to Home screen. A full Cursor CLI worker on Android is unofficial (Termux + Ubuntu proot) and is not required for Windsage deploy/email.
 

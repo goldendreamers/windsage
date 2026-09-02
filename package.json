@@ -40,6 +40,7 @@
     "check": "npx --yes tsx scripts/check-alerts.ts && node scripts/check-auth.mjs && node scripts/check-push.mjs",
     "device:preflight": "bash scripts/device-agent-preflight.sh",
     "device:s22": "bash scripts/s22-termux-bootstrap.sh",
+    "device:ssh-config": "bash scripts/install-wald-ssh-config.sh",
     "eas:android": "npx eas-cli build --platform android --profile production",
     "eas:ios": "npx eas-cli build --platform ios --profile production",
     "eas:submit:android": "npx eas-cli submit --platform android --profile production",

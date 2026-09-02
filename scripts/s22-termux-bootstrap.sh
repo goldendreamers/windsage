@@ -14,8 +14,6 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/goldendreamers/windsage.git"
-WALD_HOST="100.125.98.56"
-WALD_USER="nimrodw"
 SSH_PORT=8022
 
 say() { printf '%s\n' "$*"; }
@@ -46,31 +44,38 @@ else
 fi
 
 say ""
-say "=== 2) SSH identity + wald-mc config ==="
+say "=== 2) SSH config (same Host wald-mc as the Mac; key copied separately) ==="
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
-KEY="$HOME/.ssh/id_ed25519"
-if [[ ! -f "$KEY" ]]; then
-  ssh-keygen -t ed25519 -f "$KEY" -N "" -C "windsage-s22-termux"
-  say "generated $KEY (private key not printed)"
-else
-  say "reuse existing $KEY"
-fi
-chmod 600 "$KEY" "$KEY.pub"
-if [[ ! -f "$HOME/.ssh/config" ]] || ! grep -qE '^Host[[:space:]]+wald-mc$' "$HOME/.ssh/config"; then
-  cat >> "$HOME/.ssh/config" <<EOF
+KEY="$HOME/.ssh/shaked_waldhomeserver_ed25519"
+CONFIG="$HOME/.ssh/config"
+touch "$CONFIG"
+chmod 600 "$CONFIG"
+if ! grep -qE '^Host[[:space:]]+wald-mc$' "$CONFIG"; then
+  cat >> "$CONFIG" <<'EOF'
 
 Host wald-mc
-  HostName $WALD_HOST
-  User $WALD_USER
-  IdentityFile ~/.ssh/id_ed25519
+  HostName 100.125.98.56
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+  IdentitiesOnly yes
+
+Host wald-mc-v6
+  HostName 2a06:c701:4909:fc00:428d:5cff:fe48:b9fd
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
   IdentitiesOnly yes
 EOF
-  say "wrote Host wald-mc → $WALD_USER@$WALD_HOST in $HOME/.ssh/config"
+  say "wrote Host wald-mc and wald-mc-v6 into $CONFIG"
 else
-  say "Host wald-mc already in $HOME/.ssh/config"
+  say "Host wald-mc already in $CONFIG"
 fi
-chmod 600 "$HOME/.ssh/config"
+if [[ -f "$KEY" ]]; then
+  chmod 600 "$KEY"
+  say "OK    $KEY present (not printed)"
+else
+  say "MISS  $KEY — copy from /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519"
+fi
 
 say ""
 say "=== 3) Termux sshd (so Mac/cloud can finish setup) ==="
@@ -98,7 +103,7 @@ if [[ -f "$CLONE/package-lock.json" ]]; then
 fi
 
 say ""
-say "=== 5) preflight (expected MISS until .env.smtp + wald-mc key) ==="
+say "=== 5) preflight (expected MISS until .env.smtp + Mac key) ==="
 if [[ -x "$CLONE/scripts/device-agent-preflight.sh" ]]; then
   bash "$CLONE/scripts/device-agent-preflight.sh" || true
 else
@@ -106,14 +111,18 @@ else
 fi
 
 say ""
-say "=== PUBLIC KEY (add this to Wald ~nimrodw/.ssh/authorized_keys) ==="
-cat "$KEY.pub"
-say "=== end public key ==="
+say "=== PUBLIC KEY (only if the Mac key is already on this phone) ==="
+if [[ -f "$KEY.pub" ]]; then
+  cat "$KEY.pub"
+  say "=== end public key ==="
+else
+  say "no $KEY.pub yet — copy the Mac key pair onto this phone"
+fi
 
 say ""
-say "BLOCKED until leftover secrets (Tailscale is already on this S22):"
-say "  1. Copy /Users/goldendreamers/windsage/.env.smtp → $CLONE/.env.smtp and chmod 600."
-say "  2. Either copy the Mac wald-mc private key to $KEY, or add the public key above on Wald."
+say "BLOCKED until leftover files (Tailscale is already on this S22):"
+say "  1. Copy /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519 → $KEY (chmod 600)."
+say "  2. Copy /Users/goldendreamers/windsage/.env.smtp → $CLONE/.env.smtp and chmod 600."
 say "  3. From the Mac: ssh -p $SSH_PORT $(whoami)@100.124.6.109"
 say "  4. Then: ssh wald-mc 'hostname; systemctl is-active windsage'"
 say "  5. Cursor CLI worker is unofficial on Android. To *control* agents from the S22:"
