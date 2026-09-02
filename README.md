@@ -97,6 +97,16 @@ npm start
 Allow notifications. Follow a station — Wald takes over the watch.
 
 
+## Agents
+
+- Cloud VM (no Tailscale/SSH, no gitignored secrets): [`CLOUD_AGENT_CONTEXT.md`](CLOUD_AGENT_CONTEXT.md)
+- Local machine that can SSH to Wald and hold `.env` files: [`docs/DEVICE_AGENT_CONTEXT.md`](docs/DEVICE_AGENT_CONTEXT.md)
+- Split summary: [`AGENTS.md`](AGENTS.md)
+
+When writing a local deploy prompt, include this exact line:
+
+remember discord bot alerts
+
 ## Notes
 
 - Expo push works best in Expo Go / an EAS build with a real `extra.eas.projectId`.

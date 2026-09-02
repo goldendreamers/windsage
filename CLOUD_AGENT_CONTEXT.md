@@ -42,7 +42,7 @@ code/shared/        types, defaults, providers, glance, theme, assets
 code/cloud/         Node server on Wald (server.mjs, lib/*, providers/*)
 public/             PWA (sw.js, icons, privacy)
 scripts/            release-web.py, notify-email.sh, backup-windsage-store.sh, checks
-docs/               OUTSTANDING.md, PROGRESS_REVIEW.md, SSO-SETUP.md, STORE-PUBLISH.md
+docs/               DEVICE_AGENT_CONTEXT.md (local SSH/.env), OUTSTANDING.md, SSO-SETUP.md, STORE-PUBLISH.md
 releases/           local web snapshots / zips (often gitignored)
 ```
 
@@ -91,8 +91,14 @@ Cursor Cloud VMs: `.cursor/environment.json` only starts the **cloud backend** (
    - Step done → subject starts with `Windsage · done:`
 3. Full absolute URLs / `file://` paths in chat.
 4. **Never** wipe `store.json` users/stations. Saves refuse empty-users overwrite; use `clearStations: true` only for intentional unfollow-all.
-5. Do not commit secrets (`.env`, `oauth.env`, `code/cloud/data/`).
+5. Do not commit secrets (`.env`, `.env.smtp`, `oauth.env`, `code/cloud/data/`, SSH keys).
 6. Expo docs: see `docs/AGENTS.md` (check current Expo version docs before inventing APIs).
+7. When writing a Mac/device deploy prompt, include this exact line:
+
+remember discord bot alerts
+
+   Discord club alerts are a reminder, not a live bot on `main` unless `git grep` proves otherwise. Tokens stay in Wald `/data/windsage/oauth.env`.
+8. A **local** machine (Tailscale + gitignored `.env`) starts at [`docs/DEVICE_AGENT_CONTEXT.md`](docs/DEVICE_AGENT_CONTEXT.md). This cloud VM cannot copy `.env.smtp` or SSH to Wald.
 
 ## Recently shipped (know this before “fixing” again)
 
@@ -141,13 +147,14 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 
 ## Suggested first prompt for a new cloud agent
 
-> Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md`, `docs/OUTSTANDING.md`, and **`docs/MAC_AGENT_PROMPTS.md`**. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. If Wald deploy or Mac-only work is left pending, **append an exact paste-ready prompt** to `docs/MAC_AGENT_PROMPTS.md` (Pending section).
+> Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md`, `docs/OUTSTANDING.md`, and **`docs/MAC_AGENT_PROMPTS.md`**. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. If Wald deploy or Mac-only work is left pending, **append an exact paste-ready prompt** to `docs/MAC_AGENT_PROMPTS.md` (Pending section) and include the line `remember discord bot alerts`. Local-device bootstrap: [`docs/DEVICE_AGENT_CONTEXT.md`](docs/DEVICE_AGENT_CONTEXT.md).
 
 ## Related docs
 
 | File | Purpose |
 | --- | --- |
 | `README.md` | Product + ops overview |
+| **`docs/DEVICE_AGENT_CONTEXT.md`** | **Local/device agent: Tailscale, SSH `wald-mc`, `.env.smtp`, Wald `oauth.env`, first-run prompt** |
 | **`docs/MAC_AGENT_PROMPTS.md`** | **Running paste-ready prompts for Mac Cursor (phone env / Wald / Tailscale)** |
 | `AGENTS.md` | Cloud vs Mac: local phone env lives on the Mac |
 | `docs/OUTSTANDING.md` | Blocked / needed from operator |
