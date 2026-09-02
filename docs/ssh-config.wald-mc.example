@@ -1,0 +1,23 @@
+# Example SSH config for Wald. Copy into ~/.ssh/config on each device.
+# The private key file is NOT in git. On the Mac it is:
+#   /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519
+# Copy that key to ~/.ssh/shaked_waldhomeserver_ed25519 on the S22 (chmod 600).
+
+Host wald-mc
+  HostName 100.125.98.56
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+  IdentitiesOnly yes
+
+Host wald-mc-v6
+  HostName 2a06:c701:4909:fc00:428d:5cff:fe48:b9fd
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+  IdentitiesOnly yes
+
+# Samsung S22 on the same tailnet (Termux sshd). User is Termux u0_a383.
+Host s22-termux
+  HostName 100.124.6.109
+  User u0_a383
+  Port 8022
+  IdentitiesOnly yes
