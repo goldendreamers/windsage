@@ -15,8 +15,9 @@ Host wald-mc-v6
   IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
   IdentitiesOnly yes
 
-# Samsung S22 on the same tailnet (Termux sshd). User is Termux's u0_aXXX.
+# Samsung S22 on the same tailnet (Termux sshd). User is Termux u0_a383.
 Host s22-termux
   HostName 100.124.6.109
+  User u0_a383
   Port 8022
   IdentitiesOnly yes

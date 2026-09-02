@@ -22,7 +22,7 @@ bash scripts/s22-termux-bootstrap.sh
 ```
 
 4. SSH config is the Mac’s `Host wald-mc` / `wald-mc-v6` (see [`docs/ssh-config.wald-mc.example`](ssh-config.wald-mc.example)). Copy the private key `/Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519` onto the phone at `~/.ssh/shaked_waldhomeserver_ed25519` (`chmod 600`). Copy `/Users/goldendreamers/windsage/.env.smtp` → `~/windsage/.env.smtp`. Never commit those files.
-5. Termux `sshd` listens on port **8022**. From the Mac: `ssh -p 8022 u0_aXXX@100.124.6.109`
+5. Termux `sshd` listens on port **8022**. Termux user is **`u0_a383`**. From the Mac: `ssh -p 8022 u0_a383@100.124.6.109`
 6. To **control** Cursor agents from the S22 (supported): Chrome → https://cursor.com/agents → Add to Home screen. A full Cursor CLI worker on Android is unofficial (Termux + Ubuntu proot) and is not required for Windsage deploy/email.
 
 Then continue with sections 2–6 below (SSH `wald-mc`, `.env.smtp`, preflight).
