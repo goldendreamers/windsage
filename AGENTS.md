@@ -6,6 +6,7 @@ Start with the context file that matches where you are running:
 | --- | --- |
 | Cursor **Cloud** VM (no Tailscale, no gitignored secrets) | [`CLOUD_AGENT_CONTEXT.md`](./CLOUD_AGENT_CONTEXT.md) |
 | **Local** machine that can SSH to Wald and hold `.env` files | [`docs/DEVICE_AGENT_CONTEXT.md`](./docs/DEVICE_AGENT_CONTEXT.md) |
+| **Samsung S22 / Termux** | [`docs/DEVICE_AGENT_CONTEXT.md`](./docs/DEVICE_AGENT_CONTEXT.md) (Android / S22 section) + `scripts/s22-termux-bootstrap.sh` |
 
 Product overview and ops: [`README.md`](./README.md). Expo version notes: [`docs/AGENTS.md`](./docs/AGENTS.md) (read https://docs.expo.dev/versions/v57.0.0/ before inventing APIs).
 

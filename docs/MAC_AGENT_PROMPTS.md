@@ -10,7 +10,26 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 0) Bootstrap a local agent on a new device
+### 0) Install the local Windsage agent on the Samsung Galaxy S22 (Termux)
+
+**Why:** Cursor Cloud VMs cannot reach the phone. The S22 needs Termux + Tailscale + copied secrets. Script: `file:///Users/goldendreamers/windsage/scripts/s22-termux-bootstrap.sh`
+
+On the S22, in Termux (not a Cloud agent):
+
+```
+pkg update -y && pkg install -y git
+git clone https://github.com/goldendreamers/windsage.git
+cd ~/windsage
+git fetch origin cursor/s22-local-agent-a1e3
+git checkout cursor/s22-local-agent-a1e3
+bash scripts/s22-termux-bootstrap.sh
+```
+
+Then copy `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`, put the printed pubkey on Wald (or copy the Mac `wald-mc` key), confirm Tailscale shows the S22 next to Wald, and run `bash scripts/device-agent-preflight.sh`.
+
+remember discord bot alerts
+
+### 0b) Bootstrap a local agent on a new (non-phone) device
 
 **Why:** Cloud VMs cannot read `.env.smtp` or SSH to Wald. A new physical machine needs copied secrets + Tailscale. Context: `file:///Users/goldendreamers/windsage/docs/DEVICE_AGENT_CONTEXT.md` and https://github.com/goldendreamers/windsage/blob/cursor/device-agent-context-a1af/docs/DEVICE_AGENT_CONTEXT.md
 

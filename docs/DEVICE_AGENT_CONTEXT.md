@@ -1,6 +1,32 @@
 # Windsage — device agent context
 
-**Start here** when a **local** Cursor agent runs on a real machine (Mac, Linux laptop, another desktop). That agent can Tailscale/SSH to Wald and use gitignored `.env` files. Cursor **Cloud** agents cannot — they use [`CLOUD_AGENT_CONTEXT.md`](../CLOUD_AGENT_CONTEXT.md) instead.
+**Start here** when a **local** Cursor agent runs on a real machine (Mac, Linux laptop, another desktop, or a phone Termux environment). That agent can Tailscale/SSH to Wald and use gitignored `.env` files. Cursor **Cloud** agents cannot — they use [`CLOUD_AGENT_CONTEXT.md`](../CLOUD_AGENT_CONTEXT.md) instead.
+
+## Android / Samsung Galaxy S22
+
+A Cloud Agent VM cannot install anything on the S22. You run the bootstrap **in Termux on the phone**.
+
+1. Install **Termux from F-Droid** (not the Play Store build).
+2. Install the official **Tailscale Android** app and join the **same tailnet as Wald** (`100.125.98.56`).
+3. In Termux:
+
+```bash
+pkg update -y
+pkg install -y git
+git clone https://github.com/goldendreamers/windsage.git
+cd windsage
+git fetch origin cursor/s22-local-agent-a1e3
+git checkout cursor/s22-local-agent-a1e3
+bash scripts/s22-termux-bootstrap.sh
+```
+
+4. Copy gitignored secrets from the Mac (do not commit them):
+   - `/Users/goldendreamers/windsage/.env.smtp` → `~/windsage/.env.smtp` (`chmod 600`)
+   - Either the Mac `wald-mc` private key, **or** add the Termux pubkey the script prints to `~nimrodw/.ssh/authorized_keys` on Wald
+5. After Tailscale is up, Termux `sshd` listens on port **8022**. From the Mac: `ssh -p 8022 u0_aXXX@<s22-tailscale-ip>`
+6. To **control** Cursor agents from the S22 (supported): Chrome → https://cursor.com/agents → Add to Home screen. A full Cursor CLI worker on Android is unofficial (Termux + Ubuntu proot) and is not required for Windsage deploy/email.
+
+Then continue with sections 2–6 below (SSH `wald-mc`, `.env.smtp`, preflight).
 
 **Never put real passwords, API keys, or private keys in this file or in git.** Copy secrets from an already-working machine. Do not invent them.
 
