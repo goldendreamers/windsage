@@ -10,26 +10,110 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 0) Install the local Windsage agent on the Samsung Galaxy S22 (Termux)
+### 0) Mac local agent: finish S22 (nothing has been done from the Mac yet)
 
-**Why:** Cursor Cloud VMs cannot reach the phone. Tailscale is already on the S22 (same account / tailnet as Wald). Remaining: Termux + copied secrets. Script: `file:///Users/goldendreamers/windsage/scripts/s22-termux-bootstrap.sh`
+**Why:** Phone already has Termux, Tailscale, `sshd`, and `Host wald-mc` in `~/.ssh/config`. User `u0_a383`. **No key, no `.env.smtp`, no clone from the Mac yet.** Cloud agents cannot reach `100.124.6.109`.
 
-Play Protect / Samsung will often say Termux “might be harmful.” Use only https://f-droid.org/packages/com.termux/ or https://github.com/termux/termux-app/releases (package `com.termux`). Then **More details → Install anyway**. Do not use Play Store Termux. Do not use random APK sites.
-
-On the S22, in Termux (not a Cloud agent):
+Open a **new local Cursor agent on the Mac** (`/Users/goldendreamers/windsage`), not Cloud. Paste everything inside the fence:
 
 ```
-pkg update -y && pkg install -y git
-git clone https://github.com/goldendreamers/windsage.git
-cd ~/windsage
-git fetch origin cursor/s22-local-agent-a1e3
-git checkout cursor/s22-local-agent-a1e3
-bash scripts/s22-termux-bootstrap.sh
-```
+You are a LOCAL Windsage agent on goldendreamers's MacBook Air. Operator: Nimrod.
 
-Then the Mac must copy `/Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519` onto the phone at `~/.ssh/shaked_waldhomeserver_ed25519`, and `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`. S22 is `100.124.6.109`. From the Mac: `ssh -p 8022 u0_a383@100.124.6.109`. Do not paste the private key into chat.
+NOTHING has been done from this Mac toward the S22 yet. You must do all Mac-side work. Do not assume scp/ssh to the phone already worked. Do not invent passwords or keys. Never print private key bytes or .env.smtp contents. Never wipe /data/windsage/data/store.json. Do not merge to main.
+
+If this run is a Cursor Cloud VM (hostname often "cursor", or /Users/goldendreamers/windsage missing): STOP. Report hostname and pwd. Do not fake success.
+
+Read:
+- file:///Users/goldendreamers/windsage/docs/DEVICE_AGENT_CONTEXT.md
+- file:///Users/goldendreamers/windsage/CLOUD_AGENT_CONTEXT.md
+- file:///Users/goldendreamers/.ssh/config  (hosts only; do not cat the private key)
+
+Facts (already true on the phone; do not reinstall Tailscale or Termux):
+- S22 Tailscale IP: 100.124.6.109
+- Termux user: u0_a383
+- Termux sshd: port 8022 (process was running)
+- Phone ~/.ssh/config already has Host wald-mc and Host wald-mc-v6 pointing at IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+- Phone does NOT yet have that private key (ls showed only config + empty authorized_keys)
+- Wald: Host wald-mc → nimrodw@100.125.98.56
+- Wald IPv6 alias: Host wald-mc-v6 → nimrodw@2a06:c701:4909:fc00:428d:5cff:fe48:b9fd
+- Mac private key path: /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519
+- Mac smtp path: /Users/goldendreamers/windsage/.env.smtp
+
+## Do all of this
+
+export PATH="$HOME/.local/node/bin:$PATH"
+cd /Users/goldendreamers/windsage
+
+1) Prove this is the Mac:
+   hostname; pwd; test -f /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519 && echo KEY_YES
+   test -f /Users/goldendreamers/windsage/.env.smtp && echo SMTP_YES
+   If KEY or SMTP missing: STOP, ACTION NEEDED, do not invent files.
+
+2) Merge into /Users/goldendreamers/.ssh/config if missing (do not delete other hosts):
+
+Host wald-mc
+  HostName 100.125.98.56
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+  IdentitiesOnly yes
+
+Host wald-mc-v6
+  HostName 2a06:c701:4909:fc00:428d:5cff:fe48:b9fd
+  User nimrodw
+  IdentityFile ~/.ssh/shaked_waldhomeserver_ed25519
+  IdentitiesOnly yes
+
+Host s22-termux
+  HostName 100.124.6.109
+  User u0_a383
+  Port 8022
+  IdentitiesOnly yes
+
+3) Prove Wald from the Mac:
+   ssh -o BatchMode=yes -o ConnectTimeout=8 wald-mc 'hostname; systemctl is-active windsage'
+   If this fails: STOP, ACTION NEEDED (Tailscale/key on Mac).
+
+4) Reach the S22 (first time from this Mac):
+   ping -c 1 -W 2 100.124.6.109
+   ssh -o BatchMode=yes -o ConnectTimeout=8 -p 8022 u0_a383@100.124.6.109 'echo S22_OK; whoami; pgrep sshd'
+   Phone authorized_keys was empty, so BatchMode will likely fail until a password or a pubkey is installed.
+
+   If BatchMode fails:
+   - Tell Nimrod in chat: Windsage · ACTION NEEDED: in Termux run passwd (if not set), keep Termux open with sshd running.
+   - Ask Nimrod to run these in Terminal.app ONCE (he types the Termux password; you do not invent it), then continue:
+     ssh-copy-id -p 8022 u0_a383@100.124.6.109
+   - Do not loop forever. After he confirms, retry BatchMode.
+   - Prefer ssh-copy-id of the Mac's own pubkey into Termux authorized_keys so later scp is passwordless.
+
+5) Copy secrets onto the phone (chmod 600 on the phone; never echo file contents):
+   ssh -p 8022 u0_a383@100.124.6.109 'mkdir -p ~/.ssh ~/windsage && chmod 700 ~/.ssh'
+   scp -P 8022 /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519 u0_a383@100.124.6.109:~/.ssh/shaked_waldhomeserver_ed25519
+   scp -P 8022 /Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519.pub u0_a383@100.124.6.109:~/.ssh/shaked_waldhomeserver_ed25519.pub || true
+   scp -P 8022 /Users/goldendreamers/windsage/.env.smtp u0_a383@100.124.6.109:~/windsage/.env.smtp
+   ssh -p 8022 u0_a383@100.124.6.109 'chmod 600 ~/.ssh/shaked_waldhomeserver_ed25519 ~/.ssh/config ~/windsage/.env.smtp; ls -l ~/.ssh ~/windsage/.env.smtp'
+
+6) Bootstrap code on the phone via SSH (Termux pkg):
+   ssh -p 8022 u0_a383@100.124.6.109 'pkg update -y && pkg install -y git openssh nodejs python curl rsync'
+   If ~/windsage is not a git clone yet, clone https://github.com/goldendreamers/windsage.git into ~/windsage (keep .env.smtp).
+   ssh -p 8022 u0_a383@100.124.6.109 'test -f ~/.ssh/config && grep -A6 "^Host wald-mc" ~/.ssh/config'
+   Ensure IdentitiesOnly yes is present on both Host blocks; append if missing.
+   If scripts/s22-termux-bootstrap.sh exists on the clone, you may run it; it must not overwrite the Mac key with a new key. Prefer scripts/install-wald-ssh-config.sh if present (branch cursor/s22-local-agent-a1e3 or main after merge). Fetch that branch if the script is missing:
+     cd ~/windsage && git fetch origin cursor/s22-local-agent-a1e3 && git checkout cursor/s22-local-agent-a1e3
+
+7) Prove Wald FROM the phone:
+   ssh -p 8022 u0_a383@100.124.6.109 "ssh -o BatchMode=yes -o ConnectTimeout=10 wald-mc 'hostname; systemctl is-active windsage'"
+
+8) Optional smtp test FROM the phone (do not print the env file):
+   ssh -p 8022 u0_a383@100.124.6.109 'cd ~/windsage && bash scripts/notify-email.sh "Windsage · done: S22 smtp" "S22 Termux notify-email works."'
+
+9) Email Nimrod from the Mac too:
+   bash /Users/goldendreamers/windsage/scripts/notify-email.sh "Windsage · done: S22 local agent from Mac" "Key + .env.smtp copied to u0_a383@100.124.6.109:8022. Phone can ssh wald-mc. Preflight notes in chat."
+   If blocked at any required secret/password: subject Windsage · ACTION NEEDED: and stop.
+
+10) Report: Mac hostname, KEY_YES/SMTP_YES, Wald-from-Mac, S22 ping, S22 ssh, files copied (names only), Wald-from-phone, smtp result. Then wait for the next product task.
 
 remember discord bot alerts
+```
 
 ### 0b) Bootstrap a local agent on a new (non-phone) device
 
