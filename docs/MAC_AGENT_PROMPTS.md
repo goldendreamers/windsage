@@ -27,7 +27,7 @@ git checkout cursor/s22-local-agent-a1e3
 bash scripts/s22-termux-bootstrap.sh
 ```
 
-Then copy `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`, put the printed pubkey on Wald (or copy the Mac `wald-mc` key), and run `bash scripts/device-agent-preflight.sh`. Tailscale is already connected — S22 is `100.124.6.109`. From the Mac: `ssh -p 8022 u0_aXXX@100.124.6.109`.
+Then the Mac must copy `/Users/goldendreamers/.ssh/shaked_waldhomeserver_ed25519` onto the phone at `~/.ssh/shaked_waldhomeserver_ed25519`, and `/Users/goldendreamers/windsage/.env.smtp` onto `~/windsage/.env.smtp`. S22 is `100.124.6.109`. From the Mac: `ssh -p 8022 u0_aXXX@100.124.6.109`. Do not paste the private key into chat.
 
 remember discord bot alerts
 
