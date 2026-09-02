@@ -231,7 +231,6 @@ export function StationDetailScreen({
   };
 
   return (
-    <>
     <ScrollView
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
@@ -880,18 +879,17 @@ export function StationDetailScreen({
               : 'Unfollow station'}
         </Text>
       </Pressable>
+      <MonitoringDurationModal
+        visible={monitorOpen}
+        turningOn={monitorIntentOn}
+        simpleMode={simpleMode}
+        onCancel={() => setMonitorOpen(false)}
+        onConfirm={(untilMs) => {
+          setMonitorOpen(false);
+          onPersist({ ...station, enabled: monitorIntentOn, monitoringUntilMs: untilMs });
+        }}
+      />
     </ScrollView>
-    <MonitoringDurationModal
-      visible={monitorOpen}
-      turningOn={monitorIntentOn}
-      simpleMode={simpleMode}
-      onCancel={() => setMonitorOpen(false)}
-      onConfirm={(untilMs) => {
-        setMonitorOpen(false);
-        onPersist({ ...station, enabled: monitorIntentOn, monitoringUntilMs: untilMs });
-      }}
-    />
-    </>
   );
 }
 
