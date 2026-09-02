@@ -214,18 +214,6 @@ export function HomeScreen({
               {simpleMode ? 'Add a Windguru station' : 'Follow a station'}
             </Text>
           </Pressable>
-        ) : simpleMode ? (
-          <Pressable
-            style={[styles.emptyCta, { backgroundColor: palette.accent }]}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onOpenAdd();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Add another station"
-          >
-            <Text style={[styles.emptyCtaText, { color: ink }]}>Add another station</Text>
-          </Pressable>
         ) : null}
 
         {hasStations && headline ? (

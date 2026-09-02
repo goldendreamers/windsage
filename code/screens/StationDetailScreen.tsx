@@ -425,7 +425,7 @@ export function StationDetailScreen({
           </>
         )}
 
-        {!simpleMode && allowSourceIdEdit ? (
+        {simpleMode ? null : allowSourceIdEdit ? (
           <>
             <Text style={[styles.label, styles.spaced]}>Source ID or URL</Text>
             <TextInput
@@ -517,12 +517,14 @@ export function StationDetailScreen({
             <Text style={styles.readOnlyValue}>{followSourceRef(station)}</Text>
           </>
         )}
+        {simpleMode ? null : (
         <Pressable
           onPress={() => void Linking.openURL(stationPageUrl(station))}
           style={styles.linkBtn}
         >
           <Text style={styles.linkText}>{openOnLabel}</Text>
         </Pressable>
+        )}
       </Section>
 
       {forecastOnly ? (

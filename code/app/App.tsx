@@ -879,6 +879,7 @@ export default function App() {
         />
       ) : accountOpen ? (
         <AccountScreen
+          simpleMode={simpleMode}
           onBack={() => setAccountOpen(false)}
           onOpenMenu={() => setMenuOpen(true)}
           onAuthed={(payload, opts) => void applyAccountPayload(payload, opts)}
@@ -1016,6 +1017,7 @@ export default function App() {
         onUpdate={appUpdate.available ? () => void applyAppUpdate() : undefined}
       />
 
+      {simpleMode ? null : (
       <Pressable
         style={[styles.donateBar, { borderTopColor: palette.line }]}
         onPress={() => {
@@ -1028,9 +1030,10 @@ export default function App() {
       >
         <Text style={[styles.donateBarText, { color: palette.muted }]}>Support Windsage</Text>
       </Pressable>
+      )}
 
       {toast ? (
-        <View style={[styles.toast, { borderColor: palette.accent, backgroundColor: palette.bgLift }]}>
+        <View style={[styles.toast, { borderColor: palette.accent, backgroundColor: palette.bgLift }, simpleMode && { bottom: 20 }]}>
           <Text style={[styles.toastText, { color: palette.text }]}>{toast}</Text>
         </View>
       ) : null}

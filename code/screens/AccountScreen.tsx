@@ -29,6 +29,7 @@ import { isRunningAsInstalledApp } from '../core/pwaInstall';
 type Props = {
   onBack: () => void;
   onOpenMenu?: () => void;
+  simpleMode?: boolean;
   onAuthed: (
     payload: {
       user: CloudUser;
@@ -42,7 +43,7 @@ type Props = {
   onLoggedOut: () => void;
 };
 
-export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Props) {
+export function AccountScreen({ onBack, onOpenMenu, simpleMode = true, onAuthed, onLoggedOut }: Props) {
   const [user, setUser] = useState<CloudUser | null>(null);
   const [providers, setProviders] = useState({ google: false, facebook: false, apple: false });
   const [username, setUsername] = useState('');
@@ -299,6 +300,7 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
         </Text>
       </Section>
 
+      {simpleMode ? null : (
       <Pressable
         style={[styles.btn, styles.btnSecondary]}
         onPress={() => {
@@ -310,6 +312,7 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
       >
         <Text style={styles.btnSecondaryText}>Email the developer</Text>
       </Pressable>
+      )}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>

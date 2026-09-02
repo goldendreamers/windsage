@@ -119,7 +119,7 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 
 ## Simple vs advanced
 
-Keep **simple mode** to core actions only (see `.cursor/rules/simple-vs-advanced.mdc`). Custom / exact / extra-limit controls stay advanced unless Nimrod says otherwise.
+Keep **simple mode** to core “get an alert” actions only. New controls default to **advanced** unless Nimrod says otherwise. Canonical list: [`docs/SIMPLE-MODE.md`](docs/SIMPLE-MODE.md).
 
 ## Mac paste prompts
 
@@ -141,4 +141,5 @@ remember discord bot alerts
 | `docs/SSO-SETUP.md` | Google/Facebook/Apple OAuth |
 | `docs/STORE-PUBLISH.md` | Store publish notes (PWA-first) |
 | `docs/AGENTS.md` | Expo version doc reminder |
+| `docs/SIMPLE-MODE.md` | What belongs in simple vs advanced |
 | `.cursor/rules/*.mdc` | Email + web-export rules (local Cursor) |

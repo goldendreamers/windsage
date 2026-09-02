@@ -108,21 +108,22 @@ export function AppMenu({
     });
   }
 
-  const aboutRows: Row[] = [
-    {
-      key: 'support',
-      label: 'Support Windsage',
-      sub: simpleMode ? undefined : 'Keeps the app running',
-      onPress: () => run(openWindsageKofi),
-    },
-  ];
+  const aboutRows: Row[] = [];
   if (!simpleMode) {
-    aboutRows.push({
-      key: 'email',
-      label: 'Email the developer',
-      sub: 'Opens Gmail',
-      onPress: () => run(openDeveloperEmail),
-    });
+    aboutRows.push(
+      {
+        key: 'support',
+        label: 'Support Windsage',
+        sub: 'Keeps the app running',
+        onPress: () => run(openWindsageKofi),
+      },
+      {
+        key: 'email',
+        label: 'Email the developer',
+        sub: 'Opens Gmail',
+        onPress: () => run(openDeveloperEmail),
+      },
+    );
   }
   aboutRows.push({
     key: 'privacy',
