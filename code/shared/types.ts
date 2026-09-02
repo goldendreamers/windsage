@@ -42,6 +42,25 @@ export interface AlertRule {
    */
   maxWindEnabled: boolean;
   maxWindKnots: number;
+  /**
+   * When alerting on wave: optional min wind avg (kt).
+   * Off by default.
+   */
+  minWindEnabled: boolean;
+  minWindKnots: number;
+  /**
+   * When alerting on average wind: optional absolute max gust (kt).
+   * Off by default. Distinct from gust−avg spread.
+   */
+  maxGustEnabled: boolean;
+  maxGustKnots: number;
+  /**
+   * Optional air-temp band on wind/wave alerts. Off by default.
+   */
+  minTempEnabled: boolean;
+  minTempC: number;
+  maxTempEnabled: boolean;
+  maxTempC: number;
 }
 
 /** Windguru target: forecast spot page or live station page. */

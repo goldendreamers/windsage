@@ -25,7 +25,7 @@ import {
   providerAllowsSourceIdEdit,
   providerHasSpotStationKinds,
 } from '../shared/providers';
-import { colors } from '../shared/theme';
+import { colors, paletteForMode } from '../shared/theme';
 import type {
   AlertState,
   CheckResult,
@@ -47,6 +47,7 @@ import { Section } from '../components/Section';
 import { StatusPanel } from '../components/StatusPanel';
 import { WarnNumberInput } from '../components/WarnNumberInput';
 import { SimpleNotifyPicker } from '../components/SimpleNotifyPicker';
+import { AlertLimitEditor } from '../components/AlertLimitEditor';
 
 type ReadingLike = {
   wind_avg?: number | null;
@@ -200,10 +201,7 @@ export function StationDetailScreen({
   const reading = result?.reading;
   const forecast = result?.forecast ?? null;
   const forecastOnly = station.kind === 'spot' && !!(station.linkedLiveStation || station.liveLinkWarning);
-  const windPrimary =
-    station.rule.metric === 'wind_avg' || station.rule.metric === 'wind_max';
-  const wavePrimary = station.rule.metric === 'wave_height';
-  const showDirection = windPrimary || wavePrimary;
+  const palette = paletteForMode(simpleMode);
   const thresholdLabel =
     station.rule.metric === 'temperature'
       ? 'Temperature (°C)'
@@ -229,7 +227,7 @@ export function StationDetailScreen({
     >
       <View style={styles.navRow}>
         <Pressable style={styles.back} onPress={onBack}>
-          <Text style={styles.backText}>‹ Home</Text>
+        <Text style={[styles.backText, { color: palette.accent }]}>‹ Home</Text>
         </Pressable>
         {onOpenMenu ? (
           <Pressable
@@ -681,7 +679,7 @@ export function StationDetailScreen({
                 void Haptics.selectionAsync();
                 onPersist({ ...station, enabled });
               }}
-              trackColor={{ false: '#23404C', true: colors.accent }}
+              trackColor={{ false: '#23404C', true: palette.accent }}
               thumbColor="#fff"
             />
           </View>
@@ -752,163 +750,12 @@ export function StationDetailScreen({
           rangeWarning={(n) => (n < 1 ? 'Under 1 minute' : null)}
         />
 
-        {windPrimary ? (
-          <>
-            <View style={[styles.rowBetween, styles.spaced]}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.label}>Limit gust − avg spread</Text>
-              </View>
-              <Switch
-                value={!!station.rule.maxGustSpreadEnabled}
-                onValueChange={(maxGustSpreadEnabled) => {
-                  void Haptics.selectionAsync();
-                  onPersist({ ...station, rule: { ...station.rule, maxGustSpreadEnabled } });
-                }}
-                trackColor={{ false: '#23404C', true: colors.accent }}
-                thumbColor="#fff"
-              />
-            </View>
-            {station.rule.maxGustSpreadEnabled ? (
-              <>
-                <Text style={[styles.label, styles.spaced]}>Max spread (knots)</Text>
-                <WarnNumberInput
-                  style={styles.input}
-                  value={station.rule.maxGustSpreadKnots ?? 5}
-                  onLiveChange={(maxGustSpreadKnots) =>
-                    onChange({ ...station, rule: { ...station.rule, maxGustSpreadKnots } })
-                  }
-                  onCommit={(maxGustSpreadKnots) =>
-                    onPersist({ ...station, rule: { ...station.rule, maxGustSpreadKnots } })
-                  }
-                  rangeWarning={(n) =>
-                    n < 0 ? 'Negative value' : null
-                  }
-                />
-              </>
-            ) : null}
-
-            <View style={[styles.rowBetween, styles.spaced]}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.label}>Limit max wave</Text>
-              </View>
-              <Switch
-                value={!!station.rule.maxWaveEnabled}
-                onValueChange={(maxWaveEnabled) => {
-                  void Haptics.selectionAsync();
-                  onPersist({ ...station, rule: { ...station.rule, maxWaveEnabled } });
-                }}
-                trackColor={{ false: '#23404C', true: colors.accent }}
-                thumbColor="#fff"
-              />
-            </View>
-            {station.rule.maxWaveEnabled ? (
-              <>
-                <Text style={[styles.label, styles.spaced]}>Max wave (m)</Text>
-                <WarnNumberInput
-                  style={styles.input}
-                  value={station.rule.maxWaveHeightM ?? 1.5}
-                  onLiveChange={(maxWaveHeightM) =>
-                    onChange({ ...station, rule: { ...station.rule, maxWaveHeightM } })
-                  }
-                  onCommit={(maxWaveHeightM) =>
-                    onPersist({ ...station, rule: { ...station.rule, maxWaveHeightM } })
-                  }
-                  rangeWarning={(n) =>
-                    n < 0 ? 'Negative value' : null
-                  }
-                />
-              </>
-            ) : null}
-          </>
-        ) : null}
-
-        {wavePrimary ? (
-          <>
-            <View style={[styles.rowBetween, styles.spaced]}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.label}>Limit max wind</Text>
-              </View>
-              <Switch
-                value={!!station.rule.maxWindEnabled}
-                onValueChange={(maxWindEnabled) => {
-                  void Haptics.selectionAsync();
-                  onPersist({ ...station, rule: { ...station.rule, maxWindEnabled } });
-                }}
-                trackColor={{ false: '#23404C', true: colors.accent }}
-                thumbColor="#fff"
-              />
-            </View>
-            {station.rule.maxWindEnabled ? (
-              <>
-                <Text style={[styles.label, styles.spaced]}>Max wind avg (kt)</Text>
-                <WarnNumberInput
-                  style={styles.input}
-                  value={station.rule.maxWindKnots ?? 25}
-                  onLiveChange={(maxWindKnots) =>
-                    onChange({ ...station, rule: { ...station.rule, maxWindKnots } })
-                  }
-                  onCommit={(maxWindKnots) =>
-                    onPersist({ ...station, rule: { ...station.rule, maxWindKnots } })
-                  }
-                  rangeWarning={(n) =>
-                    n < 0 ? 'Negative value' : null
-                  }
-                />
-              </>
-            ) : null}
-          </>
-        ) : null}
-
-        {showDirection ? (
-          <>
-            <View style={[styles.rowBetween, styles.spaced]}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.label}>Limit by wind direction</Text>
-              </View>
-              <Switch
-                value={!!station.rule.windDirEnabled}
-                onValueChange={(windDirEnabled) => {
-                  void Haptics.selectionAsync();
-                  onPersist({ ...station, rule: { ...station.rule, windDirEnabled } });
-                }}
-                trackColor={{ false: '#23404C', true: colors.accent }}
-                thumbColor="#fff"
-              />
-            </View>
-            {station.rule.windDirEnabled ? (
-              <View style={styles.dirRow}>
-                <View style={styles.dirField}>
-                  <Text style={styles.label}>From (°)</Text>
-                  <WarnNumberInput
-                    style={styles.input}
-                    value={station.rule.windDirFromDeg ?? 0}
-                    onLiveChange={(windDirFromDeg) =>
-                      onChange({ ...station, rule: { ...station.rule, windDirFromDeg } })
-                    }
-                    onCommit={(windDirFromDeg) =>
-                      onPersist({ ...station, rule: { ...station.rule, windDirFromDeg } })
-                    }
-                    rangeWarning={(n) => (n < 0 || n > 360 ? 'Usually 0–360°' : null)}
-                  />
-                </View>
-                <View style={styles.dirField}>
-                  <Text style={styles.label}>To (°)</Text>
-                  <WarnNumberInput
-                    style={styles.input}
-                    value={station.rule.windDirToDeg ?? 360}
-                    onLiveChange={(windDirToDeg) =>
-                      onChange({ ...station, rule: { ...station.rule, windDirToDeg } })
-                    }
-                    onCommit={(windDirToDeg) =>
-                      onPersist({ ...station, rule: { ...station.rule, windDirToDeg } })
-                    }
-                    rangeWarning={(n) => (n < 0 || n > 360 ? 'Usually 0–360°' : null)}
-                  />
-                </View>
-              </View>
-            ) : null}
-          </>
-        ) : null}
+        <AlertLimitEditor
+          rule={station.rule}
+          accent={palette.accent}
+          onLiveChange={(rule) => onChange({ ...station, rule })}
+          onPersist={(rule) => onPersist({ ...station, rule })}
+        />
 
         <Text style={[styles.label, styles.spaced]}>Cloud poll on (minutes)</Text>
         <WarnNumberInput

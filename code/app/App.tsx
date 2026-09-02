@@ -32,7 +32,7 @@ import { DEFAULT_SETTINGS, cloudCoveredByLocal, createFollowedStation, displayNa
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
-import { initPwaInstallCapture, registerPwaServiceWorker } from '../core/pwaInstall';
+import { initPwaInstallCapture, registerPwaServiceWorker, subscribeAppUpdate, applyAppUpdate } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
 import { followTargetFromResolved, resolveFollowInput } from '../core/stations';
 import {
@@ -45,7 +45,7 @@ import {
 } from '../core/shareFollow';
 import { loadSettings, saveSettings } from '../core/storage';
 import { openWindsageKofi } from '../core/contact';
-import { colors } from '../shared/theme';
+import { colors, paletteForMode } from '../shared/theme';
 import type {
   AlertState,
   AlertStateMap,
@@ -150,6 +150,7 @@ export default function App() {
   const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
   const [catalogStations, setCatalogStations] = useState<CatalogStation[]>([]);
+  const [appUpdate, setAppUpdate] = useState({ available: false, waiting: false });
 
   const [cloudWarmed, setCloudWarmed] = useState(false);
   const [shareTick, setShareTick] = useState(0);
@@ -158,6 +159,7 @@ export default function App() {
   const cloudWarmedRef = useRef(false);
   const pendingShareHrefRef = useRef<string | null>(null);
   const shareBusyRef = useRef(false);
+  const catalogLoadedRef = useRef(false);
   settingsRef.current = settings;
 
   const noteShareHref = useCallback((href: string | null | undefined) => {
@@ -173,8 +175,14 @@ export default function App() {
   }, []);
 
   const loadCatalog = useCallback(async () => {
-    const rows = await fetchCatalogStations();
-    setCatalogStations(rows);
+    if (catalogLoadedRef.current) return;
+    catalogLoadedRef.current = true;
+    try {
+      const rows = await fetchCatalogStations();
+      setCatalogStations(rows);
+    } catch {
+      catalogLoadedRef.current = false;
+    }
   }, []);
 
   const applySnapshots = useCallback((snapshots: Record<string, LiveEntry>) => {
@@ -219,10 +227,7 @@ export default function App() {
             showToast(`Restored ${stations.length - incoming.length} missing station(s)`);
           }
         }
-        const [snap] = await Promise.all([
-          fetchCloudSnapshot(),
-          loadCatalog().catch(() => undefined),
-        ]);
+        const snap = await fetchCloudSnapshot();
         setLastPollAt(snap.lastPollAt);
         setCloudStatus(`cloud · ${formatCloudAge(snap.lastPollAt)}`);
         if (typeof snap.simpleMode === 'boolean' && snap.simpleMode !== settingsRef.current.simpleMode) {
@@ -241,7 +246,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [applySnapshots, loadCatalog, showToast],
+    [applySnapshots, showToast],
   );
 
   // Coalesce rapid persistSettings → one cloud sync (trailing debounce).
@@ -426,6 +431,11 @@ export default function App() {
     const onPopState = () => setDownloadOpen(webPathIsDownload());
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return undefined;
+    return subscribeAppUpdate(setAppUpdate);
   }, []);
 
   // Native deep-link fallback if AuthSession hands off via windsage://auth
@@ -802,6 +812,7 @@ export default function App() {
   }
 
   const simpleMode = settings.simpleMode !== false;
+  const palette = paletteForMode(simpleMode);
   const howtoScreen: HowtoScreen = downloadOpen
     ? 'install'
     : accountOpen
@@ -815,7 +826,7 @@ export default function App() {
     !howtoDismissed && (settings.stations.length === 0 || startedEmptyRef.current);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: palette.bg }]}>
       <StatusBar style="light" />
       {showHowto && !addOpen && !simpleMode ? (
         <FirstTimeBanner
@@ -943,6 +954,8 @@ export default function App() {
           }}
           cloudStatus={cloudStatus}
           simpleMode={simpleMode}
+          updateAvailable={appUpdate.available}
+          onApplyUpdate={() => void applyAppUpdate()}
         />
       )}
       </View>
@@ -961,23 +974,17 @@ export default function App() {
             : 'Account'
         }
         onClose={() => setMenuOpen(false)}
-        onFollow={() => {
-          setAccountOpen(false);
-          setDownloadOpen(false);
-          setActiveStationId(null);
-          setAddOpen(true);
-          void loadCatalog();
-        }}
         onAccount={() => {
           setDownloadOpen(false);
           setActiveStationId(null);
           setAccountOpen(true);
         }}
         onInstall={openDownload}
+        onUpdate={() => void applyAppUpdate()}
       />
 
       <Pressable
-        style={styles.donateBar}
+        style={[styles.donateBar, { borderTopColor: palette.line }]}
         onPress={() => {
           void hapticLight();
           openWindsageKofi();
@@ -986,12 +993,12 @@ export default function App() {
         accessibilityLabel="Support Windsage"
         accessibilityHint="Opens the Windsage Ko-fi page"
       >
-        <Text style={styles.donateBarText}>Support Windsage</Text>
+        <Text style={[styles.donateBarText, { color: palette.muted }]}>Support Windsage</Text>
       </Pressable>
 
       {toast ? (
-        <View style={styles.toast}>
-          <Text style={styles.toastText}>{toast}</Text>
+        <View style={[styles.toast, { borderColor: palette.accent, backgroundColor: palette.bgLift }]}>
+          <Text style={[styles.toastText, { color: palette.text }]}>{toast}</Text>
         </View>
       ) : null}
     </SafeAreaView>

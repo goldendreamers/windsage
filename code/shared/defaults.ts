@@ -34,6 +34,14 @@ export const DEFAULT_RULE: AlertRule = {
   maxWaveHeightM: 1.5,
   maxWindEnabled: false,
   maxWindKnots: 25,
+  minWindEnabled: false,
+  minWindKnots: 12,
+  maxGustEnabled: false,
+  maxGustKnots: 30,
+  minTempEnabled: false,
+  minTempC: 10,
+  maxTempEnabled: false,
+  maxTempC: 32,
 };
 
 /** When the user switches metric, apply that metric’s primary defaults. */
@@ -232,8 +240,20 @@ export function formatAlertTrigger(
   if (windPrimary && rule.maxWaveEnabled) {
     extras.push(`waves ≤${formatThresholdNumber(rule.maxWaveHeightM ?? 1.5)} m`);
   }
+  if (rule.metric === 'wind_avg' && rule.maxGustEnabled) {
+    extras.push(`gust ≤${formatThresholdNumber(rule.maxGustKnots ?? 30)} kt`);
+  }
+  if (rule.metric === 'wave_height' && rule.minWindEnabled) {
+    extras.push(`wind ≥${formatThresholdNumber(rule.minWindKnots ?? 12)} kt`);
+  }
   if (rule.metric === 'wave_height' && rule.maxWindEnabled) {
     extras.push(`wind ≤${formatThresholdNumber(rule.maxWindKnots ?? 25)} kt`);
+  }
+  if (rule.minTempEnabled) {
+    extras.push(`temp ≥${formatThresholdNumber(rule.minTempC ?? 10)}°C`);
+  }
+  if (rule.maxTempEnabled) {
+    extras.push(`temp ≤${formatThresholdNumber(rule.maxTempC ?? 32)}°C`);
   }
   const hold = `for ${mins} min`;
   return extras.length ? `${core} ${hold} · ${extras.join(' · ')}` : `${core} ${hold}`;
@@ -263,6 +283,10 @@ export function alertConditionLabel(message: string | null | undefined): string 
   if (/too gusty/i.test(raw)) return 'Too gusty';
   if (/waves too high/i.test(raw)) return 'Waves too high';
   if (/wind too strong/i.test(raw)) return 'Wind too strong';
+  if (/wind too light/i.test(raw)) return 'Wind too light';
+  if (/gusts too high/i.test(raw)) return 'Gusts too high';
+  if (/too cold/i.test(raw)) return 'Too cold';
+  if (/too hot/i.test(raw)) return 'Too hot';
   if (/wrong direction/i.test(raw)) return 'Wrong direction';
   if (/need /i.test(raw)) return raw;
   // Bare live reading like "10.2 kt" / "21 °C" — not a condition label.
@@ -341,6 +365,110 @@ export function createFollowedStation(
     starred: partial?.starred === true,
   };
 }
+
+export type ExtraLimitKey =
+  | 'maxWave'
+  | 'gustSpread'
+  | 'maxGust'
+  | 'windDir'
+  | 'minWind'
+  | 'maxWind'
+  | 'minTemp'
+  | 'maxTemp';
+
+/** Extra caps that apply to this primary metric (advanced “Add a limit”). */
+export function extraLimitsForMetric(metric: MetricKey): ExtraLimitKey[] {
+  if (metric === 'wind_avg') {
+    return ['maxWave', 'gustSpread', 'maxGust', 'windDir', 'minTemp', 'maxTemp'];
+  }
+  if (metric === 'wind_max') {
+    return ['maxWave', 'gustSpread', 'windDir', 'minTemp', 'maxTemp'];
+  }
+  if (metric === 'wave_height') {
+    return ['minWind', 'maxWind', 'windDir', 'minTemp', 'maxTemp'];
+  }
+  return [];
+}
+
+export function extraLimitEnabled(rule: AlertRule, key: ExtraLimitKey): boolean {
+  switch (key) {
+    case 'maxWave':
+      return !!rule.maxWaveEnabled;
+    case 'gustSpread':
+      return !!rule.maxGustSpreadEnabled;
+    case 'maxGust':
+      return !!rule.maxGustEnabled;
+    case 'windDir':
+      return !!rule.windDirEnabled;
+    case 'minWind':
+      return !!rule.minWindEnabled;
+    case 'maxWind':
+      return !!rule.maxWindEnabled;
+    case 'minTemp':
+      return !!rule.minTempEnabled;
+    case 'maxTemp':
+      return !!rule.maxTempEnabled;
+  }
+}
+
+export function setExtraLimitEnabled(rule: AlertRule, key: ExtraLimitKey, on: boolean): AlertRule {
+  switch (key) {
+    case 'maxWave':
+      return { ...rule, maxWaveEnabled: on };
+    case 'gustSpread':
+      return { ...rule, maxGustSpreadEnabled: on };
+    case 'maxGust':
+      return { ...rule, maxGustEnabled: on };
+    case 'windDir':
+      return { ...rule, windDirEnabled: on };
+    case 'minWind':
+      return { ...rule, minWindEnabled: on };
+    case 'maxWind':
+      return { ...rule, maxWindEnabled: on };
+    case 'minTemp':
+      return { ...rule, minTempEnabled: on };
+    case 'maxTemp':
+      return { ...rule, maxTempEnabled: on };
+  }
+}
+
+export const EXTRA_LIMIT_META: Record<
+  ExtraLimitKey,
+  { label: string; hint: string }
+> = {
+  maxWave: {
+    label: 'Max wave height',
+    hint: 'Skip the ping if waves are bigger than this',
+  },
+  gustSpread: {
+    label: 'Gust − avg spread',
+    hint: 'Skip when it is too gusty for the average',
+  },
+  maxGust: {
+    label: 'Max gust',
+    hint: 'Skip if peak gust is above this',
+  },
+  windDir: {
+    label: 'Wind direction',
+    hint: 'Only ping when wind is from this sector',
+  },
+  minWind: {
+    label: 'Min wind',
+    hint: 'Need at least this average wind with the waves',
+  },
+  maxWind: {
+    label: 'Max wind',
+    hint: 'Skip if average wind is stronger than this',
+  },
+  minTemp: {
+    label: 'Min air temp',
+    hint: 'Skip if it is colder than this',
+  },
+  maxTemp: {
+    label: 'Max air temp',
+    hint: 'Skip if it is warmer than this',
+  },
+};
 
 export function parseLooseNumber(raw: string): number | null {
   const t = String(raw ?? '')

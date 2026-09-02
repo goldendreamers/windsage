@@ -522,7 +522,9 @@ export async function fetchCatalogStations(): Promise<
     | 'liveLinkWarning'
   >[]
 > {
-  const fromApi = await fetchCatalogStationsFromApi();
+  const fromApiRaw = await fetchCatalogStationsFromApi();
+  // Old servers dumped the full ~6,900-row directory on empty GET — never keep that in RN state.
+  const fromApi = fromApiRaw.length > 400 ? [] : fromApiRaw;
   const fromFile = await fetchBundledLiveStations();
   if (!fromApi.length && !fromFile.length) return [];
   const byKey = new Map<string, (typeof fromApi)[number]>();

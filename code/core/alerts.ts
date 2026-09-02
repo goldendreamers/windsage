@@ -90,6 +90,46 @@ export function maxWindOk(
   return reading.wind_avg <= Math.max(0, rule.maxWindKnots ?? 25);
 }
 
+/** Optional min wind when primary metric is wave. */
+export function minWindOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (rule.metric !== 'wave_height' || !rule.minWindEnabled) return true;
+  if (reading.wind_avg == null) return false;
+  return reading.wind_avg >= Math.max(0, rule.minWindKnots ?? 12);
+}
+
+/** Optional absolute max gust when primary metric is average wind. */
+export function maxGustOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (rule.metric !== 'wind_avg' || !rule.maxGustEnabled) return true;
+  if (reading.wind_max == null) return false;
+  return reading.wind_max <= Math.max(0, rule.maxGustKnots ?? 30);
+}
+
+/** Optional min air temp on wind/wave alerts. */
+export function minTempOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (!rule.minTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature >= (rule.minTempC ?? 10);
+}
+
+/** Optional max air temp on wind/wave alerts. */
+export function maxTempOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (!rule.maxTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature <= (rule.maxTempC ?? 32);
+}
+
 export function formatDirectionSector(fromDeg: number, toDeg: number): string {
   const from = windDirectionName(fromDeg) || 'north';
   const to = windDirectionName(toDeg) || 'north';
@@ -145,7 +185,20 @@ export function evaluateAlert(
   const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
   const waveCapOk = maxWaveOk(reading, station.rule);
   const windCapOk = maxWindOk(reading, station.rule);
-  const conditionMet = metricOk && spreadOk && dirOk && waveCapOk && windCapOk;
+  const minWindCapOk = minWindOk(reading, station.rule);
+  const maxGustCapOk = maxGustOk(reading, station.rule);
+  const minTempCapOk = minTempOk(reading, station.rule);
+  const maxTempCapOk = maxTempOk(reading, station.rule);
+  const conditionMet =
+    metricOk &&
+    spreadOk &&
+    maxGustCapOk &&
+    waveCapOk &&
+    minWindCapOk &&
+    windCapOk &&
+    dirOk &&
+    minTempCapOk &&
+    maxTempCapOk;
   const historySustainedMs = sustainedDurationMs(history, station.rule);
 
   let conditionSinceMs = prev.conditionSinceMs;
@@ -203,12 +256,20 @@ export function evaluateAlert(
     message = valueText;
   } else if (!spreadOk) {
     message = spread == null ? 'Need gust reading' : 'Too gusty';
+  } else if (!maxGustCapOk) {
+    message = reading.wind_max == null ? 'Need gust reading' : 'Gusts too high';
   } else if (!waveCapOk) {
     message = reading.wave_height == null ? 'Need wave reading' : 'Waves too high';
+  } else if (!minWindCapOk) {
+    message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too light';
   } else if (!windCapOk) {
     message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too strong';
   } else if (!dirOk) {
     message = reading.wind_direction == null ? 'Need direction' : 'Wrong direction';
+  } else if (!minTempCapOk) {
+    message = reading.temperature == null ? 'Need temperature' : 'Too cold';
+  } else if (!maxTempCapOk) {
+    message = reading.temperature == null ? 'Need temperature' : 'Too hot';
   } else if (sustainedMs < requiredMs) {
     message = `Holding · ${valueText}`;
   } else if (shouldNotify) {

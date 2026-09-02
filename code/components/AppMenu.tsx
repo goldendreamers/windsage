@@ -1,9 +1,14 @@
 import * as Haptics from 'expo-haptics';
+import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { openDeveloperEmail, openWindsageKofi } from '../core/contact';
-import { colors } from '../shared/theme';
+import { colors, paletteForMode } from '../shared/theme';
 
 const PRIVACY_URL = 'https://windsage.nimrod.bio/privacy.html';
+
+type MenuSection = 'main' | 'about';
+
+type Row = { key: string; label: string; sub?: string; onPress: () => void };
 
 type Props = {
   visible: boolean;
@@ -11,9 +16,9 @@ type Props = {
   simpleMode?: boolean;
   onToggleSimple?: (on: boolean) => void;
   onClose: () => void;
-  onFollow: () => void;
   onAccount?: () => void;
   onInstall?: () => void;
+  onUpdate?: () => void;
 };
 
 export function AppMenu({
@@ -22,26 +27,31 @@ export function AppMenu({
   simpleMode = false,
   onToggleSimple,
   onClose,
-  onFollow,
   onAccount,
   onInstall,
+  onUpdate,
 }: Props) {
+  const [section, setSection] = useState<MenuSection>('main');
+  const palette = paletteForMode(simpleMode);
+
+  useEffect(() => {
+    if (!visible) setSection('main');
+  }, [visible]);
+
   const run = (fn: () => void) => {
     void Haptics.selectionAsync();
     onClose();
     fn();
   };
 
-  const rows: { key: string; label: string; sub?: string; onPress: () => void }[] = [
-    {
-      key: 'follow',
-      label: simpleMode ? 'Add a station' : 'Follow a station',
-      sub: simpleMode ? undefined : 'Windguru, map pin, NDBC, and more',
-      onPress: () => run(onFollow),
-    },
-  ];
+  const openAbout = () => {
+    void Haptics.selectionAsync();
+    setSection('about');
+  };
+
+  const youRows: Row[] = [];
   if (onAccount) {
-    rows.push({
+    youRows.push({
       key: 'account',
       label: simpleMode ? 'Sign in' : 'Account',
       sub:
@@ -53,29 +63,42 @@ export function AppMenu({
       onPress: () => run(onAccount),
     });
   }
+
+  const appRows: Row[] = [];
   if (onInstall) {
-    rows.push({
+    appRows.push({
       key: 'install',
       label: simpleMode ? 'Put on home screen' : 'Install app',
       sub: simpleMode ? undefined : 'Downloads the app onto this phone',
       onPress: () => run(onInstall),
     });
   }
+  if (onUpdate) {
+    appRows.push({
+      key: 'update',
+      label: 'Update Windsage',
+      sub: simpleMode ? undefined : 'Gets the latest without deleting the app',
+      onPress: () => run(onUpdate),
+    });
+  }
+
+  const aboutRows: Row[] = [
+    {
+      key: 'support',
+      label: 'Support Windsage',
+      sub: simpleMode ? undefined : 'Keeps the app running',
+      onPress: () => run(openWindsageKofi),
+    },
+  ];
   if (!simpleMode) {
-    rows.push({
+    aboutRows.push({
       key: 'email',
       label: 'Email the developer',
       sub: 'Opens Gmail',
       onPress: () => run(openDeveloperEmail),
     });
   }
-  rows.push({
-    key: 'support',
-    label: 'Support Windsage',
-    sub: simpleMode ? undefined : 'Keeps the app running',
-    onPress: () => run(openWindsageKofi),
-  });
-  rows.push({
+  aboutRows.push({
     key: 'privacy',
     label: 'Privacy',
     onPress: () =>
@@ -88,47 +111,92 @@ export function AppMenu({
       }),
   });
 
+  const renderRows = (rows: Row[]) =>
+    rows.map((row) => (
+      <Pressable
+        key={row.key}
+        style={styles.row}
+        onPress={row.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={row.label}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.label}>{row.label}</Text>
+          {row.sub ? <Text style={styles.sub}>{row.sub}</Text> : null}
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </Pressable>
+    ));
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <Pressable style={styles.dismiss} onPress={onClose} accessibilityLabel="Close menu" />
-        <View style={styles.sheet}>
-          <Text style={styles.title}>Menu</Text>
-          {onToggleSimple ? (
-            <View style={styles.toggleRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Simple mode</Text>
-                {simpleMode ? null : (
-                  <Text style={styles.sub}>Off — all options. Turn on to hide extras.</Text>
-                )}
-              </View>
-              <Switch
-                value={simpleMode}
-                onValueChange={(on) => {
+        <View style={[styles.sheet, { backgroundColor: palette.bgMid, borderColor: palette.line }]}>
+          {section === 'about' ? (
+            <>
+              <Pressable
+                style={styles.backRow}
+                onPress={() => {
                   void Haptics.selectionAsync();
-                  onToggleSimple(on);
+                  setSection('main');
                 }}
-                trackColor={{ false: '#23404C', true: colors.accent }}
-                thumbColor="#fff"
-                accessibilityLabel="Simple mode"
-              />
-            </View>
-          ) : null}
-          {rows.map((row) => (
-            <Pressable
-              key={row.key}
-              style={styles.row}
-              onPress={row.onPress}
-              accessibilityRole="button"
-              accessibilityLabel={row.label}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>{row.label}</Text>
-                {row.sub ? <Text style={styles.sub}>{row.sub}</Text> : null}
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </Pressable>
-          ))}
+                accessibilityRole="button"
+                accessibilityLabel="Back to menu"
+              >
+                <Text style={[styles.backText, { color: palette.accent }]}>‹ Menu</Text>
+              </Pressable>
+              <Text style={styles.title}>About</Text>
+              {renderRows(aboutRows)}
+            </>
+          ) : (
+            <>
+              <Text style={styles.title}>Menu</Text>
+              <Text style={styles.section}>You</Text>
+              {onToggleSimple ? (
+                <View style={styles.toggleRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Simple mode</Text>
+                    {simpleMode ? null : (
+                      <Text style={styles.sub}>Off — all options. Turn on to hide extras.</Text>
+                    )}
+                  </View>
+                  <Switch
+                    value={simpleMode}
+                    onValueChange={(on) => {
+                      void Haptics.selectionAsync();
+                      onToggleSimple(on);
+                    }}
+                    trackColor={{ false: palette.input, true: palette.accent }}
+                    thumbColor="#fff"
+                    accessibilityLabel="Simple mode"
+                  />
+                </View>
+              ) : null}
+              {renderRows(youRows)}
+              {appRows.length ? (
+                <>
+                  <Text style={styles.section}>App</Text>
+                  {renderRows(appRows)}
+                </>
+              ) : null}
+              <Text style={styles.section}>More</Text>
+              <Pressable
+                style={styles.row}
+                onPress={openAbout}
+                accessibilityRole="button"
+                accessibilityLabel="About"
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>About</Text>
+                  {simpleMode ? null : (
+                    <Text style={styles.sub}>Support, email, privacy</Text>
+                  )}
+                </View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+            </>
+          )}
           <Pressable style={styles.close} onPress={onClose}>
             <Text style={styles.closeText}>Close</Text>
           </Pressable>
@@ -162,6 +230,26 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     marginBottom: 8,
+  },
+  backRow: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  backText: {
+    color: colors.accent,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  section: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginTop: 12,
+    marginBottom: 2,
+    paddingHorizontal: 4,
   },
   toggleRow: {
     flexDirection: 'row',

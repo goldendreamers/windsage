@@ -31,20 +31,34 @@ export function ruleFromSimplePreset(id: string): AlertRule {
     windDirEnabled: false,
     maxWaveEnabled: false,
     maxWindEnabled: false,
+    minWindEnabled: false,
+    maxGustEnabled: false,
+    minTempEnabled: false,
+    maxTempEnabled: false,
   };
+}
+
+function hasExtraLimits(rule: AlertRule): boolean {
+  return !!(
+    rule.maxGustSpreadEnabled ||
+    rule.windDirEnabled ||
+    rule.maxWaveEnabled ||
+    rule.maxWindEnabled ||
+    rule.minWindEnabled ||
+    rule.maxGustEnabled ||
+    rule.minTempEnabled ||
+    rule.maxTempEnabled
+  );
 }
 
 export function matchSimpleNotifyId(rule: AlertRule | null | undefined): SimpleNotifyId | null {
   if (!rule) return null;
+  if (hasExtraLimits(rule)) return null;
   const found = SIMPLE_NOTIFY_PRESETS.find(
     (row) =>
       row.metric === rule.metric &&
       row.threshold === rule.threshold &&
-      (rule.comparison || 'gte') === 'gte' &&
-      !rule.maxGustSpreadEnabled &&
-      !rule.windDirEnabled &&
-      !rule.maxWaveEnabled &&
-      !rule.maxWindEnabled,
+      (rule.comparison || 'gte') === 'gte',
   );
   return found?.id ?? null;
 }

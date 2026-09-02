@@ -3,11 +3,16 @@ import {
   directionInSector,
   evaluateAlert,
   gustSpreadOk,
+  maxGustOk,
+  maxTempOk,
   maxWaveOk,
   maxWindOk,
+  minTempOk,
+  minWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { matchSimpleNotifyId, ruleFromSimplePreset } from '../code/core/simpleMode';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -236,5 +241,76 @@ assert.equal(parseLooseNumber('15,2'), 15.2);
 assert.equal(parseLooseNumber('abc'), null);
 assert.equal(parseLooseNumber('0'), 0);
 assert.equal(parseLooseNumber('-3'), -3);
+
+assert.deepEqual(extraLimitsForMetric('wind_avg'), [
+  'maxWave',
+  'gustSpread',
+  'maxGust',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('wind_max'), [
+  'maxWave',
+  'gustSpread',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('wave_height'), [
+  'minWind',
+  'maxWind',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('temperature'), []);
+
+assert.equal(matchSimpleNotifyId(ruleFromSimplePreset('wind_15')), 'wind_15');
+assert.equal(
+  matchSimpleNotifyId({ ...ruleFromSimplePreset('wind_15'), minTempEnabled: true }),
+  null,
+);
+
+const maxGustStation = createFollowedStation('219', 'Gust cap', {
+  rule: { ...station.rule, maxGustEnabled: true, maxGustKnots: 22 },
+});
+assert.equal(maxGustOk(reading(18, 20), maxGustStation.rule), true);
+assert.equal(maxGustOk(reading(18, 28), maxGustStation.rule), false);
+const gustHigh = evaluateAlert(reading(18, 28), history, maxGustStation, prev, Date.now());
+assert.equal(gustHigh.result.conditionMet, false);
+assert.match(gustHigh.result.message, /Gusts too high|gust/i);
+assert.equal(alertConditionLabel(gustHigh.result.message), 'Gusts too high');
+
+const coldStation = createFollowedStation('219', 'Cold', {
+  rule: { ...station.rule, minTempEnabled: true, minTempC: 25 },
+});
+assert.equal(minTempOk(reading(18), coldStation.rule), false);
+const tooCold = evaluateAlert(reading(18), history, coldStation, prev, Date.now());
+assert.equal(tooCold.result.conditionMet, false);
+assert.match(tooCold.result.message, /Too cold|temperature/i);
+
+const hotStation = createFollowedStation('219', 'Hot', {
+  rule: { ...station.rule, maxTempEnabled: true, maxTempC: 15 },
+});
+assert.equal(maxTempOk(reading(18), hotStation.rule), false);
+const tooHot = evaluateAlert(reading(18), history, hotStation, prev, Date.now());
+assert.equal(tooHot.result.conditionMet, false);
+assert.match(tooHot.result.message, /Too hot|temperature/i);
+
+const waveMinWind = createFollowedStation('219', 'Wave min wind', {
+  rule: {
+    ...station.rule,
+    metric: 'wave_height',
+    threshold: 1.0,
+    minWindEnabled: true,
+    minWindKnots: 20,
+    maxWindEnabled: false,
+  },
+});
+assert.equal(minWindOk(reading(10, 12, 180, 1.4), waveMinWind.rule), false);
+const light = evaluateAlert(reading(10, 12, 180, 1.4), waveHistory, waveMinWind, prev, Date.now());
+assert.equal(light.result.conditionMet, false);
+assert.match(light.result.message, /Wind too light|wind/i);
 
 console.log('check-alerts: ok');

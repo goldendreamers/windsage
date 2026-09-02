@@ -1425,10 +1425,12 @@ async function handleApi(req, res, pathname, url) {
     const provider = String(url.searchParams.get('provider') || '').trim() || null;
     const kind = String(url.searchParams.get('kind') || '').trim() || null;
     if (!q) {
+      // Phones never need the full ~6,900-row directory. Empty q is a seed:
+      // shared follows on this server, plus catalogSize for the UI.
       return json(res, 200, {
         ok: true,
-        stations: merged,
-        total: merged.length,
+        stations: shared.slice(0, limit),
+        total: shared.length,
         catalogSize: merged.length,
       });
     }
