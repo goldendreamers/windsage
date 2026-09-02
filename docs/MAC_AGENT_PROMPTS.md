@@ -14,6 +14,8 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 **Why:** Cursor Cloud VMs cannot reach the phone. Tailscale is already on the S22 (same account / tailnet as Wald). Remaining: Termux + copied secrets. Script: `file:///Users/goldendreamers/windsage/scripts/s22-termux-bootstrap.sh`
 
+Play Protect / Samsung will often say Termux “might be harmful.” Use only https://f-droid.org/packages/com.termux/ or https://github.com/termux/termux-app/releases (package `com.termux`). Then **More details → Install anyway**. Do not use Play Store Termux. Do not use random APK sites.
+
 On the S22, in Termux (not a Cloud agent):
 
 ```

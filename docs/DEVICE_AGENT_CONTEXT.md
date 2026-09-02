@@ -6,7 +6,8 @@
 
 A Cloud Agent VM cannot install anything on the S22. **Tailscale Android is already installed and on Wald’s tailnet** — do not reinstall it. You only run the bootstrap **in Termux on the phone**.
 
-1. Install **Termux from F-Droid** if it is not already there (not the Play Store build).
+1. Install **Termux from F-Droid** if it is not already there. Official: https://f-droid.org/packages/com.termux/ or https://github.com/termux/termux-app/releases — **not** the Play Store listing (abandoned since 2022).
+   Samsung / Play Protect often says Termux “might be harmful.” That is a **sideload / old-SDK false positive**, not malware, when the package is `com.termux` from F-Droid or the `termux/termux-app` GitHub release. Tap **More details → Install anyway** only for that source. Do not download Termux APKs from random sites. Leave Play Protect on afterward.
 2. Skip Tailscale. Confirm the S22 still shows as connected next to Wald (`100.125.98.56`).
 3. In Termux:
 
