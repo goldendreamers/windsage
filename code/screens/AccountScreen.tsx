@@ -33,9 +33,10 @@ type Props = {
     payload: {
       user: CloudUser;
       stations: import('../shared/types').FollowedStation[];
-      pollIntervalMinutes: number;
-      simpleMode?: boolean;
-    },
+        pollIntervalMinutes: number;
+        simpleMode?: boolean;
+        notifyPrefs?: import('../shared/types').NotifyPrefs;
+      },
     opts?: { importLocalGuestFollows?: boolean },
   ) => void;
   onLoggedOut: () => void;
@@ -104,6 +105,7 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
         stations: pulled?.stations || [],
         pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
         simpleMode: pulled?.simpleMode !== false,
+        notifyPrefs: pulled?.notifyPrefs,
       },
       // Google "login" to a brand-new SSO user already merged guest follows server-side
       // when created; never import leftover local guest lists for returning users.
@@ -153,13 +155,16 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
             {user.username ? `@${user.username}` : user.sso.google?.email || 'SSO account'}
           </Text>
           {providers.google && !user.sso.google?.linked ? (
-            <Pressable
-              style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => void run(async () => finishGoogle('link'))}
-            >
-              <Text style={styles.btnSecondaryText}>Link Google</Text>
-            </Pressable>
+            <>
+              <Pressable
+                style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() => void run(async () => finishGoogle('link'))}
+              >
+                <Text style={styles.btnSecondaryText}>Link Google</Text>
+              </Pressable>
+              <Text style={styles.hint}>Needed for Quiet email-only alerts.</Text>
+            </>
           ) : null}
           <Pressable
             style={[styles.btn, styles.btnDanger, busy && styles.btnDisabled]}
@@ -271,6 +276,9 @@ export function AccountScreen({ onBack, onOpenMenu, onAuthed, onLoggedOut }: Pro
             ) : (
               <Text style={styles.hint}>Google sign-in isn’t configured on this server.</Text>
             )}
+            {providers.google ? (
+              <Text style={styles.hint}>Quiet (email-only) alerts use this Google address.</Text>
+            ) : null}
           </Section>
 
           <Pressable style={styles.guest} onPress={onBack}>

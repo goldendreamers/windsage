@@ -1,3 +1,5 @@
+import { alertNotifyDue, resolveNotifyPrefs, stampAlertNotify } from './notifyPrefs.mjs';
+
 const BASE = 'https://www.windguru.cz/int/iapi.php';
 const RESOLVE_TTL_MS = 6 * 60 * 60 * 1000;
 const STATION_LIST_TTL_MS = 24 * 60 * 60 * 1000;
@@ -887,7 +889,7 @@ export function needsAlertHistory(reading, station, prev) {
   return true;
 }
 
-export function evaluateAlert(reading, history, station, prev, nowMs = Date.now()) {
+export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(), notifyPrefs, notifyOpts) {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
   const wavePrimary = metric === 'wave_height';
@@ -911,11 +913,18 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
 
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
+  let cadencePrev = prev;
 
   const evalId = alertEvalId(station);
   if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
+    cadencePrev = {
+      ...prev,
+      notifiedForRun: false,
+      lastNotifyMs: null,
+      lastCheckMs: null,
+    };
   }
 
   if (!conditionMet) {
@@ -931,9 +940,18 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       : 0;
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
   const monitoringOn = station.enabled !== false;
+  const resolved = resolveNotifyPrefs(notifyPrefs, notifyOpts);
+  const cadenceOk = alertNotifyDue(cadencePrev, resolved, nowMs);
   const shouldNotify =
-    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && cadenceOk;
   if (shouldNotify) notifiedForRun = true;
+  const stamp = shouldNotify
+    ? stampAlertNotify(prev, nowMs)
+    : {
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
+      };
 
   const unit =
     metric === 'temperature' ? '°C' : metric === 'wave_height' ? 'm' : 'kt';
@@ -987,6 +1005,9 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       lastValue: value,
       lastError: null,
       lastStationId: evalId,
+      lastNotifyMs: stamp.lastNotifyMs,
+      notifyDayUtc: stamp.notifyDayUtc,
+      notifyCountToday: stamp.notifyCountToday,
     },
   };
 }

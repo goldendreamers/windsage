@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   applyMonitoringSchedules,
   createFollowedStation,
+  normalizeNotifyPrefs,
 } from '../shared/defaults';
 import type { AlertState, AlertStateMap, AppSettings, FollowedStation } from '../shared/types';
 
@@ -48,6 +49,7 @@ function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
         : DEFAULT_SETTINGS.pollIntervalMinutes,
     simpleMode: raw.simpleMode !== false,
     accountId: raw.accountId ? String(raw.accountId) : null,
+    notifyPrefs: normalizeNotifyPrefs(raw.notifyPrefs),
   };
 }
 
@@ -75,6 +77,7 @@ async function migrateLegacySettings(): Promise<AppSettings | null> {
       stations,
       pollIntervalMinutes: Math.max(10, legacy.pollIntervalMinutes ?? 10),
       simpleMode: true,
+      notifyPrefs: { preset: 'normal', timesPerDay: 1, how: 'phone' },
     };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(migrated));
     return migrated;

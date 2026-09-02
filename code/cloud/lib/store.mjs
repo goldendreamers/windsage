@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { applyNotifyPrefs, normalizeNotifyPrefs } from './notifyPrefs.mjs';
+
+export { applyNotifyPrefs };
 
 const STORE_FILE = 'store.json';
 const STORE_BAK = 'store.json.bak';
@@ -193,6 +196,7 @@ export function ensureDevice(store, deviceId, secret) {
       stations: [],
       pollIntervalMinutes: 10,
       simpleMode: true,
+      notifyPrefs: { preset: 'normal', timesPerDay: 1, how: 'phone' },
       alertStates: {},
       snapshots: {},
       createdAt: Date.now(),
@@ -221,6 +225,7 @@ export function createUser(store, partial = {}) {
     stations: partial.stations ?? [],
     pollIntervalMinutes: partial.pollIntervalMinutes ?? 10,
     simpleMode: partial.simpleMode !== false,
+    notifyPrefs: partial.notifyPrefs ?? { preset: 'normal', timesPerDay: 1, how: 'phone' },
     alertStates: partial.alertStates ?? {},
     snapshots: partial.snapshots ?? {},
     pushTokens: partial.pushTokens ?? [],
@@ -340,6 +345,9 @@ export function linkDeviceToUser(
   }
   if (mergeGuestStations && typeof device.simpleMode === 'boolean') {
     user.simpleMode = device.simpleMode;
+  }
+  if (mergeGuestStations && device.notifyPrefs) {
+    user.notifyPrefs = normalizeNotifyPrefs(device.notifyPrefs);
   }
   // Device bag is owned by the user while linked — never keep a second copy.
   device.stations = [];
@@ -549,6 +557,7 @@ export function publicUser(user) {
     },
     pollIntervalMinutes: user.pollIntervalMinutes || 10,
     simpleMode: user.simpleMode !== false,
+    notifyPrefs: user.notifyPrefs || { preset: 'normal', timesPerDay: 1, how: 'phone' },
     stationCount: (user.stations || []).length,
   };
 }

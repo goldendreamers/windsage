@@ -147,6 +147,18 @@ export interface LocationBlend {
   updatedAt?: number;
 }
 
+export type NotifyPreset = 'annoying' | 'normal' | 'quiet' | 'custom';
+export type NotifyHow = 'phone' | 'email' | 'both';
+
+/** How often / how to send wind alerts. Account-level, not per station. */
+export interface NotifyPrefs {
+  preset: NotifyPreset;
+  /** Advanced custom: 1–24 alerts per UTC day. Ignored for named presets. */
+  timesPerDay?: number;
+  /** Advanced custom: phone push, email, or both. */
+  how?: NotifyHow;
+}
+
 export interface AppSettings {
   stations: FollowedStation[];
   pollIntervalMinutes: number;
@@ -154,6 +166,8 @@ export interface AppSettings {
   simpleMode?: boolean;
   /** Signed-in user id for this device bag — used so sync does not drop local extras. */
   accountId?: string | null;
+  /** Alert volume + channel. Missing → normal (once a day, phone). */
+  notifyPrefs?: NotifyPrefs;
 }
 
 export interface StationReading {
@@ -181,6 +195,12 @@ export interface AlertState {
   lastValue: number | null;
   lastError: string | null;
   lastStationId: string | null;
+  /** Last time a push/email actually fired for this follow. */
+  lastNotifyMs?: number | null;
+  /** UTC YYYY-MM-DD for `notifyCountToday`. */
+  notifyDayUtc?: string | null;
+  /** Alerts sent on `notifyDayUtc` (per follow). */
+  notifyCountToday?: number;
 }
 
 export type AlertStateMap = Record<string, AlertState>;

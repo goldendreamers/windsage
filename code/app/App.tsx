@@ -28,10 +28,10 @@ import {
   snapshotsToLive,
   syncStationsToCloud,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, applyMonitoringSchedules, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, applyMonitoringSchedules, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, normalizeNotifyPrefs, resolveNotifyPrefs, toggleFollowStar, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
-import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
+import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription } from '../core/notifications';
 import { initPwaInstallCapture, registerPwaServiceWorker, subscribeAppUpdate, applyAppUpdate } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
 import { followTargetFromResolved, resolveFollowInput } from '../core/stations';
@@ -237,6 +237,15 @@ export default function App() {
           setSettings(next);
           await saveSettings(next);
         }
+        if (snap.notifyPrefs) {
+          const incoming = normalizeNotifyPrefs(snap.notifyPrefs);
+          const cur = normalizeNotifyPrefs(settingsRef.current.notifyPrefs);
+          if (JSON.stringify(incoming) !== JSON.stringify(cur)) {
+            const next = { ...settingsRef.current, notifyPrefs: incoming };
+            setSettings(next);
+            await saveSettings(next);
+          }
+        }
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
@@ -334,6 +343,7 @@ export default function App() {
         stations: FollowedStation[];
         pollIntervalMinutes: number;
         simpleMode?: boolean;
+        notifyPrefs?: import('../shared/types').NotifyPrefs;
       },
       opts?: { importLocalGuestFollows?: boolean },
     ) => {
@@ -355,6 +365,9 @@ export default function App() {
           : 10,
         simpleMode: payload.simpleMode !== false,
         accountId: payload.user.id,
+        notifyPrefs: normalizeNotifyPrefs(
+          payload.notifyPrefs ?? payload.user.notifyPrefs ?? settingsRef.current.notifyPrefs,
+        ),
       };
       setSettings(next);
       settingsRef.current = next;
@@ -380,13 +393,18 @@ export default function App() {
         setLastPollAt(Date.now());
         setCloudStatus('cloud · just now');
         const snap = snapshots[station.id];
-        if (snap?.result?.shouldNotify) {
-          await sendThresholdNotification(station, snap.result);
-        }
+        const resolved = resolveNotifyPrefs(settingsRef.current.notifyPrefs, {
+          hasGoogleEmail: !!account?.sso?.google?.email,
+        });
+        const failed = /not delivered yet/i.test(String(snap?.result?.message || ''));
         await hapticLight();
         showToast(
           snap?.result?.shouldNotify
-            ? 'Alert fired — check phone notifications'
+            ? failed
+              ? 'Alert ready — allow notifications or install the app'
+              : resolved.email && !resolved.push
+                ? 'Alert emailed'
+                : 'Alert fired — check phone notifications'
             : 'Cloud check complete',
         );
       } catch (error) {
@@ -396,7 +414,7 @@ export default function App() {
         setCheckingId(null);
       }
     },
-    [applySnapshots, showToast],
+    [applySnapshots, showToast, account],
   );
 
   const openDownload = useCallback(() => {
@@ -465,6 +483,7 @@ export default function App() {
           stations: pulled?.stations || [],
           pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
           simpleMode: pulled?.simpleMode !== false,
+          notifyPrefs: pulled?.notifyPrefs,
         });
       }
     };
@@ -510,6 +529,7 @@ export default function App() {
                   stations: pulled.stations,
                   pollIntervalMinutes: pulled.pollIntervalMinutes,
                   simpleMode: pulled.simpleMode !== false,
+                  notifyPrefs: pulled.notifyPrefs,
                 });
                 return;
               }
@@ -869,6 +889,7 @@ export default function App() {
               pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
               simpleMode: true,
               accountId: null,
+              notifyPrefs: settingsRef.current.notifyPrefs,
             };
             setSettings(cleared);
             void saveSettings(cleared);
@@ -968,6 +989,16 @@ export default function App() {
         onToggleSimple={(on) => {
           void persistSettings({ ...settingsRef.current, simpleMode: on });
         }}
+        notifyPrefs={settings.notifyPrefs}
+        hasGoogleEmail={!!account?.sso?.google?.email}
+        onChangeNotifyPrefs={(prefs) => {
+          void persistSettings({ ...settingsRef.current, notifyPrefs: prefs });
+        }}
+        onNeedGoogle={() => {
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAccountOpen(true);
+        }}
         accountLabel={
           account
             ? account.username
@@ -982,7 +1013,7 @@ export default function App() {
           setAccountOpen(true);
         }}
         onInstall={openDownload}
-        onUpdate={() => void applyAppUpdate()}
+        onUpdate={appUpdate.available ? () => void applyAppUpdate() : undefined}
       />
 
       <Pressable

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import type { AlertState, AppSettings, CheckResult, FollowedStation, StationReading } from '../shared/types';
+import type { AlertState, AppSettings, CheckResult, FollowedStation, NotifyPrefs, StationReading } from '../shared/types';
+import { normalizeNotifyPrefs } from '../shared/defaults';
 
 const FALLBACK_CLOUD = 'https://windsage.nimrod.bio';
 
@@ -49,6 +50,7 @@ export type CloudUser = {
   };
   pollIntervalMinutes: number;
   simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
   stationCount: number;
 };
 
@@ -195,7 +197,14 @@ export async function fetchAuthProviders(): Promise<{
 export async function registerAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
@@ -203,6 +212,7 @@ export async function registerAccount(
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -220,7 +230,14 @@ export async function registerAccount(
 export async function loginAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
@@ -228,6 +245,7 @@ export async function loginAccount(
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -280,6 +298,7 @@ export async function pullMyStations(): Promise<AppSettings | null> {
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/me/stations', { method: 'GET', token });
   return {
     stations: data.stations || [],
@@ -287,6 +306,8 @@ export async function pullMyStations(): Promise<AppSettings | null> {
       ? Number(data.pollIntervalMinutes)
       : 10,
     simpleMode: data.simpleMode !== false,
+    notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
+  };
   };
 }
 
@@ -398,6 +419,7 @@ export async function syncStationsToCloud(
         removedKeys,
         pollIntervalMinutes: settings.pollIntervalMinutes,
         simpleMode: settings.simpleMode !== false,
+        notifyPrefs: normalizeNotifyPrefs(settings.notifyPrefs),
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
@@ -425,6 +447,7 @@ export async function syncStationsToCloud(
       removedKeys,
       pollIntervalMinutes: settings.pollIntervalMinutes,
       simpleMode: settings.simpleMode !== false,
+      notifyPrefs: normalizeNotifyPrefs(settings.notifyPrefs),
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
     }),
@@ -605,6 +628,7 @@ export async function fetchCloudSnapshot(): Promise<{
   cloud: boolean;
   stations?: FollowedStation[];
   simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -614,6 +638,7 @@ export async function fetchCloudSnapshot(): Promise<{
       cloud: boolean;
       stations: FollowedStation[];
       simpleMode?: boolean;
+      notifyPrefs?: NotifyPrefs;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
@@ -621,6 +646,7 @@ export async function fetchCloudSnapshot(): Promise<{
       cloud: !!data.cloud,
       stations: data.stations,
       simpleMode: data.simpleMode !== false,
+      notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
     };
   }
 
@@ -631,6 +657,7 @@ export async function fetchCloudSnapshot(): Promise<{
     cloud: boolean;
     stations: FollowedStation[];
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -641,6 +668,7 @@ export async function fetchCloudSnapshot(): Promise<{
     cloud: !!data.cloud,
     stations: data.stations,
     simpleMode: data.simpleMode !== false,
+    notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
   };
 }
 

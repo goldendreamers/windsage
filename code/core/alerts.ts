@@ -1,9 +1,10 @@
-import { DEFAULT_ALERT_STATE, windDirectionName } from '../shared/defaults';
+import { DEFAULT_ALERT_STATE, alertNotifyDue, resolveNotifyPrefs, stampAlertNotify, windDirectionName } from '../shared/defaults';
 import type {
   AlertState,
   CheckResult,
   FollowedStation,
   HistorySeries,
+  NotifyPrefs,
   StationReading,
 } from '../shared/types';
 import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricUnit, metricValue } from './windguru';
@@ -170,6 +171,8 @@ export function evaluateAlert(
   station: FollowedStation,
   prev: AlertState,
   nowMs = Date.now(),
+  notifyPrefs?: NotifyPrefs | null,
+  notifyOpts?: { hasGoogleEmail?: boolean },
 ): { result: CheckResult; nextState: AlertState } {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
@@ -203,11 +206,18 @@ export function evaluateAlert(
 
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
+  let cadencePrev = prev;
 
   const evalId = alertEvalId(station);
   if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
+    cadencePrev = {
+      ...prev,
+      notifiedForRun: false,
+      lastNotifyMs: null,
+      lastCheckMs: null,
+    };
   }
 
   if (!conditionMet) {
@@ -228,12 +238,22 @@ export function evaluateAlert(
 
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
   const monitoringOn = station.enabled !== false;
+  const resolved = resolveNotifyPrefs(notifyPrefs, notifyOpts);
+  const cadenceOk = alertNotifyDue(cadencePrev, resolved, nowMs);
   const shouldNotify =
-    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && cadenceOk;
 
   if (shouldNotify) {
     notifiedForRun = true;
   }
+
+  const stamp = shouldNotify
+    ? stampAlertNotify(prev, nowMs)
+    : {
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
+      };
 
   const unit = metricUnit(metric);
   const formatValue = (v: number | null | undefined) => {
@@ -294,6 +314,9 @@ export function evaluateAlert(
       lastValue: value,
       lastError: null,
       lastStationId: evalId,
+      lastNotifyMs: stamp.lastNotifyMs,
+      notifyDayUtc: stamp.notifyDayUtc,
+      notifyCountToday: stamp.notifyCountToday,
     },
   };
 }

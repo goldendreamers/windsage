@@ -117,6 +117,16 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 `file:///Users/goldendreamers/windsage/releases/local-zips/windsage-20260812T223104Z.zip`  
 (~4.5 MB tree snapshot; not required for cloud agents — use GitHub.)
 
+## Simple vs advanced
+
+Keep **simple mode** to core actions only (see `.cursor/rules/simple-vs-advanced.mdc`). Custom / exact / extra-limit controls stay advanced unless Nimrod says otherwise.
+
+## Mac paste prompts
+
+When Nimrod asks for a Mac prompt (deploy / `npm run release:web`), include this exact phrase on its own line in the prompt:
+
+remember discord bot alerts
+
 ## Suggested first prompt for a new cloud agent
 
 > Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md` and `docs/OUTSTANDING.md`. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. Cloud VMs cannot Tailscale to Wald — if a live deploy is needed, put one paste-ready prompt in chat for Nimrod (do not keep a prompts file in the repo).

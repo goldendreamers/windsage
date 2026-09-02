@@ -87,6 +87,12 @@ import {
   applyMonitoringSchedules,
   bagHasActiveStation,
 } from './lib/monitoring.mjs';
+import {
+  applyNotifyPrefs,
+  bagGoogleEmail,
+  normalizeNotifyPrefs,
+  resolveNotifyPrefs,
+} from './lib/notifyPrefs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -128,6 +134,9 @@ const DEFAULT_ALERT = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
 
 const MIME = {
@@ -227,29 +236,33 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     liveStationId: station.liveStationId || station.linkedLiveStation?.id || sid,
     kind: 'alert',
   };
+  const googleEmail = bagGoogleEmail(bag);
+  const resolved = resolveNotifyPrefs(bag.notifyPrefs, { hasGoogleEmail: !!googleEmail });
 
   let delivered = 0;
-  const pushTokens = collectPushTokens(bag);
-  for (const to of pushTokens) {
-    const r = await sendExpoPush({ to, title, body, data });
-    if (r?.ok) delivered += 1;
-  }
+  if (resolved.push) {
+    const pushTokens = collectPushTokens(bag);
+    for (const to of pushTokens) {
+      const r = await sendExpoPush({ to, title, body, data });
+      if (r?.ok) delivered += 1;
+    }
 
-  const subs = collectWebPushSubscriptions(bag);
-  if (subs.length) {
-    const { results, alive } = await sendWebPushMany(subs, { title, body, data });
-    bag.webPushSubscriptions = alive;
-    delivered += results.filter((r) => r.ok).length;
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, { title, body, data });
+      bag.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
   }
 
   const emailed =
-    bag?.username || bag?.email
-      ? await sendAlertEmail({ title, body })
+    resolved.email && googleEmail
+      ? await sendAlertEmail({ title, body, to: googleEmail })
       : { ok: false, skipped: true };
   if (emailed?.ok) delivered += 1;
 
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length} email=${emailed?.ok ? 1 : 0}`,
+    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0}`,
   );
   return { delivered, title, body };
 }
@@ -523,7 +536,9 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       }
 
       const history = historyCache.get(histKey);
-      const evaluated = evaluateAlert(publicReading, history, station, prev);
+      const evaluated = evaluateAlert(publicReading, history, station, prev, Date.now(), bag.notifyPrefs, {
+        hasGoogleEmail: !!bagGoogleEmail(bag),
+      });
       const withForecast = isForecastOnlySpot(station)
         ? {
             ...evaluated.result,
@@ -550,15 +565,18 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       if (notify && result.shouldNotify && station.enabled !== false) {
         const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
         if (!delivered) {
-          const state = bag.alertStates[station.id] || nextState;
+          const state = { ...(bag.alertStates[station.id] || nextState) };
           state.notifiedForRun = false;
+          state.lastNotifyMs = prev.lastNotifyMs ?? null;
+          state.notifyDayUtc = prev.notifyDayUtc ?? null;
+          state.notifyCountToday = prev.notifyCountToday ?? 0;
           bag.alertStates[station.id] = state;
           if (bag.snapshots?.[station.id]) {
             bag.snapshots[station.id].alertState = state;
             bag.snapshots[station.id].result = {
               ...result,
               shouldNotify: true,
-              message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+              message: `${result.message} · alert not delivered yet (allow notifications, install app, or link Google for email)`,
             };
           }
           console.warn(`[notify] no delivery for ${station.id} — will retry`);
@@ -835,6 +853,7 @@ async function handleAuth(req, res, pathname, url) {
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -870,6 +889,7 @@ async function handleAuth(req, res, pathname, url) {
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -986,6 +1006,7 @@ async function handleMe(req, res, pathname) {
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -998,6 +1019,7 @@ async function handleMe(req, res, pathname) {
       user.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
     applySimpleMode(user, body);
+    applyNotifyPrefs(user, body);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -1032,6 +1054,7 @@ async function handleMe(req, res, pathname) {
       ok: true,
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
@@ -1160,6 +1183,7 @@ async function handleDevices(req, res, pathname) {
       bag.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
     applySimpleMode(bag, body);
+    applyNotifyPrefs(bag, body);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1191,6 +1215,7 @@ async function handleDevices(req, res, pathname) {
       ok: true,
       pollIntervalMinutes: bag.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(bag),
+      notifyPrefs: normalizeNotifyPrefs(bag.notifyPrefs),
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},

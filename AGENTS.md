@@ -15,3 +15,5 @@ Lint / test: `npm run check` (root) runs 8 fixture-based smoke checks (alerts, s
 **Egress caveat (important):** external weather/geo provider domains are **blocked** by the cloud VM's network policy — `www.windguru.cz`, `www.ndbc.noaa.gov`, `*.open-meteo.com`, `nominatim.openstreetmap.org`. As a result, live readings and `POST /v1/stations/resolve` for `windguru`/`ndbc` fail with `{"error":"fetch failed"}`, and the backend logs `windguru directory warmup failed`. The `openmeteo` provider *resolves* offline (it just echoes lat/lon) but its live data fetch still needs egress. Auth, follow/sync, and persistence work fully offline. To test true end-to-end alert firing, request an egress allowlist for those domains.
 
 **Deploy is operator-only:** `npm run release:web` / the `eas:*` scripts require Wald SSH + Tailscale (or EAS credentials) and cannot run in the cloud VM — do not attempt them here.
+
+**Simple vs advanced:** new controls default to advanced unless they are a core “get an alert” action. See `.cursor/rules/simple-vs-advanced.mdc`. When writing a Mac deploy prompt, include the exact line `remember discord bot alerts`.

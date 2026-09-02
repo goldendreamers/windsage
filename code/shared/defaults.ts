@@ -6,8 +6,13 @@ import type {
   Comparison,
   FollowedStation,
   MetricKey,
+  NotifyHow,
+  NotifyPrefs,
+  NotifyPreset,
   WindguruKind,
 } from './types';
+
+export type { NotifyHow, NotifyPrefs, NotifyPreset } from './types';
 
 /** Primary alert defaults per metric (threshold units match the metric). */
 export const METRIC_DEFAULTS: Record<
@@ -56,11 +61,18 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
   };
 }
 
+export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = {
+  preset: 'normal',
+  timesPerDay: 1,
+  how: 'phone',
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
   simpleMode: true,
   accountId: null,
+  notifyPrefs: { ...DEFAULT_NOTIFY_PREFS },
 };
 
 export const DEFAULT_ALERT_STATE: AlertState = {
@@ -70,7 +82,142 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
+
+const NOTIFY_PRESETS = new Set(['annoying', 'normal', 'quiet', 'custom']);
+const NOTIFY_HOWS = new Set(['phone', 'email', 'both']);
+const ANNOYING_INTERVAL_MIN = 10;
+
+export function utcDayKey(nowMs = Date.now()): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+export function normalizeNotifyPrefs(raw: unknown): NotifyPrefs {
+  const src = raw && typeof raw === 'object' ? (raw as Partial<NotifyPrefs>) : {};
+  const preset = NOTIFY_PRESETS.has(String(src.preset))
+    ? (src.preset as NotifyPreset)
+    : 'normal';
+  const how = NOTIFY_HOWS.has(String(src.how)) ? (src.how as NotifyHow) : 'phone';
+  const n = Math.trunc(Number(src.timesPerDay));
+  const timesPerDay = Number.isFinite(n) ? Math.min(24, Math.max(1, n)) : 1;
+  return { preset, timesPerDay, how };
+}
+
+export type ResolvedNotifyPrefs = {
+  preset: NotifyPreset;
+  maxPerDay: number | null;
+  minIntervalMinutes: number;
+  push: boolean;
+  email: boolean;
+  needsGoogle: boolean;
+  googleMissing: boolean;
+};
+
+export function resolveNotifyPrefs(
+  prefs: NotifyPrefs | null | undefined,
+  opts?: { hasGoogleEmail?: boolean },
+): ResolvedNotifyPrefs {
+  const n = normalizeNotifyPrefs(prefs);
+  const hasGoogle = opts?.hasGoogleEmail === true;
+  if (n.preset === 'annoying') {
+    return {
+      preset: 'annoying',
+      maxPerDay: null,
+      minIntervalMinutes: ANNOYING_INTERVAL_MIN,
+      push: true,
+      email: false,
+      needsGoogle: false,
+      googleMissing: false,
+    };
+  }
+  if (n.preset === 'quiet') {
+    return {
+      preset: 'quiet',
+      maxPerDay: 1,
+      minIntervalMinutes: 24 * 60,
+      push: false,
+      email: hasGoogle,
+      needsGoogle: true,
+      googleMissing: !hasGoogle,
+    };
+  }
+  if (n.preset === 'custom') {
+    const times = n.timesPerDay ?? 1;
+    const how = n.how ?? 'phone';
+    const wantEmail = how === 'email' || how === 'both';
+    const wantPush = how === 'phone' || how === 'both';
+    return {
+      preset: 'custom',
+      maxPerDay: times,
+      minIntervalMinutes: Math.max(ANNOYING_INTERVAL_MIN, Math.floor((24 * 60) / times)),
+      push: wantPush,
+      email: wantEmail && hasGoogle,
+      needsGoogle: wantEmail,
+      googleMissing: wantEmail && !hasGoogle,
+    };
+  }
+  return {
+    preset: 'normal',
+    maxPerDay: 1,
+    minIntervalMinutes: 24 * 60,
+    push: true,
+    email: false,
+    needsGoogle: false,
+    googleMissing: false,
+  };
+}
+
+export function notifyPrefsSummary(prefs: NotifyPrefs | null | undefined): string {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'annoying') return 'Annoying · every 10 min';
+  if (n.preset === 'quiet') return 'Quiet · email only';
+  if (n.preset === 'custom') {
+    const how = n.how === 'email' ? 'email' : n.how === 'both' ? 'phone + email' : 'phone';
+    const times = n.timesPerDay ?? 1;
+    return `Custom · ${times}× a day · ${how}`;
+  }
+  return 'Normal · once a day';
+}
+
+export function alertNotifyDue(
+  prev: Pick<AlertState, 'notifiedForRun' | 'lastCheckMs' | 'lastNotifyMs' | 'notifyDayUtc' | 'notifyCountToday'> | null | undefined,
+  resolved: ResolvedNotifyPrefs,
+  nowMs = Date.now(),
+): boolean {
+  if (!resolved.push && !resolved.email) return false;
+  const day = utcDayKey(nowMs);
+  const count =
+    prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  if (resolved.maxPerDay != null && count >= resolved.maxPerDay) return false;
+  const lastRaw = prev?.lastNotifyMs;
+  const lastMs =
+    typeof lastRaw === 'number' && Number.isFinite(lastRaw)
+      ? lastRaw
+      : prev?.notifiedForRun &&
+          typeof prev.lastCheckMs === 'number' &&
+          Number.isFinite(prev.lastCheckMs)
+        ? prev.lastCheckMs
+        : null;
+  if (lastMs != null && nowMs - lastMs < resolved.minIntervalMinutes * 60 * 1000) return false;
+  if (prev?.notifiedForRun && lastMs == null) return false;
+  return true;
+}
+
+export function stampAlertNotify(
+  prev: AlertState,
+  nowMs = Date.now(),
+): Pick<AlertState, 'lastNotifyMs' | 'notifyDayUtc' | 'notifyCountToday'> {
+  const day = utcDayKey(nowMs);
+  const count = prev.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  return {
+    lastNotifyMs: nowMs,
+    notifyDayUtc: day,
+    notifyCountToday: count + 1,
+  };
+}
 
 export const METRIC_OPTIONS = [
   {

@@ -9,7 +9,6 @@ export function normalizeSimpleMode(value: unknown): boolean {
 export const SIMPLE_NOTIFY_PRESETS = [
   { id: 'wind_12', label: 'Wind 12 knots or more', metric: 'wind_avg' as const, threshold: 12 },
   { id: 'wind_15', label: 'Wind 15 knots or more', metric: 'wind_avg' as const, threshold: 15 },
-  { id: 'wind_18', label: 'Wind 18 knots or more', metric: 'wind_avg' as const, threshold: 18 },
   { id: 'wind_20', label: 'Wind 20 knots or more', metric: 'wind_avg' as const, threshold: 20 },
   { id: 'gust_25', label: 'Gusts 25 knots or more', metric: 'wind_max' as const, threshold: 25 },
 ] as const;

@@ -104,7 +104,7 @@ export function MonitoringDurationModal({
                 <Text style={[styles.chevron, { color: palette.muted }]}>›</Text>
               </Pressable>
             ))}
-            {customOpen ? (
+            {simpleMode ? null : customOpen ? (
               <View style={[styles.customBox, { borderTopColor: palette.line }]}>
                 <Text style={[styles.label, { color: palette.text }]}>Custom</Text>
                 <View style={styles.customRow}>

@@ -29,6 +29,7 @@ import {
   bagHasActiveStation,
   monitoringUntilMsForPreset,
 } from '../code/cloud/lib/monitoring.mjs';
+import { applyNotifyPrefs, resolveNotifyPrefs } from '../code/cloud/lib/notifyPrefs.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'windsage-auth-'));
@@ -102,9 +103,11 @@ const guest2 = ensureDevice(store, 'dev_new', 'sec_new');
 guest2.stations = [
   { id: 'st_g', stationId: '219', nickname: 'Test reef', enabled: true, rule: {} },
 ];
+guest2.notifyPrefs = { preset: 'annoying', timesPerDay: 1, how: 'phone' };
 linkDeviceToUser(store, newbie, 'dev_new', 'sec_new', { mergeGuestStations: true });
 assert.equal(newbie.stations.length, 1);
 assert.equal(newbie.stations[0].stationId, '219');
+assert.equal(newbie.notifyPrefs.preset, 'annoying');
 
 assert.equal(unlinkDeviceFromUser(store, 'dev_shared', 'sec_shared'), true);
 assert.equal(store.devices.dev_shared.userId, null);
@@ -208,5 +211,13 @@ const flippedOff = applyMonitoringSchedule(onDay, now + 24 * 60 * 60 * 1000 + 1)
 assert.equal(flippedOff.enabled, false);
 assert.equal(flippedOff.monitoringUntilMs, null);
 assert.equal(applyMonitoringSchedule({ id: 's3', stationId: '1', enabled: false }, now + 1e12).enabled, false);
+
+const quietBag = {};
+applyNotifyPrefs(quietBag, { notifyPrefs: { preset: 'quiet' } });
+assert.equal(quietBag.notifyPrefs.preset, 'quiet');
+assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: false }).email, false);
+assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: true }).email, true);
+assert.equal(resolveNotifyPrefs({ preset: 'annoying' }).push, true);
+assert.equal(publicUser(found)?.notifyPrefs?.preset, 'normal');
 
 console.log('check-auth: ok');
