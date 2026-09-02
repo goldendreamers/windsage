@@ -3,6 +3,7 @@ import {
   DEFAULT_ALERT_STATE,
   DEFAULT_RULE,
   DEFAULT_SETTINGS,
+  applyMonitoringSchedules,
   createFollowedStation,
 } from '../shared/defaults';
 import type { AlertState, AlertStateMap, AppSettings, FollowedStation } from '../shared/types';
@@ -19,6 +20,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     provider: raw.provider,
     kind: raw.kind === 'spot' ? 'spot' : 'station',
     enabled: raw.enabled !== false,
+    monitoringUntilMs: raw.monitoringUntilMs,
     rule: { ...DEFAULT_RULE, ...(raw.rule ?? {}) },
     sourceName: raw.sourceName ?? null,
     liveStationId: raw.liveStationId ?? null,
@@ -31,11 +33,13 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
 
 function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
   if (!raw) return { ...DEFAULT_SETTINGS, stations: [] };
-  const stations = Array.isArray(raw.stations)
-    ? raw.stations
-        .map((item) => mergeStation(item as Partial<FollowedStation>))
-        .filter((item): item is FollowedStation => item != null)
-    : [];
+  const stations = applyMonitoringSchedules(
+    Array.isArray(raw.stations)
+      ? raw.stations
+          .map((item) => mergeStation(item as Partial<FollowedStation>))
+          .filter((item): item is FollowedStation => item != null)
+      : [],
+  ).stations;
   return {
     stations,
     pollIntervalMinutes:

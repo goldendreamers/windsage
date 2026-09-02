@@ -28,7 +28,7 @@ import {
   snapshotsToLive,
   syncStationsToCloud,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, applyMonitoringSchedules, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, toggleFollowStar, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
@@ -57,12 +57,14 @@ import type {
 
 /** Ensure cloud/local stations always have provider + safe nickname before setSettings. */
 function withStationDefaults(stations: FollowedStation[] | null | undefined): FollowedStation[] {
-  return (stations || []).map((s) => ({
-    ...s,
-    provider: normalizeProvider(s?.provider || 'windguru'),
-    nickname: s?.nickname ?? '',
-    starred: s?.starred === true,
-  }));
+  return applyMonitoringSchedules(
+    (stations || []).map((s) => ({
+      ...s,
+      provider: normalizeProvider(s?.provider || 'windguru'),
+      nickname: s?.nickname ?? '',
+      starred: s?.starred === true,
+    })),
+  ).stations;
 }
 
 /** Keep local extras when the cloud bag is a subset (stale/partial sync). */

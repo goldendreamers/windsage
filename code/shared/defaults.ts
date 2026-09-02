@@ -306,6 +306,132 @@ export function followIdentityKey(
   return `${normalizeProvider(station?.provider)}:${sid}`;
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+
+export type MonitoringDurationPreset = 'day' | 'week' | 'forever';
+export type MonitoringCustomUnit = 'hours' | 'days';
+
+export function normalizeMonitoringUntilMs(raw: unknown): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Timestamp to auto-flip monitoring, or `null` for forever. */
+export function monitoringUntilMsForPreset(
+  preset: MonitoringDurationPreset,
+  nowMs = Date.now(),
+): number | null {
+  if (preset === 'forever') return null;
+  if (preset === 'week') return nowMs + WEEK_MS;
+  return nowMs + DAY_MS;
+}
+
+export function monitoringUntilMsForCustomHours(hours: number, nowMs = Date.now()): number {
+  const h = Math.max(1, Math.trunc(Number(hours) || 0));
+  return nowMs + h * HOUR_MS;
+}
+
+export function monitoringUntilMsForCustomAmount(
+  amount: number,
+  unit: MonitoringCustomUnit,
+  nowMs = Date.now(),
+): number {
+  const n = Math.max(1, Math.trunc(Number(amount) || 0));
+  return monitoringUntilMsForCustomHours(unit === 'days' ? n * 24 : n, nowMs);
+}
+
+/**
+ * When `monitoringUntilMs` is in the past, flip `enabled` and clear the timer.
+ * Pause-for-a-day resumes; keep-on-for-a-day pauses. Forever (`null`) is a no-op.
+ */
+export function applyMonitoringSchedule<T extends { enabled?: boolean; monitoringUntilMs?: number | null }>(
+  station: T,
+  nowMs = Date.now(),
+): T {
+  if (!station) return station;
+  const raw = station.monitoringUntilMs;
+  if (raw == null) return station;
+  const untilMs = Number(raw);
+  if (!Number.isFinite(untilMs) || untilMs > nowMs) return station;
+  const currentlyOn = station.enabled !== false;
+  return {
+    ...station,
+    enabled: !currentlyOn,
+    monitoringUntilMs: null,
+  };
+}
+
+export function applyMonitoringSchedules<T extends { enabled?: boolean; monitoringUntilMs?: number | null }>(
+  stations: T[] | null | undefined,
+  nowMs = Date.now(),
+): { stations: T[]; changed: boolean } {
+  const list = Array.isArray(stations) ? stations : [];
+  let changed = false;
+  const next = list.map((station) => {
+    const applied = applyMonitoringSchedule(station, nowMs);
+    if (applied !== station) changed = true;
+    return applied;
+  });
+  return { stations: next, changed };
+}
+
+export function formatMonitoringUntilClock(untilMs: number, nowMs = Date.now()): string {
+  const d = new Date(untilMs);
+  const now = new Date(nowMs);
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleString(undefined, opts);
+}
+
+export type MonitoringScheduleSummary = {
+  on: boolean;
+  untilMs: number | null;
+  homeLabel: string | null;
+  cardBit: string;
+  detailHint: string | null;
+};
+
+/** Labels for Home / station detail after applying any expired timer. */
+export function monitoringScheduleSummary(
+  station: { enabled?: boolean; monitoringUntilMs?: number | null } | null | undefined,
+  nowMs = Date.now(),
+): MonitoringScheduleSummary {
+  if (!station) {
+    return { on: true, untilMs: null, homeLabel: null, cardBit: '', detailHint: null };
+  }
+  const applied = applyMonitoringSchedule(station, nowMs);
+  const on = applied.enabled !== false;
+  const untilRaw = applied.monitoringUntilMs;
+  const untilMs = untilRaw == null ? null : Number(untilRaw);
+  const hasUntil = untilMs != null && Number.isFinite(untilMs) && untilMs > nowMs;
+  const when = hasUntil && untilMs != null ? formatMonitoringUntilClock(untilMs, nowMs) : null;
+  if (on) {
+    return {
+      on: true,
+      untilMs: hasUntil ? untilMs : null,
+      homeLabel: when ? `On until ${when}` : null,
+      cardBit: when ? ` · on until ${when}` : '',
+      detailHint: when ? `Alerts stay on until ${when}` : null,
+    };
+  }
+  return {
+    on: false,
+    untilMs: hasUntil ? untilMs : null,
+    homeLabel: when ? `Paused until ${when}` : 'Alerts off',
+    cardBit: when ? ` · paused until ${when}` : ' · paused',
+    detailHint: when ? `Paused until ${when}` : 'Alerts are off',
+  };
+}
+
 /** Union two follow lists. Primary wins on the same provider:id; extra adds new ones. */
 export function mergeFollowedStations(
   primary: FollowedStation[] | null | undefined,
@@ -357,6 +483,7 @@ export function createFollowedStation(
     nickname: String(nickname ?? '').trim(),
     sourceName: String(partial?.sourceName ?? '').trim() || null,
     enabled: partial?.enabled !== false,
+    monitoringUntilMs: normalizeMonitoringUntilMs(partial?.monitoringUntilMs),
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
     linkedLiveStation: partial?.linkedLiveStation ?? null,

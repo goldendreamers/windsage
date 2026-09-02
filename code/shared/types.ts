@@ -97,6 +97,11 @@ export interface FollowedStation {
   /** Official source name (not the user nickname). */
   sourceName?: string | null;
   enabled: boolean;
+  /**
+   * When set, flip `enabled` at this unix-ms (pause→resume or on→pause).
+   * `null` / omitted = keep the current on/off state forever.
+   */
+  monitoringUntilMs?: number | null;
   rule: AlertRule;
   /** Live station used for sensor readings (native link or nearest). */
   liveStationId?: string | null;

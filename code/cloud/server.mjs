@@ -82,6 +82,11 @@ import {
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
+import {
+  applyBagMonitoringSchedules,
+  applyMonitoringSchedules,
+  bagHasActiveStation,
+} from './lib/monitoring.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -282,7 +287,12 @@ function sensorCacheKey(station) {
 async function resolveStationsPut(bag, body) {
   const existing = Array.isArray(bag.stations) ? bag.stations : [];
   if (!Array.isArray(body?.stations)) {
-    return { stations: existing, kept: true, annotatedKinds: 0, restored: 0 };
+    return {
+      stations: applyMonitoringSchedules(existing).stations,
+      kept: true,
+      annotatedKinds: 0,
+      restored: 0,
+    };
   }
   const applied = applyStationsPut(existing, body.stations, {
     clearStations: body.clearStations === true,
@@ -295,7 +305,12 @@ async function resolveStationsPut(bag, body) {
         `[stations-put] refused empty wipe (kept ${existing.length} follows)`,
       );
     }
-    return { stations: applied.stations, kept: true, annotatedKinds: 0, restored: applied.restored };
+    return {
+      stations: applyMonitoringSchedules(applied.stations).stations,
+      kept: true,
+      annotatedKinds: 0,
+      restored: applied.restored,
+    };
   }
   if (applied.restored > 0) {
     console.warn(
@@ -304,7 +319,9 @@ async function resolveStationsPut(bag, body) {
   }
   const fixed = await fixSpotStations(applied.stations);
   const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
-  const stations = Array.isArray(nextStations) ? nextStations : applied.stations;
+  const stations = applyMonitoringSchedules(
+    Array.isArray(nextStations) ? nextStations : applied.stations,
+  ).stations;
   return {
     stations,
     kept: false,
@@ -372,7 +389,15 @@ async function attachSpotForecast(station, result, forecastCache, priorSnap) {
   }
 }
 
+async function persistBagMonitoring(store, bag) {
+  if (!applyBagMonitoringSchedules(bag)) return false;
+  bag.updatedAt = Date.now();
+  await saveStore(DATA_DIR, store);
+  return true;
+}
+
 async function runBagChecks(store, bag, { notify = true } = {}) {
+  applyBagMonitoringSchedules(bag);
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
@@ -595,8 +620,8 @@ async function pollAll() {
   let bags = 0;
 
   for (const user of Object.values(store.users)) {
-    const active = (user.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
-    if (!active) continue;
+    if (applyBagMonitoringSchedules(user)) touched = true;
+    if (!bagHasActiveStation(user)) continue;
     // Collect push tokens + web-push subscriptions from linked devices
     const tokens = new Set(collectPushTokens(user));
     const webSubs = new Map();
@@ -621,8 +646,8 @@ async function pollAll() {
   for (const deviceId of Object.keys(store.devices)) {
     const device = store.devices[deviceId];
     if (device.userId) continue; // already covered via user
-    const active = (device.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
-    if (!active) continue;
+    if (applyBagMonitoringSchedules(device)) touched = true;
+    if (!bagHasActiveStation(device)) continue;
     try {
       await runBagChecks(store, device, { notify: true });
       touched = true;
@@ -955,6 +980,7 @@ async function handleMe(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/me/stations') {
+    await persistBagMonitoring(store, user);
     return json(res, 200, {
       ok: true,
       stations: user.stations || [],
@@ -1001,6 +1027,7 @@ async function handleMe(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/me/snapshot') {
+    await persistBagMonitoring(store, user);
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
@@ -1159,6 +1186,7 @@ async function handleDevices(req, res, pathname) {
   }
 
   if (req.method === 'GET' && rest === '/snapshot') {
+    await persistBagMonitoring(store, bag);
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: bag.pollIntervalMinutes || DEFAULT_POLL_MIN,

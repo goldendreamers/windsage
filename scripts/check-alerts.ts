@@ -11,7 +11,7 @@ import {
   minWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, monitoringUntilMsForCustomHours, monitoringUntilMsForPreset, monitoringScheduleSummary, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
 import { matchSimpleNotifyId, ruleFromSimplePreset } from '../code/core/simpleMode';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
@@ -312,5 +312,40 @@ assert.equal(minWindOk(reading(10, 12, 180, 1.4), waveMinWind.rule), false);
 const light = evaluateAlert(reading(10, 12, 180, 1.4), waveHistory, waveMinWind, prev, Date.now());
 assert.equal(light.result.conditionMet, false);
 assert.match(light.result.message, /Wind too light|wind/i);
+
+const now = 1_700_000_000_000;
+assert.equal(monitoringUntilMsForPreset('forever', now), null);
+assert.equal(monitoringUntilMsForPreset('day', now), now + 24 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForPreset('week', now), now + 7 * 24 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForCustomHours(3, now), now + 3 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForCustomHours(0, now), now + 60 * 60 * 1000);
+
+const pausedDay = createFollowedStation('219', 'Paused day', {
+  enabled: false,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+});
+assert.equal(applyMonitoringSchedule(pausedDay, now).enabled, false);
+assert.equal(applyMonitoringSchedule(pausedDay, now).monitoringUntilMs, pausedDay.monitoringUntilMs);
+const resumed = applyMonitoringSchedule(pausedDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(resumed.enabled, true);
+assert.equal(resumed.monitoringUntilMs, null);
+
+const onDay = createFollowedStation('219', 'On day', {
+  enabled: true,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+});
+const expiredOn = applyMonitoringSchedule(onDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(expiredOn.enabled, false);
+assert.equal(expiredOn.monitoringUntilMs, null);
+
+const foreverOff = createFollowedStation('219', 'Forever off', {
+  enabled: false,
+  monitoringUntilMs: monitoringUntilMsForPreset('forever', now),
+});
+assert.equal(foreverOff.monitoringUntilMs, null);
+assert.equal(applyMonitoringSchedule(foreverOff, now + 99e12).enabled, false);
+assert.equal(monitoringScheduleSummary(pausedDay, now).homeLabel?.startsWith('Paused until'), true);
+assert.equal(monitoringScheduleSummary(onDay, now).detailHint?.startsWith('Alerts stay on until'), true);
+assert.equal(monitoringScheduleSummary(foreverOff, now).homeLabel, 'Alerts off');
 
 console.log('check-alerts: ok');

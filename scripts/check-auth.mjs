@@ -23,6 +23,12 @@ import {
   upsertSharedStations,
   publicCatalogStations,
 } from '../code/cloud/lib/store.mjs';
+import {
+  applyBagMonitoringSchedules,
+  applyMonitoringSchedule,
+  bagHasActiveStation,
+  monitoringUntilMsForPreset,
+} from '../code/cloud/lib/monitoring.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'windsage-auth-'));
@@ -173,5 +179,34 @@ assert.ok(caes);
 assert.equal(caes.sourceName, 'Caesarea');
 assert.equal(caes.nickname, undefined);
 assert.equal(pub.some((s) => s.stationId === '219'), false);
+
+const now = 1_700_000_000_000;
+const pausedBag = {
+  stations: [
+    {
+      id: 's1',
+      stationId: '219',
+      enabled: false,
+      monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+    },
+  ],
+};
+assert.equal(bagHasActiveStation(pausedBag), false);
+assert.equal(applyBagMonitoringSchedules(pausedBag, now), false);
+assert.equal(applyBagMonitoringSchedules(pausedBag, now + 24 * 60 * 60 * 1000 + 1), true);
+assert.equal(pausedBag.stations[0].enabled, true);
+assert.equal(pausedBag.stations[0].monitoringUntilMs, null);
+assert.equal(bagHasActiveStation(pausedBag), true);
+
+const onDay = {
+  id: 's2',
+  stationId: '2259',
+  enabled: true,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+};
+const flippedOff = applyMonitoringSchedule(onDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(flippedOff.enabled, false);
+assert.equal(flippedOff.monitoringUntilMs, null);
+assert.equal(applyMonitoringSchedule({ id: 's3', stationId: '1', enabled: false }, now + 1e12).enabled, false);
 
 console.log('check-auth: ok');

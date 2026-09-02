@@ -16,6 +16,7 @@ import {
   displayName,
   followSourceRef,
   formatAlertTrigger,
+  monitoringScheduleSummary,
   ruleForMetric,
   formatWindFromDisplay,
 } from '../shared/defaults';
@@ -48,6 +49,7 @@ import { StatusPanel } from '../components/StatusPanel';
 import { WarnNumberInput } from '../components/WarnNumberInput';
 import { SimpleNotifyPicker } from '../components/SimpleNotifyPicker';
 import { AlertLimitEditor } from '../components/AlertLimitEditor';
+import { MonitoringDurationModal } from '../components/MonitoringDurationModal';
 
 type ReadingLike = {
   wind_avg?: number | null;
@@ -198,6 +200,8 @@ export function StationDetailScreen({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState<'good' | 'meh' | null>(null);
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const [monitorIntentOn, setMonitorIntentOn] = useState(true);
   const reading = result?.reading;
   const forecast = result?.forecast ?? null;
   const forecastOnly = station.kind === 'spot' && !!(station.linkedLiveStation || station.liveLinkWarning);
@@ -218,8 +222,16 @@ export function StationDetailScreen({
   const allowSourceIdEdit = providerAllowsSourceIdEdit(provider);
   const openOnLabel =
     provider === 'location' ? 'Open in Google Maps' : `Open on ${providerMeta.label}`;
+  const monitor = monitoringScheduleSummary(station);
+
+  const openMonitorDuration = (nextOn: boolean) => {
+    void Haptics.selectionAsync();
+    setMonitorIntentOn(nextOn);
+    setMonitorOpen(true);
+  };
 
   return (
+    <>
     <ScrollView
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
@@ -672,15 +684,14 @@ export function StationDetailScreen({
           <View style={[styles.block, styles.rowBetween, { paddingHorizontal: 0, marginTop: 8 }]}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.label}>Send alerts</Text>
+              {monitor.detailHint ? <Text style={styles.hint}>{monitor.detailHint}</Text> : null}
             </View>
             <Switch
               value={station.enabled !== false}
-              onValueChange={(enabled) => {
-                void Haptics.selectionAsync();
-                onPersist({ ...station, enabled });
-              }}
+              onValueChange={openMonitorDuration}
               trackColor={{ false: '#23404C', true: palette.accent }}
               thumbColor="#fff"
+              accessibilityLabel="Send alerts"
             />
           </View>
         </Section>
@@ -772,15 +783,14 @@ export function StationDetailScreen({
       <View style={[styles.block, styles.rowBetween]}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.sectionTitle}>Monitoring</Text>
+          {monitor.detailHint ? <Text style={styles.hint}>{monitor.detailHint}</Text> : null}
         </View>
         <Switch
           value={station.enabled !== false}
-          onValueChange={(enabled) => {
-            void Haptics.selectionAsync();
-            onPersist({ ...station, enabled });
-          }}
-          trackColor={{ false: '#23404C', true: colors.accent }}
+          onValueChange={openMonitorDuration}
+          trackColor={{ false: '#23404C', true: palette.accent }}
           thumbColor="#fff"
+          accessibilityLabel="Monitoring"
         />
       </View>
       </>
@@ -871,6 +881,17 @@ export function StationDetailScreen({
         </Text>
       </Pressable>
     </ScrollView>
+    <MonitoringDurationModal
+      visible={monitorOpen}
+      turningOn={monitorIntentOn}
+      simpleMode={simpleMode}
+      onCancel={() => setMonitorOpen(false)}
+      onConfirm={(untilMs) => {
+        setMonitorOpen(false);
+        onPersist({ ...station, enabled: monitorIntentOn, monitoringUntilMs: untilMs });
+      }}
+    />
+    </>
   );
 }
 
