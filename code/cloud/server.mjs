@@ -23,9 +23,17 @@ import {
   cacheKey,
   mapsStatus,
 } from './lib/providers/index.mjs';
-import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
+import {
+  normalizeWindguruFollowInput,
+  fetchSpotForecastNow,
+  windguruCatalogStations,
+  parseWindguruRef,
+  resolveWindguruId,
+  catalogRowFromWindguruResolved,
+  shouldResolveWindguruCatalogQuery,
+} from './lib/wind.mjs';
 import { persistWindguruNameFiles, NAME_FILES } from './lib/windguruNames.mjs';
-import { mergeCatalogRows, searchCatalogStations } from './lib/catalogSearch.mjs';
+import { mergeCatalogRows, searchCatalogStations, prependCatalogHit } from './lib/catalogSearch.mjs';
 import { autocompletePlaces, geocodeAddress } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
@@ -1286,8 +1294,9 @@ async function handleApi(req, res, pathname, url) {
     }
     const body = await readBody(req);
     const input = typeof body.input === 'string' ? body.input : '';
+    const kindHint = body.kindHint === 'spot' || body.kindHint === 'station' ? body.kindHint : undefined;
     try {
-      const resolved = await normalizeWindguruFollowInput(input);
+      const resolved = await normalizeWindguruFollowInput(input, { kindHint });
       return json(res, 200, { ok: true, provider: 'windguru', ...resolved });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
@@ -1424,10 +1433,35 @@ async function handleApi(req, res, pathname, url) {
       });
     }
     const found = searchCatalogStations(merged, q, { limit, provider, kind });
+    let stations = found.stations;
+    let total = found.total;
+    // Live `station_list` has anemometers only. A pasted spot URL/ID (any
+    // Windguru /N or /station/N, not a hardcoded list) is resolved on demand
+    // and prepended so Follow search can find forecast spots.
+    if (shouldResolveWindguruCatalogQuery(q, merged) && (!provider || provider === 'windguru')) {
+      try {
+        const parsed = parseWindguruRef(q);
+        if (parsed) {
+          const resolved = await resolveWindguruId(parsed.id, { kindHint: parsed.kindHint });
+          const hit = catalogRowFromWindguruResolved(resolved);
+          if (hit) {
+            const already = stations.some(
+              (row) =>
+                String(row.provider || 'windguru').toLowerCase() === 'windguru' &&
+                String(row.stationId) === hit.stationId,
+            );
+            stations = prependCatalogHit(stations, hit, limit);
+            if (!already) total += 1;
+          }
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] windguru catalog id resolve failed', e);
+      }
+    }
     return json(res, 200, {
       ok: true,
-      stations: found.stations,
-      total: found.total,
+      stations,
+      total,
       catalogSize: merged.length,
       query: q,
       limit,

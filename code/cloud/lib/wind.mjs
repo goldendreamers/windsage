@@ -239,6 +239,59 @@ function formatLinkedWarning(linked) {
   return `No live Windguru sensor on this spot — alerts use the model forecast. Nearest live for reference: ${linked.name} (#${linked.id}, ${km} km)`;
 }
 
+const FORECAST_ONLY_WARNING =
+  'No live Windguru sensor on this spot — alerts use the model forecast.';
+
+/** Network/timeout failures — do not treat these as “not a live station”. */
+export function isWindguruTransportError(error) {
+  const name = error?.name || '';
+  const message = error instanceof Error ? error.message : String(error || '');
+  return (
+    name === 'TimeoutError' ||
+    name === 'AbortError' ||
+    /timed out/i.test(message) ||
+    /fetch failed/i.test(message)
+  );
+}
+
+/** Windguru station_data_* said this id is not a live sensor. */
+export function isUnknownWindguruLiveStationError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /unknown station/i.test(message) || /http 400/i.test(message);
+}
+
+/**
+ * Follow search is built from live `station_list` only. Spot URLs/IDs (e.g.
+ * https://www.windguru.cz/168017) are not in that list — resolve them on demand
+ * unless the same numeric id is already a known live station.
+ */
+export function shouldResolveWindguruCatalogQuery(query, catalog) {
+  const parsed = parseWindguruRef(query);
+  if (!parsed) return false;
+  if (parsed.kindHint === 'spot') return true;
+  return !(catalog || []).some(
+    (row) =>
+      String(row?.provider || 'windguru').toLowerCase() === 'windguru' &&
+      String(row?.stationId ?? '').trim() === parsed.id,
+  );
+}
+
+/** Catalog row for a resolved Windguru station or forecast spot. */
+export function catalogRowFromWindguruResolved(resolved) {
+  const id = String(resolved?.inputId || '').trim();
+  if (!id) return null;
+  const kind = resolved.kind === 'spot' ? 'spot' : 'station';
+  return {
+    provider: 'windguru',
+    stationId: id,
+    kind,
+    sourceName: resolved.spotName || null,
+    liveStationId: resolved.liveStationId || (kind === 'station' ? id : null),
+    linkedLiveStation: resolved.linkedLiveStation || null,
+    liveLinkWarning: resolved.warning || null,
+  };
+}
+
 /** Look up official name for a live station id from Windguru station_list. */
 async function lookupLiveStationName(liveStationId) {
   try {
@@ -254,37 +307,21 @@ async function lookupLiveStationName(liveStationId) {
   }
 }
 
-/**
- * Spot IDs resolve to a native live station when Windguru links one;
- * otherwise attach the geographically nearest live station as a reference
- * (alerts for those spots use the model forecast, not that live sensor).
- */
-export async function resolveWindguruId(inputId) {
-  const id = String(inputId).trim();
-  if (!/^\d+$/.test(id)) throw new Error('Station/spot ID must be numeric');
+async function resolveAsLiveStation(id) {
+  await tryStationCurrent(id);
+  const spotName = await lookupLiveStationName(id);
+  return {
+    inputId: id,
+    liveStationId: id,
+    kind: 'station',
+    spotName,
+    hasLiveStation: true,
+    linkedLiveStation: null,
+    warning: null,
+  };
+}
 
-  const cached = resolveCache.get(id);
-  if (cached && cached.expires > Date.now()) return cached.value;
-
-  try {
-    await tryStationCurrent(id);
-    const spotName = await lookupLiveStationName(id);
-    const value = {
-      inputId: id,
-      liveStationId: id,
-      kind: 'station',
-      spotName,
-      hasLiveStation: true,
-      linkedLiveStation: null,
-      warning: null,
-    };
-    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-    return value;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/unknown station/i.test(message)) throw error;
-  }
-
+async function resolveAsSpot(id) {
   const spot = await fetchJson(`https://www.windguru.cz/${id}`, {
     q: 'spot',
     id_spot: id,
@@ -294,11 +331,13 @@ export async function resolveWindguruId(inputId) {
     (typeof spot?.station?.name === 'string' && spot.station.name) ||
     undefined;
   const live = asNumber(spot?.station?.id_station);
+  const lat = asNumber(spot?.lat);
+  const lon = asNumber(spot?.lon);
 
   if (live != null) {
     const liveStationId = String(Math.trunc(live));
     await tryStationCurrent(liveStationId);
-    const value = {
+    return {
       inputId: id,
       liveStationId,
       kind: 'spot',
@@ -306,51 +345,100 @@ export async function resolveWindguruId(inputId) {
       hasLiveStation: true,
       linkedLiveStation: null,
       warning: null,
-      lat: asNumber(spot?.lat),
-      lon: asNumber(spot?.lon),
+      lat,
+      lon,
     };
-    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-    return value;
   }
 
-  const linked = await findNearestLiveStation(spot?.lat, spot?.lon);
-  if (!linked) {
-    throw new Error(
-      `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} has no live station nearby.`,
-    );
+  let linked = null;
+  try {
+    linked = await findNearestLiveStation(lat, lon);
+  } catch {
+    linked = null;
   }
-  await tryStationCurrent(linked.id);
-  const warning = formatLinkedWarning(linked);
-  const value = {
+  if (linked?.id) {
+    try {
+      await tryStationCurrent(linked.id);
+    } catch {
+      linked = null;
+    }
+  }
+
+  return {
     inputId: id,
-    liveStationId: linked.id,
+    liveStationId: linked?.id || null,
     kind: 'spot',
     spotName,
     hasLiveStation: false,
-    linkedLiveStation: {
-      id: linked.id,
-      name: linked.name,
-      spotname: linked.spotname,
-      distanceKm: Number(linked.distanceKm.toFixed(2)),
-    },
-    warning,
-    lat: asNumber(spot?.lat),
-    lon: asNumber(spot?.lon),
+    linkedLiveStation: linked
+      ? {
+          id: linked.id,
+          name: linked.name,
+          spotname: linked.spotname,
+          distanceKm: Number(linked.distanceKm.toFixed(2)),
+        }
+      : null,
+    warning: linked ? formatLinkedWarning(linked) : FORECAST_ONLY_WARNING,
+    lat,
+    lon,
   };
-  resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-  return value;
+}
+
+/**
+ * Spot IDs resolve to a native live station when Windguru links one;
+ * otherwise attach the geographically nearest live station as a reference
+ * (alerts for those spots use the model forecast, not that live sensor).
+ * Forecast-only spots still resolve when no nearby live sensor exists.
+ *
+ * `kindHint` comes from the URL: `/station/N` → live first, `/N` → spot first.
+ * Bare numbers try live first, then the spot API.
+ */
+export async function resolveWindguruId(inputId, opts = {}) {
+  const id = String(inputId).trim();
+  if (!/^\d+$/.test(id)) throw new Error('Station/spot ID must be numeric');
+  const kindHint = opts.kindHint === 'spot' || opts.kindHint === 'station' ? opts.kindHint : null;
+  const cacheId = `${id}:${kindHint || 'any'}`;
+  const cached = resolveCache.get(cacheId);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  const remember = (value) => {
+    resolveCache.set(cacheId, { value, expires: Date.now() + RESOLVE_TTL_MS });
+    return value;
+  };
+
+  if (kindHint === 'spot') {
+    try {
+      return remember(await resolveAsSpot(id));
+    } catch (spotErr) {
+      try {
+        return remember(await resolveAsLiveStation(id));
+      } catch {
+        throw spotErr;
+      }
+    }
+  }
+
+  try {
+    return remember(await resolveAsLiveStation(id));
+  } catch (error) {
+    if (isWindguruTransportError(error)) throw error;
+  }
+
+  return remember(await resolveAsSpot(id));
 }
 
 /**
  * Resolve a pasted Windguru URL/number for follow UX.
  * Does not rewrite stored follow IDs — callers choose spot vs live station.
  */
-export async function normalizeWindguruFollowInput(input) {
+export async function normalizeWindguruFollowInput(input, opts = {}) {
   const parsed = parseWindguruRef(input);
   if (!parsed) {
     throw new Error('Paste a Windguru URL or number (spot or station)');
   }
-  const resolved = await resolveWindguruId(parsed.id);
+  const kindHint =
+    opts.kindHint === 'spot' || opts.kindHint === 'station' ? opts.kindHint : parsed.kindHint;
+  const resolved = await resolveWindguruId(parsed.id, { kindHint });
   return {
     inputId: resolved.inputId,
     liveStationId: resolved.liveStationId,
@@ -362,6 +450,7 @@ export async function normalizeWindguruFollowInput(input) {
     rewritten:
       resolved.kind === 'spot' &&
       resolved.hasLiveStation &&
+      resolved.liveStationId &&
       resolved.liveStationId !== resolved.inputId,
   };
 }

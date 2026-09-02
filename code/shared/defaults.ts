@@ -576,6 +576,7 @@ export function catalogMatchScore(entry: CatalogStation, query: string): number 
   const labelCompact = compactSearchText(windguruName(asFollow));
 
   if (label === q || sidFold === q) return 100;
+  if (/windguru\.cz/i.test(qRaw) && digits && sid === digits) return 100;
   if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
   if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
   if (digits && (sid === digits || sid.startsWith(digits))) return 75;

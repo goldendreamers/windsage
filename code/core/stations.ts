@@ -82,7 +82,7 @@ export function followTargetFromResolved(
   if (provider === 'windguru') {
     const target = followTargetForKind(kind, {
       inputId: resolved.inputId,
-      liveStationId: String(resolved.liveStationId || resolved.stationId),
+      liveStationId: resolved.liveStationId ?? null,
       kind: resolved.kind,
       spotName: resolved.spotName || undefined,
       hasLiveStation: resolved.hasLiveStation,

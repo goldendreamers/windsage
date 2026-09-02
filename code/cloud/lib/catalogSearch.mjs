@@ -62,6 +62,7 @@ export function catalogMatchScore(entry, query) {
   const labelCompact = compactSearchText(entry?.sourceName || '');
 
   if (label === q || sidFold === q) return 100;
+  if (/windguru\.cz/i.test(qRaw) && digits && sid === digits) return 100;
   if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
   if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
   if (digits && (sid === digits || sid.startsWith(digits))) return 75;
@@ -110,4 +111,14 @@ export function searchCatalogStations(catalog, query, opts = {}) {
     stations: scored.slice(0, limit).map((row) => row.entry),
     total: scored.length,
   };
+}
+
+/** Put a resolved URL/ID hit first, de-duplicated, capped to limit. */
+export function prependCatalogHit(stations, hit, limit) {
+  if (!hit?.stationId) return stations || [];
+  const key = catalogKey(hit.provider, hit.stationId);
+  const rest = (stations || []).filter((row) => catalogKey(row.provider, row.stationId) !== key);
+  const out = [hit, ...rest];
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.min(Math.trunc(limit), out.length) : out.length;
+  return out.slice(0, cap);
 }
