@@ -524,22 +524,8 @@ export async function fetchCatalogStations(): Promise<
 > {
   const fromApiRaw = await fetchCatalogStationsFromApi();
   // Old servers dumped the full ~6,900-row directory on empty GET — never keep that in RN state.
-  const fromApi = fromApiRaw.length > 400 ? [] : fromApiRaw;
-  const fromFile = await fetchBundledLiveStations();
-  if (!fromApi.length && !fromFile.length) return [];
-  const byKey = new Map<string, (typeof fromApi)[number]>();
-  for (const row of [...fromFile, ...fromApi]) {
-    const sid = String(row.stationId || '').trim();
-    if (!sid) continue;
-    const key = `${row.provider || 'windguru'}:${sid}`;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, row);
-      continue;
-    }
-    if (!prev.sourceName && row.sourceName) byKey.set(key, { ...prev, ...row });
-  }
-  return [...byKey.values()];
+  if (fromApiRaw.length > 400) return [];
+  return fromApiRaw;
 }
 
 async function fetchCatalogStationsFromApi(): Promise<
@@ -567,39 +553,6 @@ async function fetchCatalogStationsFromApi(): Promise<
         liveStationId: s.liveStationId ?? null,
         linkedLiveStation: s.linkedLiveStation ?? null,
         liveLinkWarning: s.liveLinkWarning ?? null,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-/** Saved names+ids file (~100 KB names-only sibling) written from station_list. */
-async function fetchBundledLiveStations(): Promise<
-  Awaited<ReturnType<typeof fetchCatalogStations>>
-> {
-  try {
-    const res = await fetch(`${getCloudBaseUrl()}/windguru-live-stations.json`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as Array<{
-      provider?: FollowedStation['provider'];
-      stationId?: string;
-      kind?: FollowedStation['kind'];
-      sourceName?: string | null;
-      liveStationId?: string | null;
-    }>;
-    if (!Array.isArray(data)) return [];
-    return data
-      .filter((s) => s?.stationId?.trim())
-      .map((s) => ({
-        provider: s.provider || 'windguru',
-        stationId: String(s.stationId).trim(),
-        kind: s.kind === 'spot' ? 'spot' : 'station',
-        sourceName: s.sourceName ?? null,
-        liveStationId: s.liveStationId ?? String(s.stationId).trim(),
-        linkedLiveStation: null,
-        liveLinkWarning: null,
       }));
   } catch {
     return [];

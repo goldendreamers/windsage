@@ -34,26 +34,31 @@
   <body>
     <main>
       <h1>Windsage Privacy Policy</h1>
-      <p class="meta">Last updated: 12 August 2026 · Contact: <a href="mailto:shakedwald@gmail.com">shakedwald@gmail.com</a></p>
+      <p class="meta">Last updated: 2 September 2026 · Contact: <a href="mailto:shakedwald@gmail.com">shakedwald@gmail.com</a></p>
 
       <p>
-        Windsage (“the app”) helps you follow Windguru spots and live stations and receive alerts when
-        your wind rules are met. This policy explains what we store and why.
+        Windsage (“the app”) helps you follow wind stations and receive alerts when
+        your rules are met. Weather is fetched by the Windsage cloud so the app on your
+        phone does not talk to Windguru, NOAA, or map search providers. This policy explains
+        what we store and why. We collect as little as we can to run alerts.
       </p>
 
       <h2>What we collect</h2>
       <ul>
-        <li>Account details you choose to provide (username, optional email from Google sign-in).</li>
-        <li>Your followed stations, alert rules, and device identifiers used to sync settings.</li>
+        <li>Account details you choose to provide (username, optional email from Google sign-in). Guest mode stores only a random device id on this server.</li>
+        <li>The stations you follow and your alert rules, so the cloud can poll and notify you. Map pins you save stay on your account and are not put in a public directory.</li>
+        <li>The latest reading for each of your follows (not a history archive), so Home can show the current wind.</li>
         <li>Push notification subscription details so we can send wind alerts to your phone.</li>
-        <li>Basic technical logs needed to run the service (for example request times and errors).</li>
+        <li>Optional good/meh on an alert (kept briefly on your account, without nicknames).</li>
       </ul>
 
       <h2>What we do not collect</h2>
       <ul>
         <li>We do not sell your personal data.</li>
         <li>We do not use advertising trackers in the app.</li>
-        <li>We do not need your precise GPS location to operate (Windguru spot/station IDs are enough).</li>
+        <li>We do not copy your follow list, nicknames, or map pins into a public catalog.</li>
+        <li>We do not need your GPS to operate. A location follow is only stored if you drop a pin yourself.</li>
+        <li>We do not keep search queries or IP addresses on disk (rate limits stay in memory).</li>
       </ul>
 
       <h2>Where data is stored</h2>

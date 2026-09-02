@@ -20,6 +20,8 @@ import {
   ensureDevice,
   linkDeviceToUser,
   unlinkDeviceFromUser,
+  upsertSharedStations,
+  publicCatalogStations,
 } from '../code/cloud/lib/store.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
 
@@ -141,5 +143,35 @@ const liveStore = {
 const rec = restoreStationsFromBackupStore(liveStore, bakStore);
 assert.equal(rec.restored, 6);
 assert.equal(liveStore.users.u1.stations.length, 12);
+
+store.sharedStations = [
+  {
+    provider: 'location',
+    stationId: '32.1,34.8',
+    nickname: 'Home',
+    locationBlend: { lat: 32.1, lon: 34.8, address: 'secret', radiusKm: 8, maxStations: 4, members: [] },
+    rule: { metric: 'wind_avg', threshold: 15 },
+  },
+  {
+    provider: 'windguru',
+    stationId: '2259',
+    nickname: 'My secret beach',
+    sourceName: 'Caesarea',
+    kind: 'station',
+    rule: { metric: 'wind_avg', threshold: 99 },
+  },
+];
+upsertSharedStations(store, [
+  { provider: 'location', stationId: '1,2', nickname: 'Should not land', locationBlend: { lat: 1, lon: 2 } },
+  { provider: 'windguru', stationId: '219', nickname: 'Also private', sourceName: 'Other' },
+]);
+const pub = publicCatalogStations(store);
+assert.equal(pub.some((s) => s.provider === 'location'), false);
+assert.equal(pub.some((s) => /secret|Home|private/i.test(JSON.stringify(s))), false);
+const caes = pub.find((s) => s.stationId === '2259');
+assert.ok(caes);
+assert.equal(caes.sourceName, 'Caesarea');
+assert.equal(caes.nickname, undefined);
+assert.equal(pub.some((s) => s.stationId === '219'), false);
 
 console.log('check-auth: ok');

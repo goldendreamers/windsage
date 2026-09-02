@@ -1036,15 +1036,13 @@ async function handleMe(req, res, pathname) {
     if (!Array.isArray(user.alertFeedback)) user.alertFeedback = [];
     user.alertFeedback.push({
       followId,
-      stationId: station.stationId,
-      provider: station.provider || 'windguru',
       rating,
       at: Date.now(),
     });
-    if (user.alertFeedback.length > 80) {
-      user.alertFeedback = user.alertFeedback.slice(-80);
+    if (user.alertFeedback.length > 20) {
+      user.alertFeedback = user.alertFeedback.slice(-20);
     }
-    // Soft trust nudge for location blends / shared catalog.
+    // Soft trust nudge keyed by public station id — no nickname or pin stored here.
     const tk = `${String(station.provider || 'windguru').toLowerCase()}:${String(station.stationId ?? '').trim()}`;
     if (!store.stationTrust[tk]) store.stationTrust[tk] = {};
     const trust = store.stationTrust[tk];
@@ -1407,7 +1405,8 @@ async function handleApi(req, res, pathname, url) {
     }
   }
 
-  // Follow search directory: Windguru live names + this server's shared follows.
+  // Follow search directory: Windguru live names (public station_list) + a
+  // PII-stripped leftover catalog. Personal follows are not copied here.
   // With ?q= rank over the full directory and return a page (phones never need all ~7k rows).
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
