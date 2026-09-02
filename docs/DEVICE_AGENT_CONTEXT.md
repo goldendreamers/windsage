@@ -8,7 +8,7 @@ A Cloud Agent VM cannot install anything on the S22. **Tailscale Android is alre
 
 1. Install **Termux from F-Droid** if it is not already there. Official: https://f-droid.org/packages/com.termux/ or https://github.com/termux/termux-app/releases — **not** the Play Store listing (abandoned since 2022).
    Samsung / Play Protect often says Termux “might be harmful.” That is a **sideload / old-SDK false positive**, not malware, when the package is `com.termux` from F-Droid or the `termux/termux-app` GitHub release. Tap **More details → Install anyway** only for that source. Do not download Termux APKs from random sites. Leave Play Protect on afterward.
-2. Skip Tailscale. Confirm the S22 still shows as connected next to Wald (`100.125.98.56`).
+2. Skip Tailscale. S22 tailnet IP (same account as Wald): **`100.124.6.109`**. Wald stays `100.125.98.56`.
 3. In Termux:
 
 ```bash
@@ -24,7 +24,7 @@ bash scripts/s22-termux-bootstrap.sh
 4. Copy gitignored secrets from the Mac (do not commit them):
    - `/Users/goldendreamers/windsage/.env.smtp` → `~/windsage/.env.smtp` (`chmod 600`)
    - Either the Mac `wald-mc` private key, **or** add the Termux pubkey the script prints to `~nimrodw/.ssh/authorized_keys` on Wald
-5. After Tailscale is up, Termux `sshd` listens on port **8022**. From the Mac: `ssh -p 8022 u0_aXXX@<s22-tailscale-ip>`
+5. Termux `sshd` listens on port **8022**. From the Mac: `ssh -p 8022 u0_aXXX@100.124.6.109`
 6. To **control** Cursor agents from the S22 (supported): Chrome → https://cursor.com/agents → Add to Home screen. A full Cursor CLI worker on Android is unofficial (Termux + Ubuntu proot) and is not required for Windsage deploy/email.
 
 Then continue with sections 2–6 below (SSH `wald-mc`, `.env.smtp`, preflight).
