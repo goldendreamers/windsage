@@ -308,7 +308,6 @@ export async function pullMyStations(): Promise<AppSettings | null> {
     simpleMode: data.simpleMode !== false,
     notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
   };
-  };
 }
 
 export async function startGoogleSignIn(
