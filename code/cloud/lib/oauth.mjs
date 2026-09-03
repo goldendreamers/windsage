@@ -3,6 +3,28 @@
  * Zero npm — Node fetch + crypto only.
  */
 
+/** Never-expire https://discord.gg/… or https://discord.com/invite/… only. */
+export function sanitizeDiscordInvite(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'https:') return '';
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'discord.gg') {
+      const code = u.pathname.replace(/^\//, '').split('/')[0];
+      return code ? `https://discord.gg/${code}` : '';
+    }
+    if (host === 'discord.com' && u.pathname.startsWith('/invite/')) {
+      const code = u.pathname.slice('/invite/'.length).split('/')[0];
+      return code ? `https://discord.gg/${code}` : '';
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 export function oauthConfig() {
   const publicUrl = (
     process.env.WINDSAGE_PUBLIC_URL || 'https://windsage.nimrod.bio'
@@ -36,10 +58,12 @@ export function oauthConfig() {
 
 export function providersStatus() {
   const cfg = oauthConfig();
+  const discordInvite = sanitizeDiscordInvite(process.env.DISCORD_INVITE_URL);
   return {
     google: cfg.google.enabled,
     facebook: cfg.facebook.enabled,
     apple: cfg.apple.enabled,
+    discordInvite: discordInvite || null,
   };
 }
 

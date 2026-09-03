@@ -117,6 +117,12 @@ export interface FollowedStation {
   locationBlend?: LocationBlend | null;
   /** Home-list favorite — starred follows sort to the top. */
   starred?: boolean;
+  /**
+   * Advanced mode only. When the alert fires, keep ringing until Stop.
+   * Default off. Delivery is this phone or repeating Discord DMs.
+   */
+  wakeOnWind?: boolean;
+  wakeOnWindVia?: 'native' | 'discord';
 }
 
 export interface LocationBlendMember {

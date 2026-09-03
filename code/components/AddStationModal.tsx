@@ -797,7 +797,12 @@ export function AddStationModal({
           />
 
           {simpleMode ? (
-            <SimpleNotifyPicker rule={notifyRule} onChange={setNotifyRule} />
+            <>
+              <SimpleNotifyPicker rule={notifyRule} onChange={setNotifyRule} />
+              <Text style={styles.linkHint}>
+                Pings go to this phone after you put Windsage on the home screen.
+              </Text>
+            </>
           ) : null}
 
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}

@@ -38,12 +38,25 @@ yarn-error.*
 .env
 .env.smtp
 
+discord-cursor.env
+.env.discord-cursor.local
+discord-helper/helper.env
+discord-alerts/alerts.env
+code/cloud/oauth.env
+code/cloud/discord-alert.env
+
 # typescript
 *.tsbuildinfo
 
 # generated native folders
 /ios
 /android
+tools/cursor-face-android/.gradle/
+tools/cursor-face-android/build/
+tools/cursor-face-android/app/build/
+tools/cursor-face-android/local.properties
+public/cursor-face/*.apk
+tools/s22-local-agent/memory.json
 code/cloud/data/
 releases/local-zips/
 

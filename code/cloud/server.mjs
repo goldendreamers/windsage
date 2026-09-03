@@ -87,6 +87,16 @@ import {
   sendWebPushMany,
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
+import {
+  completeDiscordAlertLink,
+  discordAlertConfig,
+  hookSecretOk,
+  publicDiscordAlert,
+  sendAlertDiscordDm,
+  startDiscordAlertLink,
+  unlinkDiscordAlert,
+  unlinkDiscordAlertByDiscordId,
+} from './lib/discordAlertDm.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
 import {
   applyBagMonitoringSchedules,
@@ -99,6 +109,17 @@ import {
   normalizeNotifyPrefs,
   resolveNotifyPrefs,
 } from './lib/notifyPrefs.mjs';
+import {
+  alarmPulseDue,
+  markAlarmPulsed,
+  publicWindAlarm,
+  startWindAlarm,
+  stopWindAlarm,
+  syncWindAlarmWithStations,
+  wakeCopy,
+  wakeOnWindOf,
+  wakeViaOf,
+} from './lib/windAlarm.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -234,8 +255,76 @@ function collectPushTokens(bag) {
   return [...tokens];
 }
 
+function hydrateUserChannels(store, user) {
+  const tokens = new Set(collectPushTokens(user));
+  const webSubs = new Map();
+  for (const s of collectWebPushSubscriptions(user)) webSubs.set(s.endpoint, s);
+  for (const device of Object.values(store.devices || {})) {
+    if (device.userId === user.id) {
+      for (const t of collectPushTokens(device)) tokens.add(t);
+      for (const s of collectWebPushSubscriptions(device)) webSubs.set(s.endpoint, s);
+    }
+  }
+  user.pushTokens = [...tokens];
+  user.webPushSubscriptions = [...webSubs.values()];
+}
+
+async function sendAlarmPulse(bag, alarm) {
+  const via = alarm?.via === 'discord' ? 'discord' : 'native';
+  const discordId = bag?.discordAlert?.enabled !== false ? bag?.discordAlert?.discordUserId : null;
+  const useDiscord = via === 'discord' && discordId;
+  const actualVia = useDiscord ? 'discord' : 'native';
+  if (alarm && alarm.via !== actualVia) alarm.via = actualVia;
+  const { title, body } = wakeCopy(alarm?.title, alarm?.body, actualVia);
+  const data = {
+    followId: alarm?.followId || '',
+    kind: 'alarm',
+    alarm: true,
+    via: actualVia,
+  };
+  let delivered = 0;
+  if (useDiscord) {
+    const discordDm = await sendAlertDiscordDm(discordId, { title, body });
+    if (discordDm?.ok) delivered += 1;
+  } else {
+    const pushTokens = collectPushTokens(bag);
+    for (const to of pushTokens) {
+      const r = await sendExpoPush({
+        to,
+        title,
+        body,
+        data,
+        channelId: 'windsage-alarm',
+      });
+      if (r?.ok) delivered += 1;
+    }
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, { title, body, data });
+      bag.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
+  }
+  markAlarmPulsed(alarm);
+  return { delivered, title, body, via: actualVia };
+}
+
 async function dispatchAlertNotifications(bag, station, result, sid) {
   const { title, body } = formatAlertNotificationCopy(station, result);
+  if (wakeOnWindOf(station, bag)) {
+    const alarm = startWindAlarm(bag, {
+      followId: station.id,
+      title,
+      body,
+      via: wakeViaOf(station),
+    });
+    const pulsed = await sendAlarmPulse(bag, alarm);
+    console.log(
+      `[notify] ${station.id} alarm via=${pulsed.via} delivered=${pulsed.delivered}`,
+    );
+    return { delivered: pulsed.delivered, title: pulsed.title, body: pulsed.body, alarm: true };
+  }
+
   const data = {
     followId: station.id,
     stationId: sid,
@@ -267,8 +356,15 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
       : { ok: false, skipped: true };
   if (emailed?.ok) delivered += 1;
 
+  const discordId = bag?.discordAlert?.enabled !== false ? bag?.discordAlert?.discordUserId : null;
+  let discordDm = { ok: false, skipped: true };
+  if (discordId) {
+    discordDm = await sendAlertDiscordDm(discordId, { title, body });
+    if (discordDm?.ok) delivered += 1;
+  }
+
   console.log(
-    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0}`,
+    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0} discordDm=${discordDm?.ok ? 1 : discordDm?.skipped ? 'skip' : 0}`,
   );
   return { delivered, title, body };
 }
@@ -569,8 +665,8 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       results.push({ station, result, nextState });
 
       if (notify && result.shouldNotify && station.enabled !== false) {
-        const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
-        if (!delivered) {
+        const { delivered, alarm } = await dispatchAlertNotifications(bag, station, result, sid);
+        if (!delivered && !alarm) {
           const state = { ...(bag.alertStates[station.id] || nextState) };
           state.notifiedForRun = false;
           state.lastNotifyMs = prev.lastNotifyMs ?? null;
@@ -627,6 +723,33 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
   return results;
 }
 
+async function pulseBagAlarm(store, bag, { hydrateUser = false } = {}) {
+  if (!bag?.windAlarm) return false;
+  if (hydrateUser && bag.id) hydrateUserChannels(store, bag);
+  const due = alarmPulseDue(bag.windAlarm);
+  if (due === 'wait' || due === 'none') return false;
+  if (due === 'expire') {
+    stopWindAlarm(bag);
+    return true;
+  }
+  if (syncWindAlarmWithStations(bag)) return true;
+  await sendAlarmPulse(bag, bag.windAlarm);
+  return true;
+}
+
+async function pulseAllAlarms() {
+  const store = await loadStore(DATA_DIR);
+  let touched = false;
+  for (const user of Object.values(store.users || {})) {
+    if (await pulseBagAlarm(store, user, { hydrateUser: true })) touched = true;
+  }
+  for (const device of Object.values(store.devices || {})) {
+    if (device.userId) continue;
+    if (await pulseBagAlarm(store, device)) touched = true;
+  }
+  if (touched) await saveStore(DATA_DIR, store);
+}
+
 async function runDeviceChecks(store, deviceId, opts) {
   const device = store.devices[deviceId];
   if (!device) throw new Error('Unknown device');
@@ -646,18 +769,7 @@ async function pollAll() {
   for (const user of Object.values(store.users)) {
     if (applyBagMonitoringSchedules(user)) touched = true;
     if (!bagHasActiveStation(user)) continue;
-    // Collect push tokens + web-push subscriptions from linked devices
-    const tokens = new Set(collectPushTokens(user));
-    const webSubs = new Map();
-    for (const s of collectWebPushSubscriptions(user)) webSubs.set(s.endpoint, s);
-    for (const device of Object.values(store.devices)) {
-      if (device.userId === user.id) {
-        for (const t of collectPushTokens(device)) tokens.add(t);
-        for (const s of collectWebPushSubscriptions(device)) webSubs.set(s.endpoint, s);
-      }
-    }
-    user.pushTokens = [...tokens];
-    user.webPushSubscriptions = [...webSubs.values()];
+    hydrateUserChannels(store, user);
     try {
       await runBagChecks(store, user, { notify: true });
       touched = true;
@@ -765,6 +877,7 @@ async function serveStatic(req, res, pathname) {
   cors(res);
   const noCache =
     ext === '.html' ||
+    ext === '.apk' ||
     base === 'sw.js' ||
     base === 'manifest.webmanifest' ||
     base === 'badge-96.png' ||
@@ -1026,6 +1139,7 @@ async function handleMe(req, res, pathname) {
     }
     applySimpleMode(user, body);
     applyNotifyPrefs(user, body);
+    syncWindAlarmWithStations(user);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -1064,6 +1178,7 @@ async function handleMe(req, res, pathname) {
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
+      windAlarm: publicWindAlarm(user),
       cloud: true,
       user: publicUser(user),
     });
@@ -1123,9 +1238,39 @@ async function handleMe(req, res, pathname) {
     return json(res, 200, { ok: true });
   }
 
+  if (req.method === 'POST' && pathname === '/v1/me/wind-alarm/stop') {
+    await readBody(req).catch(() => ({}));
+    const stopped = stopWindAlarm(user);
+    if (stopped) {
+      user.updatedAt = Date.now();
+      await saveStore(DATA_DIR, store);
+    }
+    return json(res, 200, { ok: true, stopped });
+  }
+
   if (req.method === 'POST' && pathname === '/v1/auth/link/google') {
     // convenience alias under auth — also allow from authenticated client as start URL
     return json(res, 400, { error: 'Use /v1/auth/google/start?mode=link&token=…' });
+  }
+
+  if (req.method === 'POST' && pathname === '/v1/me/discord-alert/start') {
+    if (!discordAlertConfig().enabled) {
+      return json(res, 503, { error: 'Discord alerts are not configured on this server yet.' });
+    }
+    const started = startDiscordAlertLink(user);
+    await saveStore(DATA_DIR, store);
+    return json(res, 200, {
+      ok: true,
+      code: started.code,
+      expiresAt: started.expiresAt,
+      discordAlert: publicDiscordAlert(user),
+    });
+  }
+
+  if (req.method === 'DELETE' && pathname === '/v1/me/discord-alert') {
+    unlinkDiscordAlert(user);
+    await saveStore(DATA_DIR, store);
+    return json(res, 200, { ok: true, discordAlert: publicDiscordAlert(user) });
   }
 
   return json(res, 404, { error: 'not found' });
@@ -1190,6 +1335,7 @@ async function handleDevices(req, res, pathname) {
     }
     applySimpleMode(bag, body);
     applyNotifyPrefs(bag, body);
+    syncWindAlarmWithStations(bag);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1225,6 +1371,7 @@ async function handleDevices(req, res, pathname) {
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},
+      windAlarm: publicWindAlarm(bag),
       cloud: true,
       userId: device.userId || null,
     });
@@ -1251,6 +1398,16 @@ async function handleDevices(req, res, pathname) {
     }
     await saveStore(DATA_DIR, store);
     return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && rest === '/wind-alarm/stop') {
+    await readBody(req).catch(() => ({}));
+    const stopped = stopWindAlarm(bag);
+    if (stopped) {
+      bag.updatedAt = Date.now();
+      await saveStore(DATA_DIR, store);
+    }
+    return json(res, 200, { ok: true, stopped });
   }
 
   if (req.method === 'POST' && rest === '/test-push') {
@@ -1310,10 +1467,11 @@ async function handleApi(req, res, pathname, url) {
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
       alertEmail: alertEmailConfig().enabled,
+      discordAlert: discordAlertConfig().enabled,
       // Stable-ish second bucket for short CDN/browser revalidation (not live ts).
       ts: Math.floor(Date.now() / 1000) * 1000,
     };
-    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}-${body.alertEmail ? 1 : 0}"`;
+    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}-${body.alertEmail ? 1 : 0}-${body.discordAlert ? 1 : 0}"`;
     const inm = req.headers['if-none-match'];
     if (inm && inm === etag) {
       cors(res);
@@ -1327,6 +1485,32 @@ async function handleApi(req, res, pathname, url) {
       ETag: etag,
       'Cache-Control': 'public, max-age=5, stale-while-revalidate=15',
     });
+  }
+
+  if (pathname === '/v1/internal/discord-alert/link' || pathname === '/v1/internal/discord-alert/unlink') {
+    const ip = clientIp(req);
+    const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    if (!local) return json(res, 403, { error: 'local only' });
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
+    if (!discordAlertConfig().hookEnabled) {
+      return json(res, 503, { error: 'Discord alert hook is not configured' });
+    }
+    const body = await readBody(req);
+    const secret = String(req.headers['x-windsage-hook'] || body.secret || body.hookSecret || '');
+    if (!hookSecretOk(secret)) return json(res, 403, { error: 'bad hook secret' });
+    const store = await loadStore(DATA_DIR);
+    if (pathname.endsWith('/unlink')) {
+      const rec = unlinkDiscordAlertByDiscordId(store, body.discordUserId);
+      if (rec.ok) await saveStore(DATA_DIR, store);
+      return json(res, rec.ok ? 200 : 400, rec.ok ? { ok: true } : { error: rec.error });
+    }
+    const rec = completeDiscordAlertLink(store, {
+      code: body.code,
+      discordUserId: body.discordUserId,
+      discordUsername: body.discordUsername,
+    });
+    if (rec.ok) await saveStore(DATA_DIR, store);
+    return json(res, rec.ok ? 200 : 400, rec.ok ? { ok: true } : { error: rec.error });
   }
 
   if (req.method === 'GET' && pathname === '/v1/announcement') {
@@ -1654,4 +1838,7 @@ server.listen(PORT, HOST, async () => {
     setTimeout(tick, getPollMs(store));
   };
   setTimeout(tick, DEFAULT_POLL_MIN * 60 * 1000);
+  setInterval(() => {
+    pulseAllAlarms().catch((e) => console.error('[alarm]', e));
+  }, 8_000);
 });

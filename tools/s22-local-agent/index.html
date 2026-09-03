@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Local Agent</title>
+    <meta name="theme-color" content="#14120B" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14120b;
+        --text: #f2efe8;
+        --muted: #b7b1a3;
+        --accent: #f54e00;
+        --card: #1f1c14;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+      }
+      header { padding: 14px 16px 8px; }
+      header h1 { font-size: 1.15rem; margin: 0; }
+      header p { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
+      #log { flex: 1; overflow: auto; padding: 8px 16px 12px; }
+      .msg {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin: 8px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+      .msg.user { border: 1px solid #5a5346; }
+      .msg.agent { border: 1px solid #f54e00; }
+      .msg.err { border: 1px solid #c44; color: #f0b4b4; }
+      .msg.think {
+        border: 1px dashed #8a7a55;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+      .dots::after {
+        content: "";
+        animation: dots 1.2s steps(4, end) infinite;
+      }
+      @keyframes dots {
+        0% { content: ""; }
+        25% { content: "."; }
+        50% { content: ".."; }
+        75% { content: "..."; }
+      }
+      form {
+        display: flex;
+        gap: 8px;
+        padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+        border-top: 1px solid #2a261c;
+      }
+      textarea {
+        flex: 1;
+        min-height: 48px;
+        max-height: 140px;
+        resize: vertical;
+        border-radius: 10px;
+        border: 1px solid #5a5346;
+        background: #1f1c14;
+        color: var(--text);
+        padding: 10px;
+        font: inherit;
+      }
+      button {
+        background: var(--accent);
+        color: #14120b;
+        font-weight: 700;
+        border: 0;
+        border-radius: 10px;
+        padding: 0 16px;
+      }
+      button:disabled { opacity: 0.5; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Local Agent · this phone</h1>
+      <p id="status">checking…</p>
+      <p><button type="button" id="fresh" style="margin-top:8px;padding:6px 10px;font-size:12px">New chat</button></p>
+    </header>
+    <div id="log"></div>
+    <form id="f">
+      <textarea id="p" rows="2" placeholder="Ask the local agent (Wald SSH, this clone)…"></textarea>
+      <button type="submit" id="go">Send</button>
+    </form>
+    <script>
+      const log = document.getElementById("log");
+      const status = document.getElementById("status");
+      const form = document.getElementById("f");
+      const input = document.getElementById("p");
+      const go = document.getElementById("go");
+      const fresh = document.getElementById("fresh");
+      const KEY = "windsage-local-memory-v1";
+
+      function snapshot() {
+        return [...log.querySelectorAll(".msg")].map((el) => ({
+          cls: el.className.replace(/^msg\s+/, "").replace(/\s+dots$/, ""),
+          text: el.textContent || "",
+        }));
+      }
+
+      async function persist() {
+        const messages = snapshot();
+        try { localStorage.setItem(KEY, JSON.stringify(messages)); } catch {}
+        try {
+          await fetch("/v1/memory", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messages }),
+          });
+        } catch {}
+      }
+
+      function restoreList(messages) {
+        if (!Array.isArray(messages) || !messages.length) return false;
+        log.innerHTML = "";
+        for (const row of messages) {
+          if (!row || !row.text) continue;
+          add(row.cls || "agent", row.text);
+        }
+        return true;
+      }
+
+      async function restore() {
+        try {
+          const r = await fetch("/v1/memory");
+          const j = await r.json();
+          if (restoreList(j.messages)) return;
+        } catch {}
+        try {
+          restoreList(JSON.parse(localStorage.getItem(KEY) || "[]"));
+        } catch {}
+      }
+
+      function add(cls, text) {
+        const el = document.createElement("div");
+        el.className = "msg " + cls;
+        el.textContent = text;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+        return el;
+      }
+
+      function clip(s) {
+        if (s.length <= 280) return s;
+        return s.slice(0, 280) + "\n… (" + s.length.toLocaleString() + " chars)";
+      }
+
+      function fmt(ms) {
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return m + ":" + String(r).padStart(2, "0");
+      }
+
+      async function ping() {
+        try {
+          const r = await fetch("/health", { cache: "no-store" });
+          const j = await r.json();
+          status.textContent = j.cursorAgent
+            ? "local · cursor-agent ready · " + j.cwd
+            : "local server up · cursor-agent not logged in yet";
+          return true;
+        } catch {
+          status.textContent = "local server not reachable · retrying every 3s";
+          return false;
+        }
+      }
+      setInterval(() => { ping(); }, 3000);
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const prompt = input.value.trim();
+        if (!prompt) return;
+        add("user", clip(prompt));
+        input.value = "";
+        go.disabled = true;
+        const think = add("think", "Thinking");
+        think.classList.add("dots");
+        const agent = add("agent", "");
+        agent.style.display = "none";
+        const started = Date.now();
+        let eta = prompt.length > 2000 ? "5–10 min" : prompt.length > 200 ? "1–3 min" : "30–90 sec";
+        status.textContent = "Thinking · 0:00 · est. " + eta;
+        const clock = setInterval(() => {
+          status.textContent = "Thinking · " + fmt(Date.now() - started) + " · est. " + eta;
+        }, 500);
+        try {
+          const r = await fetch("/v1/chat", {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "text/event-stream" },
+            body: JSON.stringify({ prompt }),
+            cache: "no-store",
+          });
+          if (!r.body) throw new Error("no stream");
+          const reader = r.body.getReader();
+          const dec = new TextDecoder();
+          let carry = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            carry += dec.decode(value, { stream: true });
+            const parts = carry.split("\n\n");
+            carry = parts.pop() || "";
+            for (const part of parts) {
+              const line = part.split("\n").find((l) => l.startsWith("data: "));
+              if (!line) continue;
+              let ev;
+              try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+              if (ev.eta) eta = ev.eta;
+              if (ev.type === "tick" || ev.type === "status") {
+                const detail = ev.detail ? " · " + ev.detail : "";
+                think.textContent = (ev.phase === "starting" ? "Starting" : "Thinking") + detail;
+                think.classList.add("dots");
+                status.textContent = "Thinking · " + fmt(ev.elapsedMs || Date.now() - started) + " · est. " + eta;
+              } else if (ev.type === "think") {
+                think.textContent = "Thinking · " + (ev.text || "").slice(0, 180);
+                think.classList.add("dots");
+              } else if (ev.type === "tool") {
+                think.textContent = "Running " + (ev.name || "tool") + (ev.text ? " · " + ev.text : "");
+                think.classList.add("dots");
+              } else if (ev.type === "text" && ev.text) {
+                agent.style.display = "";
+                agent.textContent += ev.text;
+                log.scrollTop = log.scrollHeight;
+              } else if (ev.type === "error") {
+                add("err", ev.error || "error");
+              } else if (ev.type === "done") {
+                think.classList.remove("dots");
+                think.textContent = "Done · " + fmt(ev.elapsedMs || Date.now() - started) + " (est. " + eta + ")";
+                if (!agent.textContent.trim()) agent.textContent = "(no text — check thinking line)";
+                agent.style.display = "";
+              }
+            }
+          }
+        } catch (err) {
+          add("err", String(err));
+        } finally {
+          clearInterval(clock);
+          go.disabled = false;
+          await persist();
+          ping();
+        }
+      });
+
+      fresh.addEventListener("click", async () => {
+        log.innerHTML = "";
+        try { localStorage.removeItem(KEY); } catch {}
+        try {
+          await fetch("/v1/memory", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messages: [], continue: false }),
+          });
+        } catch {}
+        status.textContent = "New chat · next send starts a fresh session";
+      });
+
+      restore().then(ping);
+    </script>
+  </body>
+</html>

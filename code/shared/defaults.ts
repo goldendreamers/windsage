@@ -637,6 +637,8 @@ export function createFollowedStation(
     liveLinkWarning: partial?.liveLinkWarning ?? null,
     locationBlend: partial?.locationBlend ?? null,
     starred: partial?.starred === true,
+    wakeOnWind: partial?.wakeOnWind === true,
+    wakeOnWindVia: partial?.wakeOnWindVia === 'discord' ? 'discord' : 'native',
   };
 }
 

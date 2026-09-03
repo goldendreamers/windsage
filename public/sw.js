@@ -1,10 +1,9 @@
 /* Windsage service worker — Web Push + static cache
- * v9: skipWaiting only on first install; JS/CSS network-first so Update + reload
- * picks up a new bundle without uninstalling the PWA.
+ * v10: skipWaiting on first install; Update + reload; wake-on-wind Stop action.
  */
-const SW_VERSION = 'windsage-sw-v9';
-const STATIC_CACHE = 'windsage-static-v9';
-const SHELL_CACHE = 'windsage-shell-v9';
+const SW_VERSION = 'windsage-sw-v10';
+const STATIC_CACHE = 'windsage-static-v10';
+const SHELL_CACHE = 'windsage-shell-v10';
 const SHELL_URLS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -218,6 +217,7 @@ self.addEventListener('push', (event) => {
     swVersion: SW_VERSION,
     receivedAt: Date.now(),
   };
+  const isAlarm = data.alarm === true || data.alarm === '1' || data.kind === 'alarm';
 
   event.waitUntil(
     self.registration
@@ -226,13 +226,18 @@ self.addEventListener('push', (event) => {
         icon: assetUrl('/notify-icon.png'),
         badge: assetUrl('/badge-96.png'),
         data,
-        tag: `${followId}-${Date.now()}`,
+        tag: isAlarm ? `windsage-alarm-${followId}` : `${followId}-${Date.now()}`,
         renotify: true,
         requireInteraction: true,
         silent: false,
-        vibrate: [300, 120, 300, 120, 500],
+        vibrate: isAlarm ? [400, 120, 400, 120, 600, 120, 800] : [300, 120, 300, 120, 500],
         timestamp: Date.now(),
-        actions: [{ action: 'open', title: 'Open Windsage' }],
+        actions: isAlarm
+          ? [
+              { action: 'open', title: 'Open' },
+              { action: 'stop', title: 'Stop ringing' },
+            ]
+          : [{ action: 'open', title: 'Open Windsage' }],
       })
       .then(async () => {
         try {
@@ -242,7 +247,7 @@ self.addEventListener('push', (event) => {
           });
           for (const client of clients) {
             client.postMessage({
-              type: 'windsage-push',
+              type: isAlarm ? 'windsage-alarm' : 'windsage-push',
               title,
               body,
               data,
@@ -257,13 +262,27 @@ self.addEventListener('push', (event) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
+  const data = event.notification.data || {};
+  const stop = event.action === 'stop';
+  const isAlarm = data.alarm === true || data.alarm === '1' || data.kind === 'alarm';
   event.notification.close();
-  const target = '/';
+  const target = stop ? '/?wake=stop' : isAlarm ? '/?wake=1' : '/';
   event.waitUntil(
     (async () => {
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of all) {
         if ('focus' in client) {
+          try {
+            client.postMessage({
+              type: stop ? 'windsage-alarm-stop' : isAlarm ? 'windsage-alarm' : 'windsage-push',
+              title: event.notification.title,
+              body: event.notification.body,
+              data,
+              at: Date.now(),
+            });
+          } catch {
+            // ignore
+          }
           await client.focus();
           if ('navigate' in client) {
             try {

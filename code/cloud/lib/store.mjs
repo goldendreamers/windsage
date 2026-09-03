@@ -242,7 +242,10 @@ export function simpleModeOf(bag) {
 }
 
 export function applySimpleMode(bag, body) {
-  if (typeof body?.simpleMode === 'boolean') bag.simpleMode = body.simpleMode;
+  if (typeof body?.simpleMode === 'boolean') {
+    bag.simpleMode = body.simpleMode;
+    if (body.simpleMode === true) bag.windAlarm = null;
+  }
 }
 
 export function findUserByUsername(store, username) {
@@ -559,5 +562,8 @@ export function publicUser(user) {
     simpleMode: user.simpleMode !== false,
     notifyPrefs: user.notifyPrefs || { preset: 'normal', timesPerDay: 1, how: 'phone' },
     stationCount: (user.stations || []).length,
+    discordAlert: user.discordAlert?.discordUserId
+      ? { linked: true, username: user.discordAlert.discordUsername || null }
+      : { linked: false, username: null },
   };
 }

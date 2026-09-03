@@ -6,6 +6,9 @@ import { AppState, Linking, Platform, Pressable, SafeAreaView, Share, StyleSheet
 import { BootScreen } from '../components/BootScreen';
 import { AppMenu } from '../components/AppMenu';
 import { FirstTimeBanner, dismissHowto, getHowtoDismissed, type HowtoScreen } from '../components/FirstTimeBanner';
+import { TrevorSupportSheet } from '../components/TrevorSupportSheet';
+import { DiscordAlertSheet } from '../components/DiscordAlertSheet';
+import { WindAlarmOverlay, type WindAlarmState } from '../components/WindAlarmOverlay';
 import { AccountScreen } from '../screens/AccountScreen';
 import { DownloadScreen } from '../screens/DownloadScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -26,13 +29,14 @@ import {
   resetCloudAlert,
   sendAlertFeedback,
   snapshotsToLive,
+  stopCloudWindAlarm,
   syncStationsToCloud,
 } from '../core/cloud';
 import { DEFAULT_SETTINGS, applyMonitoringSchedules, cloudCoveredByLocal, createFollowedStation, displayName, findExistingFollow, mergeFollowedStations, moveFollow, normalizeNotifyPrefs, resolveNotifyPrefs, toggleFollowStar, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
-import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription } from '../core/notifications';
-import { initPwaInstallCapture, registerPwaServiceWorker, subscribeAppUpdate, applyAppUpdate } from '../core/pwaInstall';
+import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
+import { applyAppUpdate, initPwaInstallCapture, registerPwaServiceWorker, subscribeAppUpdate } from '../core/pwaInstall';
 import { unregisterBackgroundFetch } from '../core/background';
 import { followTargetFromResolved, resolveFollowInput } from '../core/stations';
 import {
@@ -80,6 +84,36 @@ function adoptCloudStations(
     return mergeFollowedStations(cloud, loc);
   }
   return cloud;
+}
+
+function windAlarmFromCloud(raw: {
+  followId?: string | null;
+  title?: string;
+  body?: string;
+  via?: string;
+} | null | undefined): WindAlarmState | null {
+  if (!raw?.title) return null;
+  return {
+    title: raw.title,
+    body: raw.body || 'Wind is up',
+    via: raw.via === 'discord' ? 'discord' : 'native',
+    followId: raw.followId || null,
+  };
+}
+
+function consumeWakeQuery(): 'stop' | 'show' | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  try {
+    const url = new URL(window.location.href);
+    const wake = url.searchParams.get('wake');
+    if (!wake) return null;
+    url.searchParams.delete('wake');
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(window.history.state, '', next);
+    return wake === 'stop' ? 'stop' : 'show';
+  } catch {
+    return null;
+  }
 }
 
 async function hapticLight() {
@@ -147,12 +181,15 @@ export default function App() {
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [trevorOpen, setTrevorOpen] = useState(false);
+  const [discordAlertOpen, setDiscordAlertOpen] = useState(false);
   const [howtoDismissed, setHowtoDismissed] = useState(true);
   const startedEmptyRef = useRef(false);
   const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
   const [catalogStations, setCatalogStations] = useState<CatalogStation[]>([]);
   const [appUpdate, setAppUpdate] = useState({ available: false, waiting: false });
+  const [windAlarm, setWindAlarm] = useState<WindAlarmState | null>(null);
 
   const [cloudWarmed, setCloudWarmed] = useState(false);
   const [shareTick, setShareTick] = useState(0);
@@ -174,6 +211,15 @@ export default function App() {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  const stopWindAlarmLocal = useCallback(async () => {
+    setWindAlarm(null);
+    try {
+      await stopCloudWindAlarm();
+    } catch {
+      // overlay already closed
+    }
   }, []);
 
   const loadCatalog = useCallback(async () => {
@@ -246,6 +292,8 @@ export default function App() {
             await saveSettings(next);
           }
         }
+        const nextAlarm = windAlarmFromCloud(snap.windAlarm);
+        if (nextAlarm) setWindAlarm(nextAlarm);
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
@@ -393,6 +441,24 @@ export default function App() {
         setLastPollAt(Date.now());
         setCloudStatus('cloud · just now');
         const snap = snapshots[station.id];
+        if (snap?.result?.shouldNotify) {
+          const wake =
+            station.wakeOnWind === true && settingsRef.current.simpleMode === false;
+          if (wake) {
+            const via =
+              station.wakeOnWindVia === 'discord' && account?.discordAlert?.linked
+                ? 'discord'
+                : 'native';
+            setWindAlarm({
+              title: displayName(station),
+              body: snap.result.message || 'Wind is up',
+              via,
+              followId: station.id,
+            });
+          } else {
+            await sendThresholdNotification(station, snap.result);
+          }
+        }
         const resolved = resolveNotifyPrefs(settingsRef.current.notifyPrefs, {
           hasGoogleEmail: !!account?.sso?.google?.email,
         });
@@ -400,11 +466,13 @@ export default function App() {
         await hapticLight();
         showToast(
           snap?.result?.shouldNotify
-            ? failed
-              ? 'Alert ready — allow notifications or install the app'
-              : resolved.email && !resolved.push
-                ? 'Alert emailed'
-                : 'Alert fired — check phone notifications'
+            ? station.wakeOnWind && settingsRef.current.simpleMode === false
+              ? 'Wake-up ringing — tap Stop'
+              : failed
+                ? 'Alert ready — allow notifications or install the app'
+                : resolved.email && !resolved.push
+                  ? 'Alert emailed'
+                  : 'Alert fired — check phone notifications'
             : 'Cloud check complete',
         );
       } catch (error) {
@@ -414,7 +482,7 @@ export default function App() {
         setCheckingId(null);
       }
     },
-    [applySnapshots, showToast, account],
+    [account, applySnapshots, showToast],
   );
 
   const openDownload = useCallback(() => {
@@ -457,6 +525,35 @@ export default function App() {
     if (Platform.OS !== 'web') return undefined;
     return subscribeAppUpdate(setAppUpdate);
   }, []);
+
+  useEffect(() => {
+    const wake = consumeWakeQuery();
+    if (wake === 'stop') void stopWindAlarmLocal();
+  }, [stopWindAlarmLocal]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.serviceWorker) {
+      return;
+    }
+    const onMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'windsage-alarm-stop') {
+        void stopWindAlarmLocal();
+        return;
+      }
+      if (msg.type === 'windsage-alarm' || msg.data?.alarm === true || msg.data?.alarm === '1' || msg.data?.kind === 'alarm') {
+        setWindAlarm({
+          title: String(msg.title || 'WAKE UP'),
+          body: String(msg.body || 'Wind is up'),
+          via: msg.data?.via === 'discord' ? 'discord' : 'native',
+          followId: msg.data?.followId || null,
+        });
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [stopWindAlarmLocal]);
 
   // Native deep-link fallback if AuthSession hands off via windsage://auth
   useEffect(() => {
@@ -600,7 +697,12 @@ export default function App() {
       const stations = settingsRef.current.stations.map((s) => (s.id === next.id ? next : s));
       const payload = { ...settingsRef.current, stations };
       setSettings(payload);
-      if (persist) await persistSettings(payload);
+      if (persist) {
+        if (next.wakeOnWind && next.wakeOnWindVia !== 'discord') {
+          void ensureNotificationPermissions();
+        }
+        await persistSettings(payload);
+      }
     },
     [persistSettings],
   );
@@ -850,7 +952,7 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.bg }]}>
       <StatusBar style="light" />
-      {showHowto && !addOpen && !simpleMode ? (
+      {showHowto && !addOpen ? (
         <FirstTimeBanner
           screen={howtoScreen}
           simple={simpleMode}
@@ -873,6 +975,7 @@ export default function App() {
         <DownloadScreen
           onBack={closeDownload}
           onOpenMenu={() => setMenuOpen(true)}
+          onDiscordAlerts={simpleMode ? undefined : () => setDiscordAlertOpen(true)}
           onOpenApp={() => {
             closeDownload();
           }}
@@ -882,6 +985,7 @@ export default function App() {
           simpleMode={simpleMode}
           onBack={() => setAccountOpen(false)}
           onOpenMenu={() => setMenuOpen(true)}
+          simpleMode={simpleMode}
           onAuthed={(payload, opts) => void applyAccountPayload(payload, opts)}
           onLoggedOut={() => {
             setAccount(null);
@@ -946,6 +1050,8 @@ export default function App() {
           shareUrl={buildShareFollowUrl(activeStation)}
           onShare={() => void shareStation(activeStation)}
           onOpenMenu={() => setMenuOpen(true)}
+          onDiscordAlerts={simpleMode ? undefined : () => setDiscordAlertOpen(true)}
+          discordAlertLinked={!!account?.discordAlert?.linked}
           simpleMode={simpleMode}
         />
       ) : (
@@ -988,6 +1094,10 @@ export default function App() {
         visible={menuOpen}
         simpleMode={simpleMode}
         onToggleSimple={(on) => {
+          if (on) {
+            setWindAlarm(null);
+            void stopCloudWindAlarm().catch(() => undefined);
+          }
           void persistSettings({ ...settingsRef.current, simpleMode: on });
         }}
         notifyPrefs={settings.notifyPrefs}
@@ -1015,6 +1125,8 @@ export default function App() {
         }}
         onInstall={openDownload}
         onUpdate={appUpdate.available ? () => void applyAppUpdate() : undefined}
+        onDiscordAlerts={simpleMode ? undefined : () => setDiscordAlertOpen(true)}
+        onTrevorSupport={() => setTrevorOpen(true)}
       />
 
       {simpleMode ? null : (
@@ -1031,6 +1143,21 @@ export default function App() {
         <Text style={[styles.donateBarText, { color: palette.muted }]}>Support Windsage</Text>
       </Pressable>
       )}
+
+      <TrevorSupportSheet visible={trevorOpen} onClose={() => setTrevorOpen(false)} />
+      <DiscordAlertSheet
+        visible={discordAlertOpen}
+        signedIn={!!account}
+        onClose={() => setDiscordAlertOpen(false)}
+        onSignIn={() => {
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAccountOpen(true);
+        }}
+        onUser={setAccount}
+      />
+
+      <WindAlarmOverlay alarm={windAlarm} onStop={() => void stopWindAlarmLocal()} />
 
       {toast ? (
         <View style={[styles.toast, { borderColor: palette.accent, backgroundColor: palette.bgLift }, simpleMode && { bottom: 20 }]}>
@@ -1050,12 +1177,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   donateBar: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
+  },
+  donateLink: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  donateSep: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
   },
   donateBarText: {
     color: colors.muted,

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Agent offline</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: #14120b;
+        color: #f2efe8;
+        padding: 28px 20px;
+        line-height: 1.45;
+      }
+      p { color: #b7b1a3; }
+    </style>
+  </head>
+  <body>
+    <h1>Starting local agent…</h1>
+    <p id="s">Retrying 127.0.0.1 and the phone Tailscale IP. Leave this open.</p>
+    <script>
+      const urls = ["http://127.0.0.1:8790/", "http://100.124.6.109:8790/"];
+      let i = 0;
+      async function tick() {
+        const u = urls[i++ % urls.length];
+        document.getElementById("s").textContent = "Trying " + u;
+        try {
+          const r = await fetch(u + "health", { cache: "no-store" });
+          if (r.ok) location.replace(u);
+        } catch (e) {}
+      }
+      tick();
+      setInterval(tick, 2500);
+    </script>
+  </body>
+</html>

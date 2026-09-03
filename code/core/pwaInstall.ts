@@ -7,7 +7,7 @@
  * Android if the install dialog is missing: download /app/windsage.apk when present,
  * otherwise bounce out of in-app browsers into Chrome so the dialog can appear.
  */
-export const PWA_SW_VERSION = '9';
+export const PWA_SW_VERSION = '10';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;

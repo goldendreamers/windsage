@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Agent — install</title>
+    <meta name="theme-color" content="#14120B" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14120b;
+        --text: #f2efe8;
+        --muted: #b7b1a3;
+        --accent: #f54e00;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+      }
+      main { max-width: 560px; margin: 0 auto; padding: 36px 20px 72px; }
+      h1 { font-size: 1.8rem; margin: 0 0 8px; }
+      p, li { color: var(--muted); }
+      a { color: var(--accent); }
+      .btn {
+        display: block;
+        text-align: center;
+        text-decoration: none;
+        background: var(--accent);
+        color: #14120b;
+        font-weight: 700;
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin: 18px 0 10px;
+      }
+      .note { font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local Agent</h1>
+      <p>This APK opens a <strong>local</strong> agent on this phone (<code>127.0.0.1:8790</code> in Termux). It is not cursor.com/agents and not a cloud VM.</p>
+      <p class="note">Uninstall the old <strong>Cursor Agent</strong> icon first (that one was a cloud shortcut). Then install this file.</p>
+      <a class="btn" href="/cursor-face/local-agent-v5.apk" download>Download Local Agent v5 (APK)</a>
+      <p class="note">After install: if the app says the local agent is not running, open Termux once so sshd + the local-agent service stay up, then reopen the app. You must finish <code>cursor-agent login</code> in Termux (one-time).</p>
+      <p class="note">cursor.com/agents is a different thing (cloud). Do not use that if you want Wald SSH from this phone.</p>
+    </main>
+  </body>
+</html>

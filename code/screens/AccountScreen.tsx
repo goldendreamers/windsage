@@ -19,10 +19,13 @@ import {
   logoutAccount,
   pullMyStations,
   registerAccount,
+  startDiscordAlertLink,
   startGoogleSignIn,
+  unlinkDiscordAlert,
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
+import { DiscordAlertPanel } from '../components/DiscordAlertPanel';
 import { isInstalledPwa } from '../core/notifications';
 import { isRunningAsInstalledApp } from '../core/pwaInstall';
 
@@ -52,6 +55,7 @@ export function AccountScreen({ onBack, onOpenMenu, simpleMode = true, onAuthed,
   const [error, setError] = useState<string | null>(null);
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [discordCode, setDiscordCode] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +303,35 @@ export function AccountScreen({ onBack, onOpenMenu, simpleMode = true, onAuthed,
           notifications.
         </Text>
       </Section>
+
+      {simpleMode ? null : (
+      <Section title="Link Discord for alert DMs" icon="bell">
+        <DiscordAlertPanel
+          signedIn={!!user}
+          linked={!!user?.discordAlert?.linked}
+          username={user?.discordAlert?.username || null}
+          code={discordCode}
+          busy={busy}
+          inviteUrl={(providers as { discordInvite?: string | null }).discordInvite || null}
+          onSignIn={() => {
+            setError('Sign in above first, then come back here for a Discord code.');
+          }}
+          onGetCode={() => {
+            void run(async () => {
+              const started = await startDiscordAlertLink();
+              setDiscordCode(started.code);
+            });
+          }}
+          onUnlink={() => {
+            void run(async () => {
+              const next = await unlinkDiscordAlert();
+              setDiscordCode(null);
+              if (next) setUser((u) => (u ? { ...u, discordAlert: next } : u));
+            });
+          }}
+        />
+      </Section>
+      )}
 
       {simpleMode ? null : (
       <Pressable

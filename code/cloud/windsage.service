@@ -15,13 +15,10 @@ Environment=WINDSAGE_DATA=/data/windsage/data
 Environment=WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 # Optional secrets (GOOGLE_*, FACEBOOK_*, APPLE_*, and HTTPS PUBLIC_URL override):
 #   /data/windsage/oauth.env  (see oauth.env.example)
-# Canonical public HTTPS (Cloudflare Tunnel on nimrod.bio):
-#   WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
-# Google redirect URI (exact):
-#   https://windsage.nimrod.bio/v1/auth/google/callback
-# Tailscale MagicDNS (tailnet HTTP fallback):
-#   http://waldhomeserver.taild8a1d4.ts.net:8787
+# Discord alert DMs (separate bot — not Helper, not website OAuth):
+#   /data/windsage/discord-alert.env
 EnvironmentFile=-/data/windsage/oauth.env
+EnvironmentFile=-/data/windsage/discord-alert.env
 ExecStart=/usr/bin/node /data/windsage/server.mjs
 Restart=always
 RestartSec=5

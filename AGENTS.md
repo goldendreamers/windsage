@@ -1,6 +1,6 @@
 # Windsage — agent guide
 
-Start with [`CLOUD_AGENT_CONTEXT.md`](./CLOUD_AGENT_CONTEXT.md) and [`README.md`](./README.md) for the product overview, repo map, and mandatory repo rules (never wipe `store.json` users/stations; email via `scripts/notify-email.sh`; check versioned Expo docs). Expo version notes: [`docs/AGENTS.md`](./docs/AGENTS.md).
+Start with [`CLOUD_AGENT_CONTEXT.md`](./CLOUD_AGENT_CONTEXT.md) and [`README.md`](./README.md) for the product overview, repo map, and mandatory repo rules (never wipe `store.json` users/stations; email via `scripts/notify-email.sh`; check versioned Expo docs). A **second laptop** that SSHs to Wald should use [`MAC_AGENT_CONTEXT.md`](./MAC_AGENT_CONTEXT.md) instead of treating this as a Cursor Cloud VM. Expo version notes: [`docs/AGENTS.md`](./docs/AGENTS.md).
 
 ## Cursor Cloud specific instructions
 

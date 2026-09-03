@@ -52,6 +52,7 @@ export type CloudUser = {
   simpleMode?: boolean;
   notifyPrefs?: NotifyPrefs;
   stationCount: number;
+  discordAlert?: { linked: boolean; username: string | null };
 };
 
 type DeviceCreds = { deviceId: string; secret: string };
@@ -186,11 +187,11 @@ export async function fetchAuthProviders(): Promise<{
   google: boolean;
   facebook: boolean;
   apple: boolean;
+  discordInvite?: string | null;
 }> {
-  const data = await cloudFetch<{ providers: { google: boolean; facebook: boolean; apple: boolean } }>(
-    '/v1/auth/providers',
-    { method: 'GET' },
-  );
+  const data = await cloudFetch<{
+    providers: { google: boolean; facebook: boolean; apple: boolean; discordInvite?: string | null };
+  }>('/v1/auth/providers', { method: 'GET' });
   return data.providers;
 }
 
@@ -289,6 +290,27 @@ export async function fetchMe(): Promise<CloudUser | null> {
     await setSessionToken(null);
     return null;
   }
+}
+
+export async function startDiscordAlertLink(): Promise<{ code: string; expiresAt: number }> {
+  const token = await getSessionToken();
+  if (!token) throw new CloudError('Sign in first');
+  const data = await cloudFetch<{ code: string; expiresAt: number }>('/v1/me/discord-alert/start', {
+    method: 'POST',
+    token,
+    body: '{}',
+  });
+  return { code: data.code, expiresAt: data.expiresAt };
+}
+
+export async function unlinkDiscordAlert(): Promise<CloudUser['discordAlert']> {
+  const token = await getSessionToken();
+  if (!token) throw new CloudError('Sign in first');
+  const data = await cloudFetch<{ discordAlert?: CloudUser['discordAlert'] }>('/v1/me/discord-alert', {
+    method: 'DELETE',
+    token,
+  });
+  return data.discordAlert || { linked: false, username: null };
 }
 
 export async function pullMyStations(): Promise<AppSettings | null> {
@@ -628,6 +650,13 @@ export async function fetchCloudSnapshot(): Promise<{
   stations?: FollowedStation[];
   simpleMode?: boolean;
   notifyPrefs?: NotifyPrefs;
+  windAlarm?: {
+    followId: string | null;
+    title: string;
+    body: string;
+    via: 'native' | 'discord';
+    startedAt: number | null;
+  } | null;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -638,6 +667,13 @@ export async function fetchCloudSnapshot(): Promise<{
       stations: FollowedStation[];
       simpleMode?: boolean;
       notifyPrefs?: NotifyPrefs;
+      windAlarm?: {
+        followId: string | null;
+        title: string;
+        body: string;
+        via: 'native' | 'discord';
+        startedAt: number | null;
+      } | null;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
@@ -646,6 +682,7 @@ export async function fetchCloudSnapshot(): Promise<{
       stations: data.stations,
       simpleMode: data.simpleMode !== false,
       notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
+      windAlarm: data.windAlarm || null,
     };
   }
 
@@ -657,6 +694,13 @@ export async function fetchCloudSnapshot(): Promise<{
     stations: FollowedStation[];
     simpleMode?: boolean;
     notifyPrefs?: NotifyPrefs;
+    windAlarm?: {
+      followId: string | null;
+      title: string;
+      body: string;
+      via: 'native' | 'discord';
+      startedAt: number | null;
+    } | null;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -668,6 +712,7 @@ export async function fetchCloudSnapshot(): Promise<{
     stations: data.stations,
     simpleMode: data.simpleMode !== false,
     notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
+    windAlarm: data.windAlarm || null,
   };
 }
 
@@ -709,6 +754,24 @@ export async function resetCloudAlert(followId: string): Promise<void> {
     method: 'POST',
     secret: creds.secret,
     body: JSON.stringify({ followId }),
+  });
+}
+
+export async function stopCloudWindAlarm(): Promise<void> {
+  const session = await getSessionToken();
+  if (session) {
+    await cloudFetch('/v1/me/wind-alarm/stop', {
+      method: 'POST',
+      token: session,
+      body: JSON.stringify({}),
+    });
+    return;
+  }
+  const creds = await getDeviceCreds();
+  await cloudFetch(`/v1/devices/${encodeURIComponent(creds.deviceId)}/wind-alarm/stop`, {
+    method: 'POST',
+    secret: creds.secret,
+    body: JSON.stringify({}),
   });
 }
 

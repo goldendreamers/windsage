@@ -62,7 +62,7 @@ export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; sim
         {!hasStation ? (
           <Text style={[styles.tagline, { color: palette.muted }]}>
             {simpleMode
-              ? 'Add a station. Get a ping when the wind is up.'
+              ? 'Add a station. Put Windsage on the home screen. Get a ping when the wind is up.'
               : 'Follow a spot. Get notified when it holds.'}
           </Text>
         ) : null}

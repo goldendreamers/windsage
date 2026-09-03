@@ -29,6 +29,8 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     liveLinkWarning: raw.liveLinkWarning ?? null,
     locationBlend: raw.locationBlend ?? null,
     starred: raw.starred === true,
+    wakeOnWind: raw.wakeOnWind === true,
+    wakeOnWindVia: raw.wakeOnWindVia === 'discord' ? 'discord' : 'native',
   });
 }
 

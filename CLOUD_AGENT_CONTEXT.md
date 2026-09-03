@@ -137,6 +137,7 @@ After you give the prompt, clear **Pending** in [`docs/MAC_AGENT_PROMPTS.md`](do
 
 | File | Purpose |
 | --- | --- |
+| `MAC_AGENT_CONTEXT.md` | **Second laptop:** Tailscale, `ssh wald-mc`, `.env.smtp`, Wald env paths, paste-ready prompt |
 | `README.md` | Product + ops overview |
 | `docs/OUTSTANDING.md` | Blocked / needed from operator |
 | `docs/PROGRESS_REVIEW.md` | External review (partially superseded) |

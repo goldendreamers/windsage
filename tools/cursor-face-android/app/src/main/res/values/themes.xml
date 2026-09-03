@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CursorFace" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">#14120B</item>
+        <item name="android:statusBarColor">#14120B</item>
+        <item name="android:navigationBarColor">#14120B</item>
+    </style>
+</resources>

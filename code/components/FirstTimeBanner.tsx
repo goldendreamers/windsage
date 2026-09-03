@@ -30,19 +30,19 @@ const STEPS: { id: Exclude<HowtoScreen, 'home'>; n: number; short: string; hint:
     id: 'station',
     n: 2,
     short: 'Alert',
-    hint: 'Open the station and set when to notify (wind, gust, temp, or waves)',
+    hint: 'Open the station and set when to notify (wind, gust, temp, or waves). Alerts go to this phone and Discord if linked.',
   },
   {
     id: 'install',
     n: 3,
     short: 'Install',
-    hint: 'Menu → Install app — downloads Windsage onto this phone',
+    hint: 'Menu → Install app for lock-screen. Discord DMs: Menu → Discord alerts (join, code, /link)',
   },
   {
     id: 'account',
     n: 4,
     short: 'Account',
-    hint: 'Menu → Account to sync this list on another phone',
+    hint: 'Menu → Account to sync, then Discord alerts (join, code, /link) if you want DMs',
   },
 ];
 
@@ -60,8 +60,14 @@ const SIMPLE_STEPS: typeof STEPS = [
     hint: 'Open the station and pick when to ping you',
   },
   {
-    id: 'account',
+    id: 'install',
     n: 3,
+    short: 'Install',
+    hint: 'Menu → Put on home screen. Simple mode needs the app on this phone for pings.',
+  },
+  {
+    id: 'account',
+    n: 4,
     short: 'Sign in',
     hint: 'Menu → Sign in if you want this list on another phone',
   },

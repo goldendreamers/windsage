@@ -31,6 +31,7 @@ import {
 } from '../code/cloud/lib/monitoring.mjs';
 import { applyNotifyPrefs, resolveNotifyPrefs } from '../code/cloud/lib/notifyPrefs.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
+import { sanitizeDiscordInvite } from '../code/cloud/lib/oauth.mjs';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'windsage-auth-'));
 
@@ -219,5 +220,8 @@ assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: false })
 assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: true }).email, true);
 assert.equal(resolveNotifyPrefs({ preset: 'annoying' }).push, true);
 assert.equal(publicUser(found)?.notifyPrefs?.preset, 'normal');
+assert.equal(sanitizeDiscordInvite('https://discord.gg/uZSeqTcYq'), 'https://discord.gg/uZSeqTcYq');
+assert.equal(sanitizeDiscordInvite('https://discord.com/invite/uZSeqTcYq'), 'https://discord.gg/uZSeqTcYq');
+assert.equal(sanitizeDiscordInvite('https://evil.example/discord.gg/abc'), '');
 
 console.log('check-auth: ok');

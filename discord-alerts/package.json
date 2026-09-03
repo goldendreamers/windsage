@@ -1,0 +1,16 @@
+{
+  "name": "windsage-discord-alerts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Windsage Discord alert DMs. Separate from Helper, website OAuth, and Cursor ops.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  }
+}

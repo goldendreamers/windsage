@@ -172,6 +172,8 @@ type Props = {
   onResetAlert: () => void;
   onUnfollow: () => void;
   onOpenMenu?: () => void;
+  onDiscordAlerts?: () => void;
+  discordAlertLinked?: boolean;
   onAlertFeedback?: (rating: 'good' | 'meh') => Promise<void> | void;
   shareUrl?: string;
   onShare?: () => void;
@@ -196,6 +198,8 @@ export function StationDetailScreen({
   shareUrl,
   onShare,
   onOpenMenu,
+  onDiscordAlerts,
+  discordAlertLinked = false,
   simpleMode = false,
 }: Props) {
   const [saving, setSaving] = useState(false);
@@ -781,19 +785,100 @@ export function StationDetailScreen({
         />
       </Section>
 
-      <View style={[styles.block, styles.rowBetween]}>
-        <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={styles.sectionTitle}>Monitoring</Text>
-          {monitor.detailHint ? <Text style={styles.hint}>{monitor.detailHint}</Text> : null}
+      <View style={styles.block}>
+        <View style={styles.rowBetween}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.sectionTitle}>Monitoring</Text>
+            {monitor.detailHint ? <Text style={styles.hint}>{monitor.detailHint}</Text> : (
+              <Text style={styles.hint}>
+                Phone, and Discord DMs after you link (Join Discord → code → /link).
+              </Text>
+            )}
+          </View>
+          <Switch
+            value={station.enabled !== false}
+            onValueChange={openMonitorDuration}
+            trackColor={{ false: '#23404C', true: palette.accent }}
+            thumbColor="#fff"
+            accessibilityLabel="Monitoring"
+          />
         </View>
-        <Switch
-          value={station.enabled !== false}
-          onValueChange={openMonitorDuration}
-          trackColor={{ false: '#23404C', true: palette.accent }}
-          thumbColor="#fff"
-          accessibilityLabel="Monitoring"
-        />
+        {station.enabled === false ? null : (
+          <>
+            <View style={[styles.rowBetween, styles.spaced]}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.label}>Wake me up when there is wind</Text>
+                <Text style={styles.hint}>
+                  Keeps ringing until you tap Stop. One ping is not enough.
+                </Text>
+              </View>
+              <Switch
+                value={station.wakeOnWind === true}
+                onValueChange={(wakeOnWind) => {
+                  void Haptics.selectionAsync();
+                  onPersist({
+                    ...station,
+                    wakeOnWind,
+                    wakeOnWindVia: station.wakeOnWindVia === 'discord' ? 'discord' : 'native',
+                  });
+                }}
+                trackColor={{ false: '#23404C', true: palette.accent }}
+                thumbColor="#fff"
+              />
+            </View>
+            {station.wakeOnWind ? (
+              <>
+                <Text style={[styles.label, styles.spaced]}>Ring via</Text>
+                <View style={styles.segment}>
+                  {([
+                    { id: 'native' as const, label: 'This phone' },
+                    { id: 'discord' as const, label: 'Discord DMs' },
+                  ]).map((opt) => {
+                    const active = (station.wakeOnWindVia === 'discord' ? 'discord' : 'native') === opt.id;
+                    return (
+                      <Pressable
+                        key={opt.id}
+                        style={[styles.segmentItem, active && styles.segmentItemActive]}
+                        onPress={() => {
+                          void Haptics.selectionAsync();
+                          onPersist({ ...station, wakeOnWind: true, wakeOnWindVia: opt.id });
+                          if (opt.id === 'discord' && !discordAlertLinked && onDiscordAlerts) {
+                            onDiscordAlerts();
+                          }
+                        }}
+                      >
+                        <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.hint}>
+                  {station.wakeOnWindVia === 'discord'
+                    ? discordAlertLinked
+                      ? 'Discord will DM you every ~30 seconds until you stop it. This phone will not siren.'
+                      : 'Link Discord alerts first — until then this phone rings instead.'
+                    : 'This phone keeps pushing and sirens in the app until you stop it.'}
+                </Text>
+              </>
+            ) : null}
+          </>
+        )}
       </View>
+      {onDiscordAlerts ? (
+        <Pressable
+          style={styles.secondaryBtn}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onDiscordAlerts();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Discord alerts"
+        >
+          <Text style={styles.secondaryBtnText}>Discord alerts</Text>
+        </Pressable>
+      ) : null}
       </>
       )}
 

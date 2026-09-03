@@ -1,0 +1,22 @@
+{
+  "source": "Windguru public station_list (https://www.windguru.cz/int/iapi.php?q=station_list)",
+  "scope": "live sensor stations only — not forecast spots",
+  "writtenAt": "2026-08-28T12:52:38.501Z",
+  "liveStations": 6926,
+  "named": 6925,
+  "uniqueNames": 5959,
+  "files": {
+    "oneNamePerLine": {
+      "bytes": 104180,
+      "name": "windguru-live-station-names.txt"
+    },
+    "uniqueNamesOnePerLine": {
+      "bytes": 91737,
+      "name": "windguru-live-station-names.unique.txt"
+    },
+    "uniqueNamesJsonArray": {
+      "bytes": 103673,
+      "name": "windguru-live-station-names.json"
+    }
+  }
+}

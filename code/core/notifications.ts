@@ -73,6 +73,13 @@ export async function configureAndroidChannel(): Promise<void> {
         vibrationPattern: [0, 250, 200, 250],
         lightColor: '#3DB8A0',
       });
+      await Notifications.setNotificationChannelAsync('windsage-alarm', {
+        name: 'Windsage wake up',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 400, 200, 400, 200, 600],
+        lightColor: '#E85A5A',
+        sound: 'default',
+      });
     } catch {
       // ignore
     }
@@ -181,12 +188,16 @@ export async function sendThresholdNotification(
   if (!allowed) return;
 
   const { title, body } = formatAlertNotificationCopy(station, result);
+  const wake = station.wakeOnWind === true && station.enabled !== false;
+  const via = station.wakeOnWindVia === 'discord' ? 'discord' : 'native';
   const data = {
     followId: station.id,
     stationId: station.stationId,
     liveStationId: station.liveStationId || station.linkedLiveStation?.id || station.stationId,
     metric: station.rule.metric,
-    kind: 'alert',
+    kind: wake ? 'alarm' : 'alert',
+    alarm: wake ? '1' : '',
+    via,
   };
 
   if (Platform.OS === 'web') {
@@ -203,7 +214,9 @@ export async function sendThresholdNotification(
         body,
         data,
         sound: true,
-        ...(Platform.OS === 'android' ? { channelId: 'windsage-alerts' } : {}),
+        ...(Platform.OS === 'android'
+          ? { channelId: wake ? 'windsage-alarm' : 'windsage-alerts' }
+          : {}),
       },
       trigger: null,
     });

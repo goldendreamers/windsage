@@ -40,6 +40,8 @@ type Props = {
   hasGoogleEmail?: boolean;
   onChangeNotifyPrefs?: (prefs: NotifyPrefs) => void;
   onNeedGoogle?: () => void;
+  onDiscordAlerts?: () => void;
+  onTrevorSupport?: () => void;
 };
 
 export function AppMenu({
@@ -55,6 +57,8 @@ export function AppMenu({
   hasGoogleEmail = false,
   onChangeNotifyPrefs,
   onNeedGoogle,
+  onDiscordAlerts,
+  onTrevorSupport,
 }: Props) {
   const [section, setSection] = useState<MenuSection>('main');
   const palette = paletteForMode(simpleMode);
@@ -107,6 +111,14 @@ export function AppMenu({
       onPress: () => run(onUpdate),
     });
   }
+  if (onDiscordAlerts && !simpleMode) {
+    appRows.push({
+      key: 'discord',
+      label: 'Discord alerts',
+      sub: 'Join Discord, get a code, type /link',
+      onPress: () => run(onDiscordAlerts),
+    });
+  }
 
   const aboutRows: Row[] = [];
   if (!simpleMode) {
@@ -124,6 +136,13 @@ export function AppMenu({
         onPress: () => run(openDeveloperEmail),
       },
     );
+  }
+  if (onTrevorSupport) {
+    aboutRows.push({
+      key: 'trevor',
+      label: 'Support the Trevor Project',
+      onPress: () => run(onTrevorSupport),
+    });
   }
   aboutRows.push({
     key: 'privacy',

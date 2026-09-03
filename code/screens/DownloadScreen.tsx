@@ -16,6 +16,7 @@ type Props = {
   onBack: () => void;
   onOpenApp: () => void;
   onOpenMenu?: () => void;
+  onDiscordAlerts?: () => void;
 };
 
 function hintFor(outcome: InstallOutcome, platform: ReturnType<typeof getInstallPlatform>): string {
@@ -32,7 +33,7 @@ function hintFor(outcome: InstallOutcome, platform: ReturnType<typeof getInstall
   return 'Couldn’t start a download in this browser. Open windsage.nimrod.bio in Chrome and tap Download again.';
 }
 
-export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
+export function DownloadScreen({ onBack, onOpenApp, onOpenMenu, onDiscordAlerts }: Props) {
   const [installed, setInstalled] = useState(() => isRunningAsInstalledApp());
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -150,9 +151,26 @@ export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
 
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
+      {onDiscordAlerts ? (
+        <Pressable
+          style={[styles.btn, styles.btnSecondary]}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onDiscordAlerts();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Discord alerts"
+        >
+          <Text style={styles.btnSecondaryText}>Discord alerts</Text>
+        </Pressable>
+      ) : null}
+
       <Text style={styles.foot}>
         After it lands on the home screen: open that icon, allow notifications, Android battery
         unrestricted for Windsage and Chrome.
+        {onDiscordAlerts
+          ? ' Or skip install: Discord alerts → join, get a code, type /link.'
+          : ' Simple mode needs this install for pings.'}
       </Text>
       <Text style={styles.footUrl}>{PUBLIC_APP}</Text>
     </ScrollView>

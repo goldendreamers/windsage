@@ -1,4 +1,4 @@
-export async function sendExpoPush({ to, title, body, data }) {
+export async function sendExpoPush({ to, title, body, data, channelId }) {
   if (!to || (Array.isArray(to) && !to.length)) return { ok: false, skipped: true };
   const tokens = Array.isArray(to) ? [...new Set(to.filter(Boolean))] : [to];
   const messages = tokens.map((token) => ({
@@ -8,7 +8,7 @@ export async function sendExpoPush({ to, title, body, data }) {
     data: data || {},
     sound: 'default',
     priority: 'high',
-    channelId: 'windsage-alerts',
+    channelId: channelId || 'windsage-alerts',
   }));
   // Expo accepts batches up to 100.
   const chunks = [];

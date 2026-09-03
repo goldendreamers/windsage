@@ -1,0 +1,42 @@
+[Unit]
+Description=Windsage Discord alert DMs (not helper, not website OAuth)
+After=network-online.target windsage.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=windsagealerts
+Group=windsagealerts
+WorkingDirectory=/usr/local/windsage-alerts
+EnvironmentFile=/usr/local/windsage-alerts/alerts.env
+Environment=HOME=/usr/local/windsage-alerts
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /usr/local/windsage-alerts/src/index.mjs
+Restart=on-failure
+RestartSec=8
+Nice=15
+CPUQuota=10%
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+InaccessiblePaths=/data/windsage /root /home /data/projects
+ReadOnlyPaths=/usr/local/windsage-alerts
+
+[Install]
+WantedBy=multi-user.target
