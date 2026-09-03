@@ -3,12 +3,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { brandImages } from '../shared/assets';
-import { colors, space } from '../shared/theme';
+import { colors, paletteForMode, space } from '../shared/theme';
 
 export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; simpleMode?: boolean }) {
   const drift = useRef(new Animated.Value(0)).current;
+  const palette = paletteForMode(simpleMode);
+  const mark = simpleMode === false ? brandImages.markAdvanced : brandImages.mark;
 
   useEffect(() => {
+    if (hasStation) {
+      drift.setValue(0);
+      return;
+    }
     const loop = Animated.loop(
       Animated.timing(drift, {
         toValue: 1,
@@ -18,7 +24,7 @@ export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; sim
     );
     loop.start();
     return () => loop.stop();
-  }, [drift]);
+  }, [drift, hasStation]);
 
   const translateX = drift.interpolate({
     inputRange: [0, 1],
@@ -39,7 +45,7 @@ export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; sim
             />
           </Animated.View>
           <LinearGradient
-            colors={['rgba(6,24,33,0.15)', 'rgba(6,24,33,0.55)', colors.bg]}
+            colors={['rgba(6,24,33,0.15)', 'rgba(6,24,33,0.55)', palette.bg]}
             locations={[0, 0.55, 1]}
             style={StyleSheet.absoluteFill}
           />
@@ -50,11 +56,11 @@ export function BrandHero({ hasStation, simpleMode }: { hasStation: boolean; sim
 
       <View style={[styles.copy, hasStation && styles.copyCompact]}>
         <View style={styles.brandRow}>
-          <Image source={brandImages.mark} style={styles.mark} contentFit="contain" />
-          <Text style={styles.brand}>Windsage</Text>
+          <Image source={mark} style={styles.mark} contentFit="contain" />
+          <Text style={[styles.brand, { color: palette.text }]}>Windsage</Text>
         </View>
         {!hasStation ? (
-          <Text style={styles.tagline}>
+          <Text style={[styles.tagline, { color: palette.muted }]}>
             {simpleMode
               ? 'Add a station. Get a ping when the wind is up.'
               : 'Follow a spot. Get notified when it holds.'}

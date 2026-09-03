@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../shared/theme';
+import { colors, onAccent, paletteForMode } from '../shared/theme';
 
 export type HowtoScreen = 'home' | 'follow' | 'station' | 'install' | 'account';
 
@@ -24,7 +24,7 @@ const STEPS: { id: Exclude<HowtoScreen, 'home'>; n: number; short: string; hint:
     id: 'follow',
     n: 1,
     short: 'Follow',
-    hint: 'Menu → Follow a station — Windguru, map pin, NDBC, Open-Meteo, or airport code',
+    hint: 'Tap Follow on Home — Windguru, map pin, NDBC, Open-Meteo, or airport code',
   },
   {
     id: 'station',
@@ -51,7 +51,7 @@ const SIMPLE_STEPS: typeof STEPS = [
     id: 'follow',
     n: 1,
     short: 'Add',
-    hint: 'Tap Add a station and paste the number from the Windguru station page',
+    hint: 'Tap Add on Home and paste the number from the Windguru station page',
   },
   {
     id: 'station',
@@ -89,9 +89,19 @@ export function FirstTimeBanner({ screen, embedded, simple, onDismiss, onFollow 
   const steps = stepsFor(simple);
   const current = activeStep(screen, simple);
   const showFollow = screen === 'home' && !!onFollow;
+  const palette = paletteForMode(simple);
+  const ink = onAccent(simple);
 
   return (
-    <View style={[styles.wrap, embedded && styles.wrapEmbedded]} accessibilityRole="summary">
+    <View
+      style={[
+        styles.wrap,
+        embedded && styles.wrapEmbedded,
+        { backgroundColor: palette.accentDim, borderBottomColor: palette.accent },
+        embedded ? { borderColor: palette.accent } : null,
+      ]}
+      accessibilityRole="summary"
+    >
       <View style={styles.top}>
         <Text style={styles.title}>{simple ? 'How this works' : 'First time here'}</Text>
         {onDismiss ? (
@@ -112,7 +122,7 @@ export function FirstTimeBanner({ screen, embedded, simple, onDismiss, onFollow 
         {steps.map((step) => {
           const on = step.id === current.id;
           return (
-            <Text key={step.id} style={[styles.pill, on && styles.pillOn]}>
+            <Text key={step.id} style={[styles.pill, on && { color: palette.accent }]}>
               {step.n} {step.short}
             </Text>
           );
@@ -121,13 +131,13 @@ export function FirstTimeBanner({ screen, embedded, simple, onDismiss, onFollow 
       <Text style={styles.hint}>{current.hint}</Text>
       {showFollow ? (
         <Pressable
-          style={styles.cta}
+          style={[styles.cta, { backgroundColor: palette.accent }]}
           onPress={() => {
             void Haptics.selectionAsync();
             onFollow?.();
           }}
         >
-          <Text style={styles.ctaText}>{simple ? 'Add a station' : 'Follow your first spot'}</Text>
+          <Text style={[styles.ctaText, { color: ink }]}>{simple ? 'Add a station' : 'Follow your first spot'}</Text>
         </Pressable>
       ) : null}
     </View>

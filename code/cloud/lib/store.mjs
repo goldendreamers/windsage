@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { applyNotifyPrefs, normalizeNotifyPrefs } from './notifyPrefs.mjs';
+
+export { applyNotifyPrefs };
 
 const STORE_FILE = 'store.json';
 const STORE_BAK = 'store.json.bak';
@@ -42,19 +45,8 @@ function migrate(store) {
     }
     if (!Array.isArray(user.webPushSubscriptions)) user.webPushSubscriptions = [];
   }
-  // One-time rebuild if catalog is empty but users/devices already have follows.
-  if (store.sharedStations.length === 0) {
-    const collected = [];
-    for (const user of Object.values(store.users)) {
-      collected.push(...(user.stations || []));
-    }
-    for (const device of Object.values(store.devices)) {
-      collected.push(...(device.stations || []));
-    }
-    if (collected.length) {
-      store.sharedStations = mergeStations([], collected);
-    }
-  }
+  // Never harvest personal follow lists into a public directory (map pins, nicknames, rules).
+  store.sharedStations = sanitizeSharedCatalog(store.sharedStations);
   store.version = 3;
   return store;
 }
@@ -204,6 +196,7 @@ export function ensureDevice(store, deviceId, secret) {
       stations: [],
       pollIntervalMinutes: 10,
       simpleMode: true,
+      notifyPrefs: { preset: 'normal', timesPerDay: 1, how: 'phone' },
       alertStates: {},
       snapshots: {},
       createdAt: Date.now(),
@@ -232,6 +225,7 @@ export function createUser(store, partial = {}) {
     stations: partial.stations ?? [],
     pollIntervalMinutes: partial.pollIntervalMinutes ?? 10,
     simpleMode: partial.simpleMode !== false,
+    notifyPrefs: partial.notifyPrefs ?? { preset: 'normal', timesPerDay: 1, how: 'phone' },
     alertStates: partial.alertStates ?? {},
     snapshots: partial.snapshots ?? {},
     pushTokens: partial.pushTokens ?? [],
@@ -351,6 +345,9 @@ export function linkDeviceToUser(
   }
   if (mergeGuestStations && typeof device.simpleMode === 'boolean') {
     user.simpleMode = device.simpleMode;
+  }
+  if (mergeGuestStations && device.notifyPrefs) {
+    user.notifyPrefs = normalizeNotifyPrefs(device.notifyPrefs);
   }
   // Device bag is owned by the user while linked — never keep a second copy.
   device.stations = [];
@@ -476,44 +473,51 @@ export function restoreStationsFromBackupStore(primary, backup) {
   return { restored };
 }
 
-/** Upsert follows into the server-wide catalog (keyed by provider:stationId). */
-export function upsertSharedStations(store, stations = []) {
-  if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
-  if (!stations?.length) return store.sharedStations;
-  const keyOf = (s) => {
-    const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
-    const sid = String(s?.stationId || '').trim();
-    return sid ? `${provider}:${sid}` : '';
+/** Public weather-station ids only — never map pins, nicknames, or alert rules. */
+const PUBLIC_CATALOG_PROVIDERS = new Set(['windguru', 'ndbc', 'openmeteo', 'synoptic']);
+
+export function publicCatalogRow(s) {
+  const provider = String(s?.provider || 'windguru').trim().toLowerCase() || 'windguru';
+  const stationId = String(s?.stationId || '').trim();
+  if (!stationId) return null;
+  if (provider === 'location') return null;
+  if (!PUBLIC_CATALOG_PROVIDERS.has(provider)) return null;
+  const linked = s.linkedLiveStation;
+  return {
+    provider,
+    stationId,
+    kind: s.kind === 'spot' ? 'spot' : 'station',
+    sourceName:
+      typeof s.sourceName === 'string' && s.sourceName.trim() ? s.sourceName.trim() : null,
+    liveStationId: s.liveStationId ? String(s.liveStationId) : null,
+    linkedLiveStation: linked?.id
+      ? {
+          id: String(linked.id),
+          name: String(linked.name || ''),
+          distanceKm: Number(linked.distanceKm) || 0,
+        }
+      : null,
+    liveLinkWarning: s.liveLinkWarning || null,
   };
+}
+
+export function sanitizeSharedCatalog(rows = []) {
   const map = new Map();
-  for (const s of store.sharedStations) {
-    const k = keyOf(s);
-    if (k) map.set(k, s);
+  for (const s of rows || []) {
+    const row = publicCatalogRow(s);
+    if (!row) continue;
+    map.set(`${row.provider}:${row.stationId}`, row);
   }
-  for (const s of stations) {
-    const k = keyOf(s);
-    if (!k) continue;
-    const prev = map.get(k);
-    if (!prev) {
-      map.set(k, { ...s, provider: String(s.provider || 'windguru').toLowerCase() });
-      continue;
-    }
-    map.set(k, {
-      ...prev,
-      ...s,
-      provider: String(s.provider || prev.provider || 'windguru').toLowerCase(),
-      sourceName: s.sourceName || prev.sourceName || null,
-      liveStationId: s.liveStationId || prev.liveStationId || null,
-      linkedLiveStation: s.linkedLiveStation || prev.linkedLiveStation || null,
-      liveLinkWarning:
-        s.liveLinkWarning != null ? s.liveLinkWarning : prev.liveLinkWarning ?? null,
-      nickname: prev.nickname || s.nickname || '',
-      kind: s.kind || prev.kind,
-      rule: prev.rule || s.rule,
-      enabled: prev.enabled !== false && s.enabled !== false,
-    });
-  }
-  store.sharedStations = [...map.values()];
+  return [...map.values()];
+}
+
+/**
+ * Keep the shared catalog PII-free. Do not copy personal follow lists into it —
+ * Follow search uses Windguru's public station_list plus on-demand resolve.
+ */
+export function upsertSharedStations(store, _stations = []) {
+  if (!Array.isArray(store.sharedStations)) store.sharedStations = [];
+  store.sharedStations = sanitizeSharedCatalog(store.sharedStations);
   return store.sharedStations;
 }
 
@@ -534,20 +538,9 @@ export function seedBagFromShared(bag, store) {
   return false;
 }
 
-/** Public catalog rows for follow suggestions (no alert state / push tokens). */
+/** Public catalog rows for follow suggestions (no nicknames, pins, or rules). */
 export function publicCatalogStations(store) {
-  return (store.sharedStations || [])
-    .filter((s) => s?.stationId?.trim())
-    .map((s) => ({
-      provider: String(s.provider || 'windguru').toLowerCase(),
-      stationId: String(s.stationId).trim(),
-      kind: s.kind === 'spot' ? 'spot' : 'station',
-      sourceName: s.sourceName || null,
-      nickname: '',
-      liveStationId: s.liveStationId || null,
-      linkedLiveStation: s.linkedLiveStation || null,
-      liveLinkWarning: s.liveLinkWarning || null,
-    }));
+  return sanitizeSharedCatalog(store.sharedStations);
 }
 
 export function publicUser(user) {
@@ -564,6 +557,7 @@ export function publicUser(user) {
     },
     pollIntervalMinutes: user.pollIntervalMinutes || 10,
     simpleMode: user.simpleMode !== false,
+    notifyPrefs: user.notifyPrefs || { preset: 'normal', timesPerDay: 1, how: 'phone' },
     stationCount: (user.stations || []).length,
   };
 }

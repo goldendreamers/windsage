@@ -8,6 +8,7 @@ import {
   followSourceRef,
   homeLiveStatColumns,
   isFollowStarred,
+  monitoringScheduleSummary,
 } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
@@ -71,12 +72,13 @@ export const StationCard = memo(function StationCard({
 
   const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, showingForecast);
   const alertCol = alertThresholdDisplay(station.rule);
+  const monitor = monitoringScheduleSummary(station);
 
   return (
     <View
       style={[
         styles.card,
-        station.enabled === false && styles.cardPaused,
+        !monitor.on && styles.cardPaused,
         starred && styles.cardStarred,
       ]}
     >
@@ -100,15 +102,13 @@ export const StationCard = memo(function StationCard({
               {trend ? ` ${trend}` : ''}
             </Text>
             {simpleMode ? (
-              station.enabled === false ? (
-                <Text style={styles.meta}>Alerts off</Text>
+              monitor.homeLabel ? (
+                <Text style={styles.meta}>{monitor.homeLabel}</Text>
               ) : null
             ) : (
               <>
                 <Text style={styles.meta} numberOfLines={1}>
-                  {`${providerShort} · ${followSourceRef(station)}${
-                    station.enabled === false ? ' · paused' : ''
-                  }${
+                  {`${providerShort} · ${followSourceRef(station)}${monitor.cardBit}${
                     showingForecast
                       ? ` · fcst${result?.forecastModel ? ` ${result.forecastModel}` : ''}`
                       : ''

@@ -1,3 +1,5 @@
+import { alertNotifyDue, resolveNotifyPrefs, stampAlertNotify } from './notifyPrefs.mjs';
+
 const BASE = 'https://www.windguru.cz/int/iapi.php';
 const RESOLVE_TTL_MS = 6 * 60 * 60 * 1000;
 const STATION_LIST_TTL_MS = 24 * 60 * 60 * 1000;
@@ -242,6 +244,59 @@ function formatLinkedWarning(linked) {
   return `No live Windguru sensor on this spot — alerts use the model forecast. Nearest live for reference: ${linked.name} (#${linked.id}, ${km} km)`;
 }
 
+const FORECAST_ONLY_WARNING =
+  'No live Windguru sensor on this spot — alerts use the model forecast.';
+
+/** Network/timeout failures — do not treat these as “not a live station”. */
+export function isWindguruTransportError(error) {
+  const name = error?.name || '';
+  const message = error instanceof Error ? error.message : String(error || '');
+  return (
+    name === 'TimeoutError' ||
+    name === 'AbortError' ||
+    /timed out/i.test(message) ||
+    /fetch failed/i.test(message)
+  );
+}
+
+/** Windguru station_data_* said this id is not a live sensor. */
+export function isUnknownWindguruLiveStationError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /unknown station/i.test(message) || /http 400/i.test(message);
+}
+
+/**
+ * Follow search is built from live `station_list` only. Spot URLs/IDs (e.g.
+ * https://www.windguru.cz/168017) are not in that list — resolve them on demand
+ * unless the same numeric id is already a known live station.
+ */
+export function shouldResolveWindguruCatalogQuery(query, catalog) {
+  const parsed = parseWindguruRef(query);
+  if (!parsed) return false;
+  if (parsed.kindHint === 'spot') return true;
+  return !(catalog || []).some(
+    (row) =>
+      String(row?.provider || 'windguru').toLowerCase() === 'windguru' &&
+      String(row?.stationId ?? '').trim() === parsed.id,
+  );
+}
+
+/** Catalog row for a resolved Windguru station or forecast spot. */
+export function catalogRowFromWindguruResolved(resolved) {
+  const id = String(resolved?.inputId || '').trim();
+  if (!id) return null;
+  const kind = resolved.kind === 'spot' ? 'spot' : 'station';
+  return {
+    provider: 'windguru',
+    stationId: id,
+    kind,
+    sourceName: resolved.spotName || null,
+    liveStationId: resolved.liveStationId || (kind === 'station' ? id : null),
+    linkedLiveStation: resolved.linkedLiveStation || null,
+    liveLinkWarning: resolved.warning || null,
+  };
+}
+
 /** Look up official name for a live station id from Windguru station_list. */
 async function lookupLiveStationName(liveStationId) {
   try {
@@ -257,37 +312,21 @@ async function lookupLiveStationName(liveStationId) {
   }
 }
 
-/**
- * Spot IDs resolve to a native live station when Windguru links one;
- * otherwise attach the geographically nearest live station as a reference
- * (alerts for those spots use the model forecast, not that live sensor).
- */
-export async function resolveWindguruId(inputId) {
-  const id = String(inputId).trim();
-  if (!/^\d+$/.test(id)) throw new Error('Station/spot ID must be numeric');
+async function resolveAsLiveStation(id) {
+  await tryStationCurrent(id);
+  const spotName = await lookupLiveStationName(id);
+  return {
+    inputId: id,
+    liveStationId: id,
+    kind: 'station',
+    spotName,
+    hasLiveStation: true,
+    linkedLiveStation: null,
+    warning: null,
+  };
+}
 
-  const cached = resolveCache.get(id);
-  if (cached && cached.expires > Date.now()) return cached.value;
-
-  try {
-    await tryStationCurrent(id);
-    const spotName = await lookupLiveStationName(id);
-    const value = {
-      inputId: id,
-      liveStationId: id,
-      kind: 'station',
-      spotName,
-      hasLiveStation: true,
-      linkedLiveStation: null,
-      warning: null,
-    };
-    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-    return value;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/unknown station/i.test(message)) throw error;
-  }
-
+async function resolveAsSpot(id) {
   const spot = await fetchJson(`https://www.windguru.cz/${id}`, {
     q: 'spot',
     id_spot: id,
@@ -297,11 +336,13 @@ export async function resolveWindguruId(inputId) {
     (typeof spot?.station?.name === 'string' && spot.station.name) ||
     undefined;
   const live = asNumber(spot?.station?.id_station);
+  const lat = asNumber(spot?.lat);
+  const lon = asNumber(spot?.lon);
 
   if (live != null) {
     const liveStationId = String(Math.trunc(live));
     await tryStationCurrent(liveStationId);
-    const value = {
+    return {
       inputId: id,
       liveStationId,
       kind: 'spot',
@@ -309,51 +350,100 @@ export async function resolveWindguruId(inputId) {
       hasLiveStation: true,
       linkedLiveStation: null,
       warning: null,
-      lat: asNumber(spot?.lat),
-      lon: asNumber(spot?.lon),
+      lat,
+      lon,
     };
-    resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-    return value;
   }
 
-  const linked = await findNearestLiveStation(spot?.lat, spot?.lon);
-  if (!linked) {
-    throw new Error(
-      `Windguru spot #${id}${spotName ? ` (${spotName})` : ''} has no live station nearby.`,
-    );
+  let linked = null;
+  try {
+    linked = await findNearestLiveStation(lat, lon);
+  } catch {
+    linked = null;
   }
-  await tryStationCurrent(linked.id);
-  const warning = formatLinkedWarning(linked);
-  const value = {
+  if (linked?.id) {
+    try {
+      await tryStationCurrent(linked.id);
+    } catch {
+      linked = null;
+    }
+  }
+
+  return {
     inputId: id,
-    liveStationId: linked.id,
+    liveStationId: linked?.id || null,
     kind: 'spot',
     spotName,
     hasLiveStation: false,
-    linkedLiveStation: {
-      id: linked.id,
-      name: linked.name,
-      spotname: linked.spotname,
-      distanceKm: Number(linked.distanceKm.toFixed(2)),
-    },
-    warning,
-    lat: asNumber(spot?.lat),
-    lon: asNumber(spot?.lon),
+    linkedLiveStation: linked
+      ? {
+          id: linked.id,
+          name: linked.name,
+          spotname: linked.spotname,
+          distanceKm: Number(linked.distanceKm.toFixed(2)),
+        }
+      : null,
+    warning: linked ? formatLinkedWarning(linked) : FORECAST_ONLY_WARNING,
+    lat,
+    lon,
   };
-  resolveCache.set(id, { value, expires: Date.now() + RESOLVE_TTL_MS });
-  return value;
+}
+
+/**
+ * Spot IDs resolve to a native live station when Windguru links one;
+ * otherwise attach the geographically nearest live station as a reference
+ * (alerts for those spots use the model forecast, not that live sensor).
+ * Forecast-only spots still resolve when no nearby live sensor exists.
+ *
+ * `kindHint` comes from the URL: `/station/N` → live first, `/N` → spot first.
+ * Bare numbers try live first, then the spot API.
+ */
+export async function resolveWindguruId(inputId, opts = {}) {
+  const id = String(inputId).trim();
+  if (!/^\d+$/.test(id)) throw new Error('Station/spot ID must be numeric');
+  const kindHint = opts.kindHint === 'spot' || opts.kindHint === 'station' ? opts.kindHint : null;
+  const cacheId = `${id}:${kindHint || 'any'}`;
+  const cached = resolveCache.get(cacheId);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  const remember = (value) => {
+    resolveCache.set(cacheId, { value, expires: Date.now() + RESOLVE_TTL_MS });
+    return value;
+  };
+
+  if (kindHint === 'spot') {
+    try {
+      return remember(await resolveAsSpot(id));
+    } catch (spotErr) {
+      try {
+        return remember(await resolveAsLiveStation(id));
+      } catch {
+        throw spotErr;
+      }
+    }
+  }
+
+  try {
+    return remember(await resolveAsLiveStation(id));
+  } catch (error) {
+    if (isWindguruTransportError(error)) throw error;
+  }
+
+  return remember(await resolveAsSpot(id));
 }
 
 /**
  * Resolve a pasted Windguru URL/number for follow UX.
  * Does not rewrite stored follow IDs — callers choose spot vs live station.
  */
-export async function normalizeWindguruFollowInput(input) {
+export async function normalizeWindguruFollowInput(input, opts = {}) {
   const parsed = parseWindguruRef(input);
   if (!parsed) {
     throw new Error('Paste a Windguru URL or number (spot or station)');
   }
-  const resolved = await resolveWindguruId(parsed.id);
+  const kindHint =
+    opts.kindHint === 'spot' || opts.kindHint === 'station' ? opts.kindHint : parsed.kindHint;
+  const resolved = await resolveWindguruId(parsed.id, { kindHint });
   return {
     inputId: resolved.inputId,
     liveStationId: resolved.liveStationId,
@@ -365,6 +455,7 @@ export async function normalizeWindguruFollowInput(input) {
     rewritten:
       resolved.kind === 'spot' &&
       resolved.hasLiveStation &&
+      resolved.liveStationId &&
       resolved.liveStationId !== resolved.inputId,
   };
 }
@@ -695,6 +786,30 @@ function maxWindOk(reading, rule) {
   return reading.wind_avg <= Math.max(0, rule.maxWindKnots ?? 25);
 }
 
+function minWindOk(reading, rule) {
+  if (rule.metric !== 'wave_height' || !rule.minWindEnabled) return true;
+  if (reading.wind_avg == null) return false;
+  return reading.wind_avg >= Math.max(0, rule.minWindKnots ?? 12);
+}
+
+function maxGustOk(reading, rule) {
+  if (rule.metric !== 'wind_avg' || !rule.maxGustEnabled) return true;
+  if (reading.wind_max == null) return false;
+  return reading.wind_max <= Math.max(0, rule.maxGustKnots ?? 30);
+}
+
+function minTempOk(reading, rule) {
+  if (!rule.minTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature >= (rule.minTempC ?? 10);
+}
+
+function maxTempOk(reading, rule) {
+  if (!rule.maxTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature <= (rule.maxTempC ?? 32);
+}
+
 function windDirectionName(deg) {
   if (deg == null || !Number.isFinite(Number(deg))) return null;
   const names = [
@@ -748,7 +863,21 @@ export function alertConditionMet(reading, station) {
   const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
   const waveCapOk = maxWaveOk(reading, station.rule);
   const windCapOk = maxWindOk(reading, station.rule);
-  return metricOk && spreadOk && dirOk && waveCapOk && windCapOk;
+  const minWindCapOk = minWindOk(reading, station.rule);
+  const maxGustCapOk = maxGustOk(reading, station.rule);
+  const minTempCapOk = minTempOk(reading, station.rule);
+  const maxTempCapOk = maxTempOk(reading, station.rule);
+  return (
+    metricOk &&
+    spreadOk &&
+    maxGustCapOk &&
+    waveCapOk &&
+    minWindCapOk &&
+    windCapOk &&
+    dirOk &&
+    minTempCapOk &&
+    maxTempCapOk
+  );
 }
 
 /**
@@ -763,7 +892,7 @@ export function needsAlertHistory(reading, station, prev) {
   return true;
 }
 
-export function evaluateAlert(reading, history, station, prev, nowMs = Date.now()) {
+export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(), notifyPrefs, notifyOpts) {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
   const wavePrimary = metric === 'wave_height';
@@ -778,16 +907,27 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
   const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
   const waveCapOk = maxWaveOk(reading, station.rule);
   const windCapOk = maxWindOk(reading, station.rule);
+  const minWindCapOk = minWindOk(reading, station.rule);
+  const maxGustCapOk = maxGustOk(reading, station.rule);
+  const minTempCapOk = minTempOk(reading, station.rule);
+  const maxTempCapOk = maxTempOk(reading, station.rule);
   const conditionMet = alertConditionMet(reading, station);
   const historySustainedMs = sustainedDurationMs(history, station.rule);
 
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
+  let cadencePrev = prev;
 
   const evalId = alertEvalId(station);
   if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
+    cadencePrev = {
+      ...prev,
+      notifiedForRun: false,
+      lastNotifyMs: null,
+      lastCheckMs: null,
+    };
   }
 
   if (!conditionMet) {
@@ -803,9 +943,18 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       : 0;
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
   const monitoringOn = station.enabled !== false;
+  const resolved = resolveNotifyPrefs(notifyPrefs, notifyOpts);
+  const cadenceOk = alertNotifyDue(cadencePrev, resolved, nowMs);
   const shouldNotify =
-    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && cadenceOk;
   if (shouldNotify) notifiedForRun = true;
+  const stamp = shouldNotify
+    ? stampAlertNotify(prev, nowMs)
+    : {
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
+      };
 
   const unit =
     metric === 'temperature' ? '°C' : metric === 'wave_height' ? 'm' : 'kt';
@@ -826,11 +975,19 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
   else if (value == null) message = 'No reading';
   else if (!metricOk) message = valueText;
   else if (!spreadOk) message = spread == null ? 'Need gust reading' : 'Too gusty';
+  else if (!maxGustCapOk)
+    message = reading.wind_max == null ? 'Need gust reading' : 'Gusts too high';
   else if (!waveCapOk)
     message = reading.wave_height == null ? 'Need wave reading' : 'Waves too high';
+  else if (!minWindCapOk)
+    message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too light';
   else if (!windCapOk) message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too strong';
   else if (!dirOk)
     message = reading.wind_direction == null ? 'Need direction' : 'Wrong direction';
+  else if (!minTempCapOk)
+    message = reading.temperature == null ? 'Need temperature' : 'Too cold';
+  else if (!maxTempCapOk)
+    message = reading.temperature == null ? 'Need temperature' : 'Too hot';
   else if (sustainedMs < requiredMs) message = `Holding · ${valueText}`;
   else if (shouldNotify) message = `Alert · ${valueText}`;
   else message = `On target · ${valueText}`;
@@ -851,6 +1008,9 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
       lastValue: value,
       lastError: null,
       lastStationId: evalId,
+      lastNotifyMs: stamp.lastNotifyMs,
+      notifyDayUtc: stamp.notifyDayUtc,
+      notifyCountToday: stamp.notifyCountToday,
     },
   };
 }

@@ -40,7 +40,7 @@ code/shared/        types, defaults, providers, glance, theme, assets
 code/cloud/         Node server on Wald (server.mjs, lib/*, providers/*)
 public/             PWA (sw.js, icons, privacy)
 scripts/            release-web.py, notify-email.sh, backup-windsage-store.sh, checks
-docs/               OUTSTANDING.md, PROGRESS_REVIEW.md, SSO-SETUP.md, STORE-PUBLISH.md
+docs/               DEVICE_AGENT_CONTEXT.md (local SSH/.env), OUTSTANDING.md, SSO-SETUP.md, …
 releases/           local web snapshots / zips (often gitignored)
 ```
 
@@ -117,6 +117,18 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 `file:///Users/goldendreamers/windsage/releases/local-zips/windsage-20260812T223104Z.zip`  
 (~4.5 MB tree snapshot; not required for cloud agents — use GitHub.)
 
+## Simple vs advanced
+
+Keep **simple mode** to core “get an alert” actions only. New controls default to **advanced** unless Nimrod says otherwise. Canonical list: [`docs/SIMPLE-MODE.md`](docs/SIMPLE-MODE.md).
+
+## Mac paste prompts
+
+When Nimrod asks for a Mac prompt (deploy / `npm run release:web`), include this exact phrase on its own line in the prompt:
+
+remember discord bot alerts
+
+After you give the prompt, clear **Pending** in [`docs/MAC_AGENT_PROMPTS.md`](docs/MAC_AGENT_PROMPTS.md) (leave it empty — do not stack old recipes).
+
 ## Suggested first prompt for a new cloud agent
 
 > Clone https://github.com/goldendreamers/windsage (`main`). Read `CLOUD_AGENT_CONTEXT.md` and `docs/OUTSTANDING.md`. Confirm `git log -1` and https://windsage.nimrod.bio/health. Then continue from the user’s task. Do not wipe stations; after product changes run `npm run release:web` if Wald SSH is available, and email via `scripts/notify-email.sh` when done or blocked. Cloud VMs cannot Tailscale to Wald — if a live deploy is needed, put one paste-ready prompt in chat for Nimrod (do not keep a prompts file in the repo).
@@ -131,4 +143,7 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 | `docs/SSO-SETUP.md` | Google/Facebook/Apple OAuth |
 | `docs/STORE-PUBLISH.md` | Store publish notes (PWA-first) |
 | `docs/AGENTS.md` | Expo version doc reminder |
+| `docs/SIMPLE-MODE.md` | What belongs in simple vs advanced |
+| `docs/DEVICE_AGENT_CONTEXT.md` | Local/device agent: Tailscale, SSH `wald-mc`, `.env.smtp`, Wald `oauth.env` |
+| `docs/MAC_AGENT_PROMPTS.md` | Pending/done Mac-or-device paste prompts |
 | `.cursor/rules/*.mdc` | Email + web-export rules (local Cursor) |

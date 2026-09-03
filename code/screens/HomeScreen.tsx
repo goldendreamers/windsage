@@ -7,10 +7,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
-import { colors } from '../shared/theme';
+import { colors, onAccent, paletteForMode } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
 import { StationCard } from '../components/StationCard';
@@ -59,6 +59,8 @@ type Props = {
   showHowto?: boolean;
   onDismissHowto?: () => void;
   simpleMode?: boolean;
+  updateAvailable?: boolean;
+  onApplyUpdate?: () => void;
 };
 
 export function HomeScreen({
@@ -80,11 +82,18 @@ export function HomeScreen({
   showHowto,
   onDismissHowto,
   simpleMode = false,
+  updateAvailable = false,
+  onApplyUpdate,
 }: Props) {
+  const palette = paletteForMode(simpleMode);
+  const ink = onAccent(simpleMode);
   const hasStations = stations.length > 0;
-  const orderedStations = organizeFollows(stations);
+  const orderedStations = useMemo(() => organizeFollows(stations), [stations]);
   const starredCount = orderedStations.filter((s) => isFollowStarred(s)).length;
-  const glanceRows = hasStations ? buildGlanceRows(orderedStations, live) : [];
+  const glanceRows = useMemo(
+    () => (hasStations ? buildGlanceRows(orderedStations, live) : []),
+    [hasStations, orderedStations, live],
+  );
   const headline = glanceHeadline(glanceRows);
   const sourceFails = stations.filter((s) => {
     const err = live[s.id]?.alertState?.lastError;
@@ -120,11 +129,27 @@ export function HomeScreen({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.accent}
+            tintColor={palette.accent}
           />
         }
       >
         <BrandHero hasStation={hasStations} simpleMode={simpleMode} />
+
+        {updateAvailable && onApplyUpdate ? (
+          <Pressable
+            style={[styles.updateBanner, { borderColor: palette.accent, backgroundColor: palette.accentDim }]}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onApplyUpdate();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Update Windsage"
+          >
+            <Text style={[styles.updateBannerText, { color: palette.text }]}>
+              Update Windsage — latest version, no uninstall
+            </Text>
+          </Pressable>
+        ) : null}
 
         {stableSourceFails > 0 ? (
           <View style={styles.sourceBanner}>
@@ -149,31 +174,44 @@ export function HomeScreen({
               <Text style={styles.sub}>Cloud down — follows still work</Text>
             ) : null}
           </View>
-          <Pressable
-            style={styles.menuBtn}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              (onOpenMenu || onOpenAdd)();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Menu"
-          >
-            <Text style={styles.menuBtnText}>Menu</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={[styles.addBtn, { backgroundColor: palette.accent }]}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                onOpenAdd();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={simpleMode ? 'Add a station' : 'Follow a station'}
+            >
+              <Text style={[styles.addBtnText, { color: ink }]}>{simpleMode ? 'Add' : 'Follow'}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuBtn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                onOpenMenu?.();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Menu"
+            >
+              <Text style={styles.menuBtnText}>Menu</Text>
+            </Pressable>
+          </View>
         </View>
 
-        {simpleMode ? (
+        {!hasStations ? (
           <Pressable
-            style={styles.emptyCta}
+            style={[styles.emptyCta, { backgroundColor: palette.accent }]}
             onPress={() => {
               void Haptics.selectionAsync();
               onOpenAdd();
             }}
             accessibilityRole="button"
-            accessibilityLabel="Add a Windguru station"
+            accessibilityLabel={simpleMode ? 'Add a Windguru station' : 'Follow a station'}
           >
-            <Text style={styles.emptyCtaText}>
-              {hasStations ? 'Add another station' : 'Add a Windguru station'}
+            <Text style={[styles.emptyCtaText, { color: ink }]}>
+              {simpleMode ? 'Add a Windguru station' : 'Follow a station'}
             </Text>
           </Pressable>
         ) : null}
@@ -300,6 +338,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 2,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  addBtnText: {
+    color: '#042018',
+    fontWeight: '800',
+    fontSize: 13,
+  },
   menuBtn: {
     backgroundColor: colors.input,
     borderRadius: 999,
@@ -374,5 +428,15 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  updateBanner: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  updateBannerText: {
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

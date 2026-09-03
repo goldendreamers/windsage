@@ -3,11 +3,16 @@ import {
   directionInSector,
   evaluateAlert,
   gustSpreadOk,
+  maxGustOk,
+  maxTempOk,
   maxWaveOk,
   maxWindOk,
+  minTempOk,
+  minWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, moveFollow, organizeFollows, parseLooseNumber, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, monitoringUntilMsForCustomHours, monitoringUntilMsForPreset, monitoringScheduleSummary, moveFollow, notifyPrefsSummary, organizeFollows, parseLooseNumber, resolveNotifyPrefs, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { matchSimpleNotifyId, ruleFromSimplePreset } from '../code/core/simpleMode';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -236,5 +241,153 @@ assert.equal(parseLooseNumber('15,2'), 15.2);
 assert.equal(parseLooseNumber('abc'), null);
 assert.equal(parseLooseNumber('0'), 0);
 assert.equal(parseLooseNumber('-3'), -3);
+
+assert.deepEqual(extraLimitsForMetric('wind_avg'), [
+  'maxWave',
+  'gustSpread',
+  'maxGust',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('wind_max'), [
+  'maxWave',
+  'gustSpread',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('wave_height'), [
+  'minWind',
+  'maxWind',
+  'windDir',
+  'minTemp',
+  'maxTemp',
+]);
+assert.deepEqual(extraLimitsForMetric('temperature'), []);
+
+assert.equal(matchSimpleNotifyId(ruleFromSimplePreset('wind_15')), 'wind_15');
+assert.equal(
+  matchSimpleNotifyId({ ...ruleFromSimplePreset('wind_15'), minTempEnabled: true }),
+  null,
+);
+
+const maxGustStation = createFollowedStation('219', 'Gust cap', {
+  rule: { ...station.rule, maxGustEnabled: true, maxGustKnots: 22 },
+});
+assert.equal(maxGustOk(reading(18, 20), maxGustStation.rule), true);
+assert.equal(maxGustOk(reading(18, 28), maxGustStation.rule), false);
+const gustHigh = evaluateAlert(reading(18, 28), history, maxGustStation, prev, Date.now());
+assert.equal(gustHigh.result.conditionMet, false);
+assert.match(gustHigh.result.message, /Gusts too high|gust/i);
+assert.equal(alertConditionLabel(gustHigh.result.message), 'Gusts too high');
+
+const coldStation = createFollowedStation('219', 'Cold', {
+  rule: { ...station.rule, minTempEnabled: true, minTempC: 25 },
+});
+assert.equal(minTempOk(reading(18), coldStation.rule), false);
+const tooCold = evaluateAlert(reading(18), history, coldStation, prev, Date.now());
+assert.equal(tooCold.result.conditionMet, false);
+assert.match(tooCold.result.message, /Too cold|temperature/i);
+
+const hotStation = createFollowedStation('219', 'Hot', {
+  rule: { ...station.rule, maxTempEnabled: true, maxTempC: 15 },
+});
+assert.equal(maxTempOk(reading(18), hotStation.rule), false);
+const tooHot = evaluateAlert(reading(18), history, hotStation, prev, Date.now());
+assert.equal(tooHot.result.conditionMet, false);
+assert.match(tooHot.result.message, /Too hot|temperature/i);
+
+const waveMinWind = createFollowedStation('219', 'Wave min wind', {
+  rule: {
+    ...station.rule,
+    metric: 'wave_height',
+    threshold: 1.0,
+    minWindEnabled: true,
+    minWindKnots: 20,
+    maxWindEnabled: false,
+  },
+});
+assert.equal(minWindOk(reading(10, 12, 180, 1.4), waveMinWind.rule), false);
+const light = evaluateAlert(reading(10, 12, 180, 1.4), waveHistory, waveMinWind, prev, Date.now());
+assert.equal(light.result.conditionMet, false);
+assert.match(light.result.message, /Wind too light|wind/i);
+
+const now = 1_700_000_000_000;
+assert.equal(monitoringUntilMsForPreset('forever', now), null);
+assert.equal(monitoringUntilMsForPreset('day', now), now + 24 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForPreset('week', now), now + 7 * 24 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForCustomHours(3, now), now + 3 * 60 * 60 * 1000);
+assert.equal(monitoringUntilMsForCustomHours(0, now), now + 60 * 60 * 1000);
+
+const pausedDay = createFollowedStation('219', 'Paused day', {
+  enabled: false,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+});
+assert.equal(applyMonitoringSchedule(pausedDay, now).enabled, false);
+assert.equal(applyMonitoringSchedule(pausedDay, now).monitoringUntilMs, pausedDay.monitoringUntilMs);
+const resumed = applyMonitoringSchedule(pausedDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(resumed.enabled, true);
+assert.equal(resumed.monitoringUntilMs, null);
+
+const onDay = createFollowedStation('219', 'On day', {
+  enabled: true,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+});
+const expiredOn = applyMonitoringSchedule(onDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(expiredOn.enabled, false);
+assert.equal(expiredOn.monitoringUntilMs, null);
+
+const foreverOff = createFollowedStation('219', 'Forever off', {
+  enabled: false,
+  monitoringUntilMs: monitoringUntilMsForPreset('forever', now),
+});
+assert.equal(foreverOff.monitoringUntilMs, null);
+assert.equal(applyMonitoringSchedule(foreverOff, now + 99e12).enabled, false);
+assert.equal(monitoringScheduleSummary(pausedDay, now).homeLabel?.startsWith('Paused until'), true);
+assert.equal(monitoringScheduleSummary(onDay, now).detailHint?.startsWith('Alerts stay on until'), true);
+assert.equal(monitoringScheduleSummary(foreverOff, now).homeLabel, 'Alerts off');
+
+const t0 = Date.UTC(2024, 0, 2, 1, 0, 0);
+const annoyingPrefs = { preset: 'annoying' as const, timesPerDay: 1, how: 'phone' as const };
+const firstAnnoy = evaluateAlert(reading(18, 28), history, station, prev, t0, annoyingPrefs);
+assert.equal(firstAnnoy.result.shouldNotify, true);
+const soonAnnoy = evaluateAlert(reading(18, 28), history, station, firstAnnoy.nextState, t0 + 5 * 60 * 1000, annoyingPrefs);
+assert.equal(soonAnnoy.result.shouldNotify, false);
+const laterAnnoy = evaluateAlert(reading(18, 28), history, station, firstAnnoy.nextState, t0 + 11 * 60 * 1000, annoyingPrefs);
+assert.equal(laterAnnoy.result.shouldNotify, true);
+
+const normalPrefs = { preset: 'normal' as const, timesPerDay: 1, how: 'phone' as const };
+const firstNormal = evaluateAlert(reading(18, 28), history, station, prev, t0, normalPrefs);
+assert.equal(firstNormal.result.shouldNotify, true);
+const sameDayAgain = evaluateAlert(
+  reading(18, 28),
+  history,
+  station,
+  { ...firstNormal.nextState, notifiedForRun: false, conditionSinceMs: t0 },
+  t0 + 3 * 60 * 60 * 1000,
+  normalPrefs,
+);
+assert.equal(sameDayAgain.result.shouldNotify, false);
+
+const quietNoGoogle = evaluateAlert(reading(18, 28), history, station, prev, t0, { preset: 'quiet' }, { hasGoogleEmail: false });
+assert.equal(quietNoGoogle.result.shouldNotify, false);
+const quietGoogle = evaluateAlert(reading(18, 28), history, station, prev, t0, { preset: 'quiet' }, { hasGoogleEmail: true });
+assert.equal(quietGoogle.result.shouldNotify, true);
+
+const customTwo = { preset: 'custom' as const, timesPerDay: 2, how: 'phone' as const };
+const c1 = evaluateAlert(reading(18, 28), history, station, prev, t0, customTwo);
+assert.equal(c1.result.shouldNotify, true);
+const c2 = evaluateAlert(reading(18, 28), history, station, c1.nextState, t0 + 12 * 60 * 60 * 1000, customTwo);
+assert.equal(c2.result.shouldNotify, true);
+const c3 = evaluateAlert(reading(18, 28), history, station, c2.nextState, t0 + 13 * 60 * 60 * 1000, customTwo);
+assert.equal(c3.result.shouldNotify, false);
+
+assert.equal(notifyPrefsSummary({ preset: 'annoying' }), 'Annoying · every 10 min');
+assert.equal(notifyPrefsSummary({ preset: 'normal' }), 'Normal · once a day');
+assert.equal(notifyPrefsSummary({ preset: 'quiet' }), 'Quiet · email only');
+assert.equal(notifyPrefsSummary({ preset: 'custom', timesPerDay: 3, how: 'both' }), 'Custom · 3× a day · phone + email');
+assert.equal(resolveNotifyPrefs({ preset: 'quiet' }, { hasGoogleEmail: false }).googleMissing, true);
+assert.equal(alertNotifyDue(prev, resolveNotifyPrefs({ preset: 'quiet' }, { hasGoogleEmail: false }), t0), false);
 
 console.log('check-alerts: ok');

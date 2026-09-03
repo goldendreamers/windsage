@@ -1,9 +1,10 @@
-import { DEFAULT_ALERT_STATE, windDirectionName } from '../shared/defaults';
+import { DEFAULT_ALERT_STATE, alertNotifyDue, resolveNotifyPrefs, stampAlertNotify, windDirectionName } from '../shared/defaults';
 import type {
   AlertState,
   CheckResult,
   FollowedStation,
   HistorySeries,
+  NotifyPrefs,
   StationReading,
 } from '../shared/types';
 import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricUnit, metricValue } from './windguru';
@@ -90,6 +91,46 @@ export function maxWindOk(
   return reading.wind_avg <= Math.max(0, rule.maxWindKnots ?? 25);
 }
 
+/** Optional min wind when primary metric is wave. */
+export function minWindOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (rule.metric !== 'wave_height' || !rule.minWindEnabled) return true;
+  if (reading.wind_avg == null) return false;
+  return reading.wind_avg >= Math.max(0, rule.minWindKnots ?? 12);
+}
+
+/** Optional absolute max gust when primary metric is average wind. */
+export function maxGustOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (rule.metric !== 'wind_avg' || !rule.maxGustEnabled) return true;
+  if (reading.wind_max == null) return false;
+  return reading.wind_max <= Math.max(0, rule.maxGustKnots ?? 30);
+}
+
+/** Optional min air temp on wind/wave alerts. */
+export function minTempOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (!rule.minTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature >= (rule.minTempC ?? 10);
+}
+
+/** Optional max air temp on wind/wave alerts. */
+export function maxTempOk(
+  reading: StationReading,
+  rule: FollowedStation['rule'],
+): boolean {
+  if (!rule.maxTempEnabled || rule.metric === 'temperature') return true;
+  if (reading.temperature == null) return false;
+  return reading.temperature <= (rule.maxTempC ?? 32);
+}
+
 export function formatDirectionSector(fromDeg: number, toDeg: number): string {
   const from = windDirectionName(fromDeg) || 'north';
   const to = windDirectionName(toDeg) || 'north';
@@ -130,6 +171,8 @@ export function evaluateAlert(
   station: FollowedStation,
   prev: AlertState,
   nowMs = Date.now(),
+  notifyPrefs?: NotifyPrefs | null,
+  notifyOpts?: { hasGoogleEmail?: boolean },
 ): { result: CheckResult; nextState: AlertState } {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
@@ -145,16 +188,36 @@ export function evaluateAlert(
   const dirOk = windDirectionOk(reading, station.rule, dirApplicable);
   const waveCapOk = maxWaveOk(reading, station.rule);
   const windCapOk = maxWindOk(reading, station.rule);
-  const conditionMet = metricOk && spreadOk && dirOk && waveCapOk && windCapOk;
+  const minWindCapOk = minWindOk(reading, station.rule);
+  const maxGustCapOk = maxGustOk(reading, station.rule);
+  const minTempCapOk = minTempOk(reading, station.rule);
+  const maxTempCapOk = maxTempOk(reading, station.rule);
+  const conditionMet =
+    metricOk &&
+    spreadOk &&
+    maxGustCapOk &&
+    waveCapOk &&
+    minWindCapOk &&
+    windCapOk &&
+    dirOk &&
+    minTempCapOk &&
+    maxTempCapOk;
   const historySustainedMs = sustainedDurationMs(history, station.rule);
 
   let conditionSinceMs = prev.conditionSinceMs;
   let notifiedForRun = prev.notifiedForRun;
+  let cadencePrev = prev;
 
   const evalId = alertEvalId(station);
   if (prev.lastStationId && prev.lastStationId !== evalId) {
     conditionSinceMs = null;
     notifiedForRun = false;
+    cadencePrev = {
+      ...prev,
+      notifiedForRun: false,
+      lastNotifyMs: null,
+      lastCheckMs: null,
+    };
   }
 
   if (!conditionMet) {
@@ -175,12 +238,22 @@ export function evaluateAlert(
 
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
   const monitoringOn = station.enabled !== false;
+  const resolved = resolveNotifyPrefs(notifyPrefs, notifyOpts);
+  const cadenceOk = alertNotifyDue(cadencePrev, resolved, nowMs);
   const shouldNotify =
-    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && cadenceOk;
 
   if (shouldNotify) {
     notifiedForRun = true;
   }
+
+  const stamp = shouldNotify
+    ? stampAlertNotify(prev, nowMs)
+    : {
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
+      };
 
   const unit = metricUnit(metric);
   const formatValue = (v: number | null | undefined) => {
@@ -203,12 +276,20 @@ export function evaluateAlert(
     message = valueText;
   } else if (!spreadOk) {
     message = spread == null ? 'Need gust reading' : 'Too gusty';
+  } else if (!maxGustCapOk) {
+    message = reading.wind_max == null ? 'Need gust reading' : 'Gusts too high';
   } else if (!waveCapOk) {
     message = reading.wave_height == null ? 'Need wave reading' : 'Waves too high';
+  } else if (!minWindCapOk) {
+    message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too light';
   } else if (!windCapOk) {
     message = reading.wind_avg == null ? 'Need wind reading' : 'Wind too strong';
   } else if (!dirOk) {
     message = reading.wind_direction == null ? 'Need direction' : 'Wrong direction';
+  } else if (!minTempCapOk) {
+    message = reading.temperature == null ? 'Need temperature' : 'Too cold';
+  } else if (!maxTempCapOk) {
+    message = reading.temperature == null ? 'Need temperature' : 'Too hot';
   } else if (sustainedMs < requiredMs) {
     message = `Holding · ${valueText}`;
   } else if (shouldNotify) {
@@ -233,6 +314,9 @@ export function evaluateAlert(
       lastValue: value,
       lastError: null,
       lastStationId: evalId,
+      lastNotifyMs: stamp.lastNotifyMs,
+      notifyDayUtc: stamp.notifyDayUtc,
+      notifyCountToday: stamp.notifyCountToday,
     },
   };
 }

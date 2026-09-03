@@ -1,9 +1,10 @@
 /* Windsage service worker — Web Push + static cache
- * v8: unique push tags; client register cache-bust aligned.
+ * v9: skipWaiting only on first install; JS/CSS network-first so Update + reload
+ * picks up a new bundle without uninstalling the PWA.
  */
-const SW_VERSION = 'windsage-sw-v8';
-const STATIC_CACHE = 'windsage-static-v8';
-const SHELL_CACHE = 'windsage-shell-v8';
+const SW_VERSION = 'windsage-sw-v9';
+const STATIC_CACHE = 'windsage-static-v9';
+const SHELL_CACHE = 'windsage-shell-v9';
 const SHELL_URLS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -21,9 +22,19 @@ self.addEventListener('install', (event) => {
       } catch {
         // ignore — first visit may still work via network
       }
-      await self.skipWaiting();
+      // First SW: activate immediately. Updates wait for SKIP_WAITING from the app.
+      if (!self.registration.active) {
+        await self.skipWaiting();
+      }
     })(),
   );
+});
+
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (data && data.type === 'SKIP_WAITING') {
+    event.waitUntil(self.skipWaiting());
+  }
 });
 
 self.addEventListener('activate', (event) => {
@@ -67,6 +78,12 @@ function assetUrl(path) {
   }
 }
 
+function isAppCode(url) {
+  const p = url.pathname;
+  if (p.startsWith('/_expo/')) return true;
+  return /\.(?:js|css)$/i.test(p);
+}
+
 function isStaticAsset(url) {
   const p = url.pathname;
   if (p.startsWith('/_expo/')) return true;
@@ -108,6 +125,31 @@ self.addEventListener('fetch', (event) => {
   // Never cache API — always prefer network.
   if (url.pathname.startsWith('/v1/') || url.pathname === '/health') return;
   if (url.pathname === '/sw.js') return;
+
+  // App JS/CSS: network-first so a reload after Update actually gets the new bundle.
+  if (isAppCode(url)) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(STATIC_CACHE);
+        try {
+          const res = await fetch(req);
+          if (res && res.ok) {
+            try {
+              await cache.put(req, res.clone());
+            } catch {
+              // ignore quota
+            }
+          }
+          return res;
+        } catch {
+          const cached = await cache.match(req);
+          if (cached) return cached;
+          throw new Error('offline');
+        }
+      })(),
+    );
+    return;
+  }
 
   // HTML shell: network-first, fall back to last good shell when offline/stale fail.
   if (isNavigation(req, url) || url.pathname === '/' || url.pathname.endsWith('.html')) {

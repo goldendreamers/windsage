@@ -150,44 +150,72 @@ export function AddStationModal({
       setSearching(false);
       return;
     }
+    const directWindguru = parseWindguruRef(searchQuery);
     let cancelled = false;
     setSearching(true);
     const timer = setTimeout(() => {
       void (async () => {
         const limit = showAllMatches ? 400 : 40;
         const providerFilter = simpleMode ? 'windguru' : provider;
-        const kindFilter = simpleMode ? 'station' : undefined;
+        const kindFilter = simpleMode && !directWindguru ? 'station' : undefined;
         const remote = await fetchCatalogSearch(searchQuery, {
           limit,
           provider: providerFilter,
           kind: kindFilter,
         });
         if (cancelled) return;
+        const keepRow = (entry: CatalogStation) => {
+          if (!simpleMode) return true;
+          if (normalizeProvider(entry.provider) !== 'windguru') return false;
+          if (entry.kind === 'spot' && !directWindguru) return false;
+          return true;
+        };
+        let rows: CatalogStation[] = [];
+        let total = 0;
         if (remote.fromServer) {
-          const rows = simpleMode
-            ? remote.stations.filter(
-                (entry) =>
-                  normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
-              )
-            : remote.stations;
-          setCatalogHits(rows);
-          setCatalogTotal(remote.total);
-          setSearching(false);
-          return;
+          rows = remote.stations.filter(keepRow);
+          total = remote.total;
+        } else {
+          const local = searchCatalogStations(catalogStations, searchQuery, {
+            limit,
+            provider: providerFilter,
+            kind: kindFilter,
+          });
+          rows = local.stations.filter(keepRow);
+          total = local.total;
         }
-        const local = searchCatalogStations(catalogStations, searchQuery, {
-          limit,
-          provider: providerFilter,
-          kind: kindFilter,
-        });
-        const rows = simpleMode
-          ? local.stations.filter(
-              (entry) =>
-                normalizeProvider(entry.provider) === 'windguru' && entry.kind !== 'spot',
-            )
-          : local.stations;
+        const ref = directWindguru;
+        if (
+          ref &&
+          (simpleMode || providerFilter === 'windguru') &&
+          !rows.some(
+            (entry) =>
+              normalizeProvider(entry.provider) === 'windguru' && entry.stationId === ref.id,
+          )
+        ) {
+          try {
+            const resolved = await resolveFollowInput('windguru', searchQuery);
+            if (cancelled) return;
+            if (resolved?.inputId) {
+              const hit: CatalogStation = {
+                provider: 'windguru',
+                stationId: resolved.inputId,
+                kind: resolved.kind === 'spot' ? 'spot' : 'station',
+                sourceName: resolved.spotName || resolved.sourceName || null,
+                liveStationId: resolved.liveStationId ?? null,
+                linkedLiveStation: resolved.linkedLiveStation ?? null,
+                liveLinkWarning: resolved.liveLinkWarning || resolved.warning || null,
+              };
+              rows = [hit, ...rows.filter((entry) => entry.stationId !== hit.stationId)];
+              total = Math.max(total, rows.length);
+            }
+          } catch {
+            // Resolve is best-effort; name search may still have hits.
+          }
+        }
+        if (cancelled) return;
         setCatalogHits(rows);
-        setCatalogTotal(local.total);
+        setCatalogTotal(total);
         setSearching(false);
       })();
     }, 180);
@@ -211,7 +239,7 @@ export function AddStationModal({
     followKind: WindguruKind,
     extras: Parameters<Props['onSave']>[3] = {},
   ) => {
-    onSave(id, name, simpleMode ? 'station' : followKind, {
+    onSave(id, name, followKind, {
       ...extras,
       ...(simpleMode ? { rule: notifyRule } : {}),
     });
@@ -316,7 +344,7 @@ export function AddStationModal({
   const pickCatalog = (entry: CatalogStation) => {
     void Haptics.selectionAsync();
     const entryProvider = simpleMode ? 'windguru' : normalizeProvider(entry.provider);
-    const followKind = simpleMode ? 'station' : entry.kind === 'spot' ? 'spot' : 'station';
+    const followKind = entry.kind === 'spot' ? 'spot' : 'station';
     const existing = findExistingFollow(existingStations, {
       stationId: entry.stationId,
       provider: entryProvider,
@@ -348,13 +376,12 @@ export function AddStationModal({
     setError(null);
     setLinkHint(null);
     setWarning(null);
+    const ref = parseWindguruRef(text);
+    if (ref?.kindHint) setKind(ref.kindHint);
+    else setKind('station');
     if (simpleMode) return;
     const detected = detectProviderFromInput(text);
     if (detected && detected !== provider) setProvider(detected);
-    if (provider === 'windguru' || detected === 'windguru') {
-      const ref = parseWindguruRef(text);
-      if (ref?.kindHint) setKind(ref.kindHint);
-    }
   };
 
   const submit = async () => {
@@ -405,8 +432,8 @@ export function AddStationModal({
     }
 
     const typed = (stationId.trim() || (simpleMode ? nickname.trim() : '')).trim();
-    const looksLikeId = /^\d+$/.test(typed);
-    if (!looksLikeId && typed.length >= 2 && (simpleMode || provider === 'windguru')) {
+    const looksLikeDirectRef = !!parseWindguruRef(typed);
+    if (!looksLikeDirectRef && typed.length >= 2 && (simpleMode || provider === 'windguru')) {
       const existingHits = suggestExistingFollows(existingStations, typed, 80);
       const submitHits = catalogHits.length
         ? catalogHits
@@ -693,7 +720,7 @@ export function AddStationModal({
                 style={[styles.input, simpleMode && styles.inputFirst]}
                 value={stationId}
                 onChangeText={applyIdText}
-                placeholder={simpleMode ? 'Station name or number' : meta.placeholder}
+                placeholder={simpleMode ? 'Name, number, or Windguru link' : meta.placeholder}
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
                 autoCorrect={false}

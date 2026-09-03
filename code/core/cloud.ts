@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import type { AlertState, AppSettings, CheckResult, FollowedStation, StationReading } from '../shared/types';
+import type { AlertState, AppSettings, CheckResult, FollowedStation, NotifyPrefs, StationReading } from '../shared/types';
+import { normalizeNotifyPrefs } from '../shared/defaults';
 
 const FALLBACK_CLOUD = 'https://windsage.nimrod.bio';
 
@@ -49,6 +50,7 @@ export type CloudUser = {
   };
   pollIntervalMinutes: number;
   simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
   stationCount: number;
 };
 
@@ -195,7 +197,14 @@ export async function fetchAuthProviders(): Promise<{
 export async function registerAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
@@ -203,6 +212,7 @@ export async function registerAccount(
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -220,7 +230,14 @@ export async function registerAccount(
 export async function loginAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number; simpleMode?: boolean }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
@@ -228,6 +245,7 @@ export async function loginAccount(
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -280,6 +298,7 @@ export async function pullMyStations(): Promise<AppSettings | null> {
     stations: FollowedStation[];
     pollIntervalMinutes: number;
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>('/v1/me/stations', { method: 'GET', token });
   return {
     stations: data.stations || [],
@@ -287,6 +306,7 @@ export async function pullMyStations(): Promise<AppSettings | null> {
       ? Number(data.pollIntervalMinutes)
       : 10,
     simpleMode: data.simpleMode !== false,
+    notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
   };
 }
 
@@ -398,6 +418,7 @@ export async function syncStationsToCloud(
         removedKeys,
         pollIntervalMinutes: settings.pollIntervalMinutes,
         simpleMode: settings.simpleMode !== false,
+        notifyPrefs: normalizeNotifyPrefs(settings.notifyPrefs),
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
@@ -425,6 +446,7 @@ export async function syncStationsToCloud(
       removedKeys,
       pollIntervalMinutes: settings.pollIntervalMinutes,
       simpleMode: settings.simpleMode !== false,
+      notifyPrefs: normalizeNotifyPrefs(settings.notifyPrefs),
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
     }),
@@ -522,22 +544,10 @@ export async function fetchCatalogStations(): Promise<
     | 'liveLinkWarning'
   >[]
 > {
-  const fromApi = await fetchCatalogStationsFromApi();
-  const fromFile = await fetchBundledLiveStations();
-  if (!fromApi.length && !fromFile.length) return [];
-  const byKey = new Map<string, (typeof fromApi)[number]>();
-  for (const row of [...fromFile, ...fromApi]) {
-    const sid = String(row.stationId || '').trim();
-    if (!sid) continue;
-    const key = `${row.provider || 'windguru'}:${sid}`;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, row);
-      continue;
-    }
-    if (!prev.sourceName && row.sourceName) byKey.set(key, { ...prev, ...row });
-  }
-  return [...byKey.values()];
+  const fromApiRaw = await fetchCatalogStationsFromApi();
+  // Old servers dumped the full ~6,900-row directory on empty GET — never keep that in RN state.
+  if (fromApiRaw.length > 400) return [];
+  return fromApiRaw;
 }
 
 async function fetchCatalogStationsFromApi(): Promise<
@@ -565,39 +575,6 @@ async function fetchCatalogStationsFromApi(): Promise<
         liveStationId: s.liveStationId ?? null,
         linkedLiveStation: s.linkedLiveStation ?? null,
         liveLinkWarning: s.liveLinkWarning ?? null,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-/** Saved names+ids file (~100 KB names-only sibling) written from station_list. */
-async function fetchBundledLiveStations(): Promise<
-  Awaited<ReturnType<typeof fetchCatalogStations>>
-> {
-  try {
-    const res = await fetch(`${getCloudBaseUrl()}/windguru-live-stations.json`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as Array<{
-      provider?: FollowedStation['provider'];
-      stationId?: string;
-      kind?: FollowedStation['kind'];
-      sourceName?: string | null;
-      liveStationId?: string | null;
-    }>;
-    if (!Array.isArray(data)) return [];
-    return data
-      .filter((s) => s?.stationId?.trim())
-      .map((s) => ({
-        provider: s.provider || 'windguru',
-        stationId: String(s.stationId).trim(),
-        kind: s.kind === 'spot' ? 'spot' : 'station',
-        sourceName: s.sourceName ?? null,
-        liveStationId: s.liveStationId ?? String(s.stationId).trim(),
-        linkedLiveStation: null,
-        liveLinkWarning: null,
       }));
   } catch {
     return [];
@@ -650,6 +627,7 @@ export async function fetchCloudSnapshot(): Promise<{
   cloud: boolean;
   stations?: FollowedStation[];
   simpleMode?: boolean;
+  notifyPrefs?: NotifyPrefs;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -659,6 +637,7 @@ export async function fetchCloudSnapshot(): Promise<{
       cloud: boolean;
       stations: FollowedStation[];
       simpleMode?: boolean;
+      notifyPrefs?: NotifyPrefs;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
@@ -666,6 +645,7 @@ export async function fetchCloudSnapshot(): Promise<{
       cloud: !!data.cloud,
       stations: data.stations,
       simpleMode: data.simpleMode !== false,
+      notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
     };
   }
 
@@ -676,6 +656,7 @@ export async function fetchCloudSnapshot(): Promise<{
     cloud: boolean;
     stations: FollowedStation[];
     simpleMode?: boolean;
+    notifyPrefs?: NotifyPrefs;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -686,6 +667,7 @@ export async function fetchCloudSnapshot(): Promise<{
     cloud: !!data.cloud,
     stations: data.stations,
     simpleMode: data.simpleMode !== false,
+    notifyPrefs: normalizeNotifyPrefs(data.notifyPrefs),
   };
 }
 

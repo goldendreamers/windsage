@@ -23,9 +23,23 @@ import {
   cacheKey,
   mapsStatus,
 } from './lib/providers/index.mjs';
-import { normalizeWindguruFollowInput, fetchSpotForecastNow, windguruCatalogStations } from './lib/wind.mjs';
+import {
+  normalizeWindguruFollowInput,
+  fetchSpotForecastNow,
+  windguruCatalogStations,
+  parseWindguruRef,
+  resolveWindguruId,
+  catalogRowFromWindguruResolved,
+  shouldResolveWindguruCatalogQuery,
+} from './lib/wind.mjs';
 import { persistWindguruNameFiles, NAME_FILES } from './lib/windguruNames.mjs';
-import { mergeCatalogRows, nearbyCatalogStations, searchCatalogStations, unionCatalogHits } from './lib/catalogSearch.mjs';
+import {
+  mergeCatalogRows,
+  nearbyCatalogStations,
+  prependCatalogHit,
+  searchCatalogStations,
+  unionCatalogHits,
+} from './lib/catalogSearch.mjs';
 import { autocompletePlaces, geocodeAddress, geocodePlaceName } from './lib/providers/geo.mjs';
 import { resolveLocation } from './lib/providers/location.mjs';
 import {
@@ -74,6 +88,17 @@ import {
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
+import {
+  applyBagMonitoringSchedules,
+  applyMonitoringSchedules,
+  bagHasActiveStation,
+} from './lib/monitoring.mjs';
+import {
+  applyNotifyPrefs,
+  bagGoogleEmail,
+  normalizeNotifyPrefs,
+  resolveNotifyPrefs,
+} from './lib/notifyPrefs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -115,6 +140,9 @@ const DEFAULT_ALERT = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
 
 const MIME = {
@@ -214,29 +242,33 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     liveStationId: station.liveStationId || station.linkedLiveStation?.id || sid,
     kind: 'alert',
   };
+  const googleEmail = bagGoogleEmail(bag);
+  const resolved = resolveNotifyPrefs(bag.notifyPrefs, { hasGoogleEmail: !!googleEmail });
 
   let delivered = 0;
-  const pushTokens = collectPushTokens(bag);
-  for (const to of pushTokens) {
-    const r = await sendExpoPush({ to, title, body, data });
-    if (r?.ok) delivered += 1;
-  }
+  if (resolved.push) {
+    const pushTokens = collectPushTokens(bag);
+    for (const to of pushTokens) {
+      const r = await sendExpoPush({ to, title, body, data });
+      if (r?.ok) delivered += 1;
+    }
 
-  const subs = collectWebPushSubscriptions(bag);
-  if (subs.length) {
-    const { results, alive } = await sendWebPushMany(subs, { title, body, data });
-    bag.webPushSubscriptions = alive;
-    delivered += results.filter((r) => r.ok).length;
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, { title, body, data });
+      bag.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
   }
 
   const emailed =
-    bag?.username || bag?.email
-      ? await sendAlertEmail({ title, body })
+    resolved.email && googleEmail
+      ? await sendAlertEmail({ title, body, to: googleEmail })
       : { ok: false, skipped: true };
   if (emailed?.ok) delivered += 1;
 
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length} email=${emailed?.ok ? 1 : 0}`,
+    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0}`,
   );
   return { delivered, title, body };
 }
@@ -274,7 +306,12 @@ function sensorCacheKey(station) {
 async function resolveStationsPut(bag, body) {
   const existing = Array.isArray(bag.stations) ? bag.stations : [];
   if (!Array.isArray(body?.stations)) {
-    return { stations: existing, kept: true, annotatedKinds: 0, restored: 0 };
+    return {
+      stations: applyMonitoringSchedules(existing).stations,
+      kept: true,
+      annotatedKinds: 0,
+      restored: 0,
+    };
   }
   const applied = applyStationsPut(existing, body.stations, {
     clearStations: body.clearStations === true,
@@ -287,7 +324,12 @@ async function resolveStationsPut(bag, body) {
         `[stations-put] refused empty wipe (kept ${existing.length} follows)`,
       );
     }
-    return { stations: applied.stations, kept: true, annotatedKinds: 0, restored: applied.restored };
+    return {
+      stations: applyMonitoringSchedules(applied.stations).stations,
+      kept: true,
+      annotatedKinds: 0,
+      restored: applied.restored,
+    };
   }
   if (applied.restored > 0) {
     console.warn(
@@ -296,7 +338,9 @@ async function resolveStationsPut(bag, body) {
   }
   const fixed = await fixSpotStations(applied.stations);
   const nextStations = Array.isArray(fixed) ? fixed : fixed?.stations || [];
-  const stations = Array.isArray(nextStations) ? nextStations : applied.stations;
+  const stations = applyMonitoringSchedules(
+    Array.isArray(nextStations) ? nextStations : applied.stations,
+  ).stations;
   return {
     stations,
     kept: false,
@@ -364,7 +408,15 @@ async function attachSpotForecast(station, result, forecastCache, priorSnap) {
   }
 }
 
+async function persistBagMonitoring(store, bag) {
+  if (!applyBagMonitoringSchedules(bag)) return false;
+  bag.updatedAt = Date.now();
+  await saveStore(DATA_DIR, store);
+  return true;
+}
+
 async function runBagChecks(store, bag, { notify = true } = {}) {
+  applyBagMonitoringSchedules(bag);
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
@@ -490,7 +542,9 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       }
 
       const history = historyCache.get(histKey);
-      const evaluated = evaluateAlert(publicReading, history, station, prev);
+      const evaluated = evaluateAlert(publicReading, history, station, prev, Date.now(), bag.notifyPrefs, {
+        hasGoogleEmail: !!bagGoogleEmail(bag),
+      });
       const withForecast = isForecastOnlySpot(station)
         ? {
             ...evaluated.result,
@@ -517,15 +571,18 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       if (notify && result.shouldNotify && station.enabled !== false) {
         const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
         if (!delivered) {
-          const state = bag.alertStates[station.id] || nextState;
+          const state = { ...(bag.alertStates[station.id] || nextState) };
           state.notifiedForRun = false;
+          state.lastNotifyMs = prev.lastNotifyMs ?? null;
+          state.notifyDayUtc = prev.notifyDayUtc ?? null;
+          state.notifyCountToday = prev.notifyCountToday ?? 0;
           bag.alertStates[station.id] = state;
           if (bag.snapshots?.[station.id]) {
             bag.snapshots[station.id].alertState = state;
             bag.snapshots[station.id].result = {
               ...result,
               shouldNotify: true,
-              message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+              message: `${result.message} · alert not delivered yet (allow notifications, install app, or link Google for email)`,
             };
           }
           console.warn(`[notify] no delivery for ${station.id} — will retry`);
@@ -587,8 +644,8 @@ async function pollAll() {
   let bags = 0;
 
   for (const user of Object.values(store.users)) {
-    const active = (user.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
-    if (!active) continue;
+    if (applyBagMonitoringSchedules(user)) touched = true;
+    if (!bagHasActiveStation(user)) continue;
     // Collect push tokens + web-push subscriptions from linked devices
     const tokens = new Set(collectPushTokens(user));
     const webSubs = new Map();
@@ -613,8 +670,8 @@ async function pollAll() {
   for (const deviceId of Object.keys(store.devices)) {
     const device = store.devices[deviceId];
     if (device.userId) continue; // already covered via user
-    const active = (device.stations || []).some((s) => s.enabled !== false && s.stationId?.trim());
-    if (!active) continue;
+    if (applyBagMonitoringSchedules(device)) touched = true;
+    if (!bagHasActiveStation(device)) continue;
     try {
       await runBagChecks(store, device, { notify: true });
       touched = true;
@@ -802,6 +859,7 @@ async function handleAuth(req, res, pathname, url) {
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -837,6 +895,7 @@ async function handleAuth(req, res, pathname, url) {
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -947,11 +1006,13 @@ async function handleMe(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/me/stations') {
+    await persistBagMonitoring(store, user);
     return json(res, 200, {
       ok: true,
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -964,6 +1025,7 @@ async function handleMe(req, res, pathname) {
       user.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
     applySimpleMode(user, body);
+    applyNotifyPrefs(user, body);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -993,10 +1055,12 @@ async function handleMe(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/v1/me/snapshot') {
+    await persistBagMonitoring(store, user);
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(user),
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
@@ -1028,15 +1092,13 @@ async function handleMe(req, res, pathname) {
     if (!Array.isArray(user.alertFeedback)) user.alertFeedback = [];
     user.alertFeedback.push({
       followId,
-      stationId: station.stationId,
-      provider: station.provider || 'windguru',
       rating,
       at: Date.now(),
     });
-    if (user.alertFeedback.length > 80) {
-      user.alertFeedback = user.alertFeedback.slice(-80);
+    if (user.alertFeedback.length > 20) {
+      user.alertFeedback = user.alertFeedback.slice(-20);
     }
-    // Soft trust nudge for location blends / shared catalog.
+    // Soft trust nudge keyed by public station id — no nickname or pin stored here.
     const tk = `${String(station.provider || 'windguru').toLowerCase()}:${String(station.stationId ?? '').trim()}`;
     if (!store.stationTrust[tk]) store.stationTrust[tk] = {};
     const trust = store.stationTrust[tk];
@@ -1127,6 +1189,7 @@ async function handleDevices(req, res, pathname) {
       bag.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     }
     applySimpleMode(bag, body);
+    applyNotifyPrefs(bag, body);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1153,10 +1216,12 @@ async function handleDevices(req, res, pathname) {
   }
 
   if (req.method === 'GET' && rest === '/snapshot') {
+    await persistBagMonitoring(store, bag);
     return json(res, 200, {
       ok: true,
       pollIntervalMinutes: bag.pollIntervalMinutes || DEFAULT_POLL_MIN,
       simpleMode: simpleModeOf(bag),
+      notifyPrefs: normalizeNotifyPrefs(bag.notifyPrefs),
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},
@@ -1286,8 +1351,9 @@ async function handleApi(req, res, pathname, url) {
     }
     const body = await readBody(req);
     const input = typeof body.input === 'string' ? body.input : '';
+    const kindHint = body.kindHint === 'spot' || body.kindHint === 'station' ? body.kindHint : undefined;
     try {
-      const resolved = await normalizeWindguruFollowInput(input);
+      const resolved = await normalizeWindguruFollowInput(input, { kindHint });
       return json(res, 200, { ok: true, provider: 'windguru', ...resolved });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Could not resolve Windguru ID' });
@@ -1398,7 +1464,8 @@ async function handleApi(req, res, pathname, url) {
     }
   }
 
-  // Follow search directory: Windguru live names + this server's shared follows.
+  // Follow search directory: Windguru live names (public station_list) + a
+  // PII-stripped leftover catalog. Personal follows are not copied here.
   // With ?q= rank over the full directory and return a page (phones never need all ~7k rows).
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
@@ -1416,35 +1483,63 @@ async function handleApi(req, res, pathname, url) {
     const provider = String(url.searchParams.get('provider') || '').trim() || null;
     const kind = String(url.searchParams.get('kind') || '').trim() || null;
     if (!q) {
+      // Phones never need the full ~6,900-row directory. Empty q is a seed:
+      // shared follows on this server, plus catalogSize for the UI.
       return json(res, 200, {
         ok: true,
-        stations: merged,
-        total: merged.length,
+        stations: shared.slice(0, limit),
+        total: shared.length,
         catalogSize: merged.length,
       });
     }
     const found = searchCatalogStations(merged, q, { limit: Math.max(limit, 80), provider, kind });
-    let extra = [];
-    if (!/^\d+$/.test(q) && found.total < 12) {
+    let stations = found.stations;
+    let total = found.total;
+    // Live `station_list` has anemometers only. A pasted spot URL/ID (any
+    // Windguru /N or /station/N, not a hardcoded list) is resolved on demand
+    // and prepended so Follow search can find forecast spots.
+    if (shouldResolveWindguruCatalogQuery(q, merged) && (!provider || provider === 'windguru')) {
+      try {
+        const parsed = parseWindguruRef(q);
+        if (parsed) {
+          const resolved = await resolveWindguruId(parsed.id, { kindHint: parsed.kindHint });
+          const hit = catalogRowFromWindguruResolved(resolved);
+          if (hit) {
+            const already = stations.some(
+              (row) =>
+                String(row.provider || 'windguru').toLowerCase() === 'windguru' &&
+                String(row.stationId) === hit.stationId,
+            );
+            stations = prependCatalogHit(stations, hit, limit);
+            if (!already) total += 1;
+          }
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] windguru catalog id resolve failed', e);
+      }
+    }
+    if (!/^\d+$/.test(q) && total < 12) {
       try {
         const geo = await geocodePlaceName(q);
         if (geo?.lat != null && geo?.lon != null) {
-          extra = nearbyCatalogStations(merged, geo.lat, geo.lon, {
+          const extra = nearbyCatalogStations(merged, geo.lat, geo.lon, {
             radiusKm: 80,
             limit: 80,
             provider,
             kind,
           });
+          const combined = unionCatalogHits(stations, extra, limit);
+          stations = combined.stations;
+          total = combined.total;
         }
       } catch (e) {
         console.error('[windsage-cloud] catalog place expand failed', e);
       }
     }
-    const combined = unionCatalogHits(found.stations, extra, limit);
     return json(res, 200, {
       ok: true,
-      stations: combined.stations,
-      total: combined.total,
+      stations,
+      total,
       catalogSize: merged.length,
       query: q,
       limit,

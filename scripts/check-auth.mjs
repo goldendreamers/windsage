@@ -20,7 +20,16 @@ import {
   ensureDevice,
   linkDeviceToUser,
   unlinkDeviceFromUser,
+  upsertSharedStations,
+  publicCatalogStations,
 } from '../code/cloud/lib/store.mjs';
+import {
+  applyBagMonitoringSchedules,
+  applyMonitoringSchedule,
+  bagHasActiveStation,
+  monitoringUntilMsForPreset,
+} from '../code/cloud/lib/monitoring.mjs';
+import { applyNotifyPrefs, resolveNotifyPrefs } from '../code/cloud/lib/notifyPrefs.mjs';
 import { hashPassword, verifyPassword, validateUsername, validatePassword } from '../code/cloud/lib/auth.mjs';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'windsage-auth-'));
@@ -94,9 +103,11 @@ const guest2 = ensureDevice(store, 'dev_new', 'sec_new');
 guest2.stations = [
   { id: 'st_g', stationId: '219', nickname: 'Test reef', enabled: true, rule: {} },
 ];
+guest2.notifyPrefs = { preset: 'annoying', timesPerDay: 1, how: 'phone' };
 linkDeviceToUser(store, newbie, 'dev_new', 'sec_new', { mergeGuestStations: true });
 assert.equal(newbie.stations.length, 1);
 assert.equal(newbie.stations[0].stationId, '219');
+assert.equal(newbie.notifyPrefs.preset, 'annoying');
 
 assert.equal(unlinkDeviceFromUser(store, 'dev_shared', 'sec_shared'), true);
 assert.equal(store.devices.dev_shared.userId, null);
@@ -141,5 +152,72 @@ const liveStore = {
 const rec = restoreStationsFromBackupStore(liveStore, bakStore);
 assert.equal(rec.restored, 6);
 assert.equal(liveStore.users.u1.stations.length, 12);
+
+store.sharedStations = [
+  {
+    provider: 'location',
+    stationId: '32.1,34.8',
+    nickname: 'Home',
+    locationBlend: { lat: 32.1, lon: 34.8, address: 'secret', radiusKm: 8, maxStations: 4, members: [] },
+    rule: { metric: 'wind_avg', threshold: 15 },
+  },
+  {
+    provider: 'windguru',
+    stationId: '2259',
+    nickname: 'My secret beach',
+    sourceName: 'Caesarea',
+    kind: 'station',
+    rule: { metric: 'wind_avg', threshold: 99 },
+  },
+];
+upsertSharedStations(store, [
+  { provider: 'location', stationId: '1,2', nickname: 'Should not land', locationBlend: { lat: 1, lon: 2 } },
+  { provider: 'windguru', stationId: '219', nickname: 'Also private', sourceName: 'Other' },
+]);
+const pub = publicCatalogStations(store);
+assert.equal(pub.some((s) => s.provider === 'location'), false);
+assert.equal(pub.some((s) => /secret|Home|private/i.test(JSON.stringify(s))), false);
+const caes = pub.find((s) => s.stationId === '2259');
+assert.ok(caes);
+assert.equal(caes.sourceName, 'Caesarea');
+assert.equal(caes.nickname, undefined);
+assert.equal(pub.some((s) => s.stationId === '219'), false);
+
+const now = 1_700_000_000_000;
+const pausedBag = {
+  stations: [
+    {
+      id: 's1',
+      stationId: '219',
+      enabled: false,
+      monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+    },
+  ],
+};
+assert.equal(bagHasActiveStation(pausedBag), false);
+assert.equal(applyBagMonitoringSchedules(pausedBag, now), false);
+assert.equal(applyBagMonitoringSchedules(pausedBag, now + 24 * 60 * 60 * 1000 + 1), true);
+assert.equal(pausedBag.stations[0].enabled, true);
+assert.equal(pausedBag.stations[0].monitoringUntilMs, null);
+assert.equal(bagHasActiveStation(pausedBag), true);
+
+const onDay = {
+  id: 's2',
+  stationId: '2259',
+  enabled: true,
+  monitoringUntilMs: monitoringUntilMsForPreset('day', now),
+};
+const flippedOff = applyMonitoringSchedule(onDay, now + 24 * 60 * 60 * 1000 + 1);
+assert.equal(flippedOff.enabled, false);
+assert.equal(flippedOff.monitoringUntilMs, null);
+assert.equal(applyMonitoringSchedule({ id: 's3', stationId: '1', enabled: false }, now + 1e12).enabled, false);
+
+const quietBag = {};
+applyNotifyPrefs(quietBag, { notifyPrefs: { preset: 'quiet' } });
+assert.equal(quietBag.notifyPrefs.preset, 'quiet');
+assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: false }).email, false);
+assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: true }).email, true);
+assert.equal(resolveNotifyPrefs({ preset: 'annoying' }).push, true);
+assert.equal(publicUser(found)?.notifyPrefs?.preset, 'normal');
 
 console.log('check-auth: ok');

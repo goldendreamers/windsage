@@ -1,9 +1,5 @@
 import { getCloudBaseUrl } from './cloud';
-import {
-  followTargetForKind,
-  normalizeWindguruFollowInput,
-  stationUrl as windguruStationUrl,
-} from './windguru';
+import { followTargetForKind, stationUrl as windguruStationUrl } from './windguru';
 import { PROVIDER_META, normalizeProvider, type StationProvider } from '../shared/providers';
 import type { FollowedStation, WindguruKind } from '../shared/types';
 
@@ -27,17 +23,6 @@ export async function resolveFollowInput(
   extras: Record<string, unknown> = {},
 ): Promise<ResolvedFollow & { locationBlend?: FollowedStation['locationBlend'] }> {
   const p = normalizeProvider(provider);
-  if (p === 'windguru') {
-    const resolved = await normalizeWindguruFollowInput(input);
-    return {
-      ...resolved,
-      provider: 'windguru',
-      stationId: resolved.inputId,
-      sourceName: resolved.spotName ?? null,
-      liveLinkWarning: resolved.warning ?? null,
-    };
-  }
-
   const response = await fetch(`${getCloudBaseUrl()}/v1/stations/resolve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -47,6 +32,7 @@ export async function resolveFollowInput(
     ok?: boolean;
     error?: string;
     locationBlend?: FollowedStation['locationBlend'];
+    warning?: string | null;
   };
   if (!response.ok || data.error) {
     throw new Error(data.error || `Could not resolve ${PROVIDER_META[p].label} station`);
@@ -62,6 +48,7 @@ export async function resolveFollowInput(
     sourceName: data.sourceName ?? data.spotName ?? null,
     linkedLiveStation: data.linkedLiveStation ?? null,
     liveLinkWarning: data.liveLinkWarning ?? data.warning ?? null,
+    warning: data.warning ?? data.liveLinkWarning ?? null,
     locationBlend: data.locationBlend ?? null,
   };
 }
@@ -82,7 +69,7 @@ export function followTargetFromResolved(
   if (provider === 'windguru') {
     const target = followTargetForKind(kind, {
       inputId: resolved.inputId,
-      liveStationId: String(resolved.liveStationId || resolved.stationId),
+      liveStationId: resolved.liveStationId ?? null,
       kind: resolved.kind,
       spotName: resolved.spotName || undefined,
       hasLiveStation: resolved.hasLiveStation,

@@ -7,7 +7,7 @@
  * Android if the install dialog is missing: download /app/windsage.apk when present,
  * otherwise bounce out of in-app browsers into Chrome so the dialog can appear.
  */
-export const PWA_SW_VERSION = '8';
+export const PWA_SW_VERSION = '9';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -30,18 +30,108 @@ export function initPwaInstallCapture(): void {
   });
 }
 
+export type AppUpdateStatus = {
+  available: boolean;
+  waiting: boolean;
+};
+
+const updateListeners = new Set<(status: AppUpdateStatus) => void>();
+let lastUpdateStatus: AppUpdateStatus = { available: false, waiting: false };
+
+function emitAppUpdate(status: AppUpdateStatus) {
+  lastUpdateStatus = status;
+  for (const fn of updateListeners) fn(status);
+}
+
+export function subscribeAppUpdate(listener: (status: AppUpdateStatus) => void): () => void {
+  updateListeners.add(listener);
+  listener(lastUpdateStatus);
+  return () => {
+    updateListeners.delete(listener);
+  };
+}
+
+function watchServiceWorker(reg: ServiceWorkerRegistration) {
+  const emit = () => {
+    const waiting = Boolean(reg.waiting);
+    const installing = Boolean(reg.installing);
+    const hasController =
+      typeof navigator !== 'undefined' && !!navigator.serviceWorker.controller;
+    emitAppUpdate({
+      available: waiting || (installing && hasController),
+      waiting,
+    });
+  };
+  emit();
+  reg.addEventListener('updatefound', () => {
+    const sw = reg.installing;
+    if (sw) sw.addEventListener('statechange', emit);
+    emit();
+  });
+}
+
 /** Register the PWA worker so Chromium treats the site as installable. */
 export async function registerPwaServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
   try {
     const reg = await navigator.serviceWorker.register(`/sw.js?v=${PWA_SW_VERSION}`, { scope: '/' });
+    watchServiceWorker(reg);
     await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
+    watchServiceWorker(reg);
     return reg;
   } catch (error) {
     console.warn('[windsage] service worker register failed', error);
     return null;
   }
+}
+
+export async function checkForAppUpdate(): Promise<AppUpdateStatus> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    return { available: false, waiting: false };
+  }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return { available: false, waiting: false };
+    await reg.update().catch(() => undefined);
+    const waiting = Boolean(reg.waiting);
+    const status: AppUpdateStatus = {
+      available: waiting || Boolean(reg.installing && navigator.serviceWorker.controller),
+      waiting,
+    };
+    emitAppUpdate(status);
+    return status;
+  } catch {
+    return lastUpdateStatus;
+  }
+}
+
+/** Activate a waiting worker (or reload) so the installed PWA picks up new JS. */
+export async function applyAppUpdate(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    window.location.reload();
+    return true;
+  }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg?.waiting) {
+      const reload = () => window.location.reload();
+      navigator.serviceWorker.addEventListener('controllerchange', reload, { once: true });
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      window.setTimeout(reload, 1600);
+      return true;
+    }
+    await checkForAppUpdate();
+    const again = await navigator.serviceWorker.getRegistration();
+    if (again?.waiting) {
+      again.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
+  } catch {
+    // still reload — network-first JS on the next load
+  }
+  window.location.reload();
+  return true;
 }
 
 export function isRunningAsInstalledApp(): boolean {

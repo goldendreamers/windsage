@@ -9,7 +9,6 @@ export function normalizeSimpleMode(value: unknown): boolean {
 export const SIMPLE_NOTIFY_PRESETS = [
   { id: 'wind_12', label: 'Wind 12 knots or more', metric: 'wind_avg' as const, threshold: 12 },
   { id: 'wind_15', label: 'Wind 15 knots or more', metric: 'wind_avg' as const, threshold: 15 },
-  { id: 'wind_18', label: 'Wind 18 knots or more', metric: 'wind_avg' as const, threshold: 18 },
   { id: 'wind_20', label: 'Wind 20 knots or more', metric: 'wind_avg' as const, threshold: 20 },
   { id: 'gust_25', label: 'Gusts 25 knots or more', metric: 'wind_max' as const, threshold: 25 },
 ] as const;
@@ -31,20 +30,34 @@ export function ruleFromSimplePreset(id: string): AlertRule {
     windDirEnabled: false,
     maxWaveEnabled: false,
     maxWindEnabled: false,
+    minWindEnabled: false,
+    maxGustEnabled: false,
+    minTempEnabled: false,
+    maxTempEnabled: false,
   };
+}
+
+function hasExtraLimits(rule: AlertRule): boolean {
+  return !!(
+    rule.maxGustSpreadEnabled ||
+    rule.windDirEnabled ||
+    rule.maxWaveEnabled ||
+    rule.maxWindEnabled ||
+    rule.minWindEnabled ||
+    rule.maxGustEnabled ||
+    rule.minTempEnabled ||
+    rule.maxTempEnabled
+  );
 }
 
 export function matchSimpleNotifyId(rule: AlertRule | null | undefined): SimpleNotifyId | null {
   if (!rule) return null;
+  if (hasExtraLimits(rule)) return null;
   const found = SIMPLE_NOTIFY_PRESETS.find(
     (row) =>
       row.metric === rule.metric &&
       row.threshold === rule.threshold &&
-      (rule.comparison || 'gte') === 'gte' &&
-      !rule.maxGustSpreadEnabled &&
-      !rule.windDirEnabled &&
-      !rule.maxWaveEnabled &&
-      !rule.maxWindEnabled,
+      (rule.comparison || 'gte') === 'gte',
   );
   return found?.id ?? null;
 }
