@@ -14,8 +14,10 @@ import {
 import { openDeveloperEmail, openWindsageKofi } from '../core/contact';
 import {
   normalizeNotifyPrefs,
+  notifyChannelsOf,
   notifyPrefsSummary,
-  type NotifyHow,
+  toggleNotifyChannel,
+  type NotifyChannel,
   type NotifyPrefs,
   type NotifyPreset,
 } from '../shared/defaults';
@@ -38,6 +40,7 @@ type Props = {
   onUpdate?: () => void;
   notifyPrefs?: NotifyPrefs;
   hasGoogleEmail?: boolean;
+  hasDiscordAlert?: boolean;
   onChangeNotifyPrefs?: (prefs: NotifyPrefs) => void;
   onNeedGoogle?: () => void;
   onDiscordAlerts?: () => void;
@@ -55,6 +58,7 @@ export function AppMenu({
   onUpdate,
   notifyPrefs,
   hasGoogleEmail = false,
+  hasDiscordAlert = false,
   onChangeNotifyPrefs,
   onNeedGoogle,
   onDiscordAlerts,
@@ -187,20 +191,28 @@ export function AppMenu({
       onNeedGoogle?.();
       return;
     }
-    if (preset === 'annoying') setPrefs({ preset, how: 'phone' });
-    else if (preset === 'quiet') setPrefs({ preset, how: 'email', timesPerDay: 1 });
-    else if (preset === 'normal') setPrefs({ preset, how: 'phone', timesPerDay: 1 });
+    if (preset === 'annoying') setPrefs({ preset, how: ['phone'] });
+    else if (preset === 'quiet') setPrefs({ preset, how: ['email'], timesPerDay: 1 });
+    else if (preset === 'normal') setPrefs({ preset, how: ['phone'], timesPerDay: 1 });
     else setPrefs({ preset });
   };
 
-  const pickHow = (how: NotifyHow) => {
-    if ((how === 'email' || how === 'both') && !hasGoogleEmail) {
+  const toggleHow = (channel: NotifyChannel) => {
+    const current = notifyChannelsOf(prefs);
+    const turningOn = !current.includes(channel);
+    if (turningOn && channel === 'email' && !hasGoogleEmail) {
       void Haptics.selectionAsync();
       onClose();
       onNeedGoogle?.();
       return;
     }
-    setPrefs({ preset: 'custom', how });
+    if (turningOn && channel === 'discord' && !hasDiscordAlert) {
+      void Haptics.selectionAsync();
+      onClose();
+      onDiscordAlerts?.();
+      return;
+    }
+    setPrefs({ preset: 'custom', how: toggleNotifyChannel(current, channel) });
   };
 
   const bumpTimes = (delta: number) => {
@@ -338,15 +350,14 @@ export function AppMenu({
                     {([
                       { key: 'phone' as const, label: 'Phone' },
                       { key: 'email' as const, label: 'Email' },
-                      { key: 'both' as const, label: 'Both' },
+                      { key: 'discord' as const, label: 'Discord' },
                     ]).map((opt) => {
-                      const active =
-                        prefs.preset === 'custom'
-                          ? prefs.how === opt.key
-                          : prefs.preset === 'quiet'
-                            ? opt.key === 'email'
-                            : opt.key === 'phone';
-                      const locked = (opt.key === 'email' || opt.key === 'both') && !hasGoogleEmail;
+                      const active = notifyChannelsOf(prefs).includes(opt.key);
+                      const locked =
+                        (opt.key === 'email' && !hasGoogleEmail) ||
+                        (opt.key === 'discord' && !hasDiscordAlert);
+                      const lockHint =
+                        opt.key === 'email' ? 'Google' : opt.key === 'discord' ? 'link' : '';
                       return (
                         <Pressable
                           key={opt.key}
@@ -357,9 +368,10 @@ export function AppMenu({
                               backgroundColor: active ? palette.accentDim : palette.input,
                             },
                           ]}
-                          onPress={() => pickHow(opt.key)}
+                          onPress={() => toggleHow(opt.key)}
                           accessibilityRole="button"
                           accessibilityLabel={opt.label}
+                          accessibilityState={{ selected: active }}
                         >
                           <Text
                             style={{
@@ -367,7 +379,7 @@ export function AppMenu({
                               fontWeight: '800',
                             }}
                           >
-                            {locked ? `${opt.label} · Google` : opt.label}
+                            {locked ? `${opt.label} · ${lockHint}` : opt.label}
                           </Text>
                         </Pressable>
                       );

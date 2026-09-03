@@ -11,7 +11,7 @@ import {
   minWindOk,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, monitoringUntilMsForCustomHours, monitoringUntilMsForPreset, monitoringScheduleSummary, moveFollow, notifyPrefsSummary, organizeFollows, parseLooseNumber, resolveNotifyPrefs, ruleForMetric, toggleFollowStar, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, extraLimitsForMetric, formatAlertTrigger, formatWindFromDisplay, homeLiveStatColumns, monitoringUntilMsForCustomHours, monitoringUntilMsForPreset, monitoringScheduleSummary, moveFollow, normalizeNotifyPrefs, notifyChannelsOf, notifyPrefsSummary, organizeFollows, parseLooseNumber, parseNotifyHow, resolveNotifyPrefs, ruleForMetric, toggleFollowStar, toggleNotifyChannel, windDirectionDeg, windDirectionName } from '../code/shared/defaults';
 import { matchSimpleNotifyId, ruleFromSimplePreset } from '../code/core/simpleMode';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
@@ -375,7 +375,16 @@ assert.equal(quietNoGoogle.result.shouldNotify, false);
 const quietGoogle = evaluateAlert(reading(18, 28), history, station, prev, t0, { preset: 'quiet' }, { hasGoogleEmail: true });
 assert.equal(quietGoogle.result.shouldNotify, true);
 
-const customTwo = { preset: 'custom' as const, timesPerDay: 2, how: 'phone' as const };
+const customTwo = { preset: 'custom' as const, timesPerDay: 2, how: ['phone'] as const };
+const discordOnlyPrefs = { preset: 'custom' as const, timesPerDay: 1, how: ['discord'] as const };
+const discordNoLink = evaluateAlert(reading(18, 28), history, station, prev, t0, discordOnlyPrefs, {
+  hasDiscordAlert: false,
+});
+assert.equal(discordNoLink.result.shouldNotify, false);
+const discordLinked = evaluateAlert(reading(18, 28), history, station, prev, t0, discordOnlyPrefs, {
+  hasDiscordAlert: true,
+});
+assert.equal(discordLinked.result.shouldNotify, true);
 const c1 = evaluateAlert(reading(18, 28), history, station, prev, t0, customTwo);
 assert.equal(c1.result.shouldNotify, true);
 const c2 = evaluateAlert(reading(18, 28), history, station, c1.nextState, t0 + 12 * 60 * 60 * 1000, customTwo);
@@ -387,7 +396,46 @@ assert.equal(notifyPrefsSummary({ preset: 'annoying' }), 'Annoying · every 10 m
 assert.equal(notifyPrefsSummary({ preset: 'normal' }), 'Normal · once a day');
 assert.equal(notifyPrefsSummary({ preset: 'quiet' }), 'Quiet · email only');
 assert.equal(notifyPrefsSummary({ preset: 'custom', timesPerDay: 3, how: 'both' }), 'Custom · 3× a day · phone + email');
+assert.equal(
+  notifyPrefsSummary({ preset: 'custom', timesPerDay: 2, how: ['phone', 'discord'] }),
+  'Custom · 2× a day · phone + discord',
+);
+assert.deepEqual(parseNotifyHow('both'), ['phone', 'email']);
+assert.deepEqual(parseNotifyHow(['discord', 'phone', 'email', 'both']), ['phone', 'email', 'discord']);
+assert.deepEqual(normalizeNotifyPrefs({ preset: 'custom', how: 'both' }).how, ['phone', 'email']);
+assert.deepEqual(notifyChannelsOf({ preset: 'normal', how: ['email'] }), ['phone']);
+assert.deepEqual(notifyChannelsOf({ preset: 'custom', how: ['email', 'discord'] }), ['email', 'discord']);
+assert.deepEqual(toggleNotifyChannel(['phone'], 'email'), ['phone', 'email']);
+assert.deepEqual(toggleNotifyChannel(['phone'], 'phone'), ['phone']);
+assert.deepEqual(toggleNotifyChannel(['phone', 'discord'], 'phone'), ['discord']);
 assert.equal(resolveNotifyPrefs({ preset: 'quiet' }, { hasGoogleEmail: false }).googleMissing, true);
 assert.equal(alertNotifyDue(prev, resolveNotifyPrefs({ preset: 'quiet' }, { hasGoogleEmail: false }), t0), false);
+const discordOnly = resolveNotifyPrefs(
+  { preset: 'custom', timesPerDay: 1, how: ['discord'] },
+  { hasDiscordAlert: true },
+);
+assert.equal(discordOnly.discord, true);
+assert.equal(discordOnly.push, false);
+assert.equal(discordOnly.email, false);
+assert.equal(alertNotifyDue(prev, discordOnly, t0), true);
+assert.equal(
+  resolveNotifyPrefs({ preset: 'custom', how: ['discord'] }, { hasDiscordAlert: false }).discord,
+  false,
+);
+assert.equal(
+  alertNotifyDue(
+    prev,
+    resolveNotifyPrefs({ preset: 'custom', how: ['discord'] }, { hasDiscordAlert: false }),
+    t0,
+  ),
+  false,
+);
+assert.equal(
+  resolveNotifyPrefs({ preset: 'custom', how: ['phone', 'email', 'discord'] }, {
+    hasGoogleEmail: true,
+    hasDiscordAlert: true,
+  }).email,
+  true,
+);
 
 console.log('check-alerts: ok');

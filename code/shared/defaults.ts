@@ -6,13 +6,13 @@ import type {
   Comparison,
   FollowedStation,
   MetricKey,
-  NotifyHow,
+  NotifyChannel,
   NotifyPrefs,
   NotifyPreset,
   WindguruKind,
 } from './types';
 
-export type { NotifyHow, NotifyPrefs, NotifyPreset } from './types';
+export type { NotifyChannel, NotifyHow, NotifyPrefs, NotifyPreset } from './types';
 
 /** Primary alert defaults per metric (threshold units match the metric). */
 export const METRIC_DEFAULTS: Record<
@@ -64,7 +64,7 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
 export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = {
   preset: 'normal',
   timesPerDay: 1,
-  how: 'phone',
+  how: ['phone'],
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -88,8 +88,44 @@ export const DEFAULT_ALERT_STATE: AlertState = {
 };
 
 const NOTIFY_PRESETS = new Set(['annoying', 'normal', 'quiet', 'custom']);
-const NOTIFY_HOWS = new Set(['phone', 'email', 'both']);
+const NOTIFY_CHANNELS: NotifyChannel[] = ['phone', 'email', 'discord'];
 const ANNOYING_INTERVAL_MIN = 10;
+
+export function parseNotifyHow(raw: unknown): NotifyChannel[] {
+  const src = Array.isArray(raw)
+    ? raw
+    : raw === 'both'
+      ? ['phone', 'email']
+      : raw == null || raw === ''
+        ? []
+        : [raw];
+  const seen = new Set<NotifyChannel>();
+  for (const item of src) {
+    if (item === 'phone' || item === 'email' || item === 'discord') seen.add(item);
+  }
+  const ordered = NOTIFY_CHANNELS.filter((channel) => seen.has(channel));
+  return ordered.length ? ordered : ['phone'];
+}
+
+export function notifyChannelsOf(prefs: NotifyPrefs | null | undefined): NotifyChannel[] {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'quiet') return ['email'];
+  if (n.preset === 'custom') return parseNotifyHow(n.how);
+  return ['phone'];
+}
+
+export function toggleNotifyChannel(
+  current: NotifyChannel[] | null | undefined,
+  channel: NotifyChannel,
+): NotifyChannel[] {
+  const have = parseNotifyHow(current);
+  const on = have.includes(channel);
+  if (on) {
+    const next = have.filter((item) => item !== channel);
+    return next.length ? next : have;
+  }
+  return parseNotifyHow([...have, channel]);
+}
 
 export function utcDayKey(nowMs = Date.now()): string {
   return new Date(nowMs).toISOString().slice(0, 10);
@@ -100,7 +136,7 @@ export function normalizeNotifyPrefs(raw: unknown): NotifyPrefs {
   const preset = NOTIFY_PRESETS.has(String(src.preset))
     ? (src.preset as NotifyPreset)
     : 'normal';
-  const how = NOTIFY_HOWS.has(String(src.how)) ? (src.how as NotifyHow) : 'phone';
+  const how = parseNotifyHow(src.how);
   const n = Math.trunc(Number(src.timesPerDay));
   const timesPerDay = Number.isFinite(n) ? Math.min(24, Math.max(1, n)) : 1;
   return { preset, timesPerDay, how };
@@ -112,25 +148,46 @@ export type ResolvedNotifyPrefs = {
   minIntervalMinutes: number;
   push: boolean;
   email: boolean;
+  discord: boolean;
   needsGoogle: boolean;
   googleMissing: boolean;
+  needsDiscord: boolean;
+  discordMissing: boolean;
 };
+
+function resolvedChannels(
+  channels: NotifyChannel[],
+  opts?: { hasGoogleEmail?: boolean; hasDiscordAlert?: boolean },
+): Pick<
+  ResolvedNotifyPrefs,
+  'push' | 'email' | 'discord' | 'needsGoogle' | 'googleMissing' | 'needsDiscord' | 'discordMissing'
+> {
+  const hasGoogle = opts?.hasGoogleEmail === true;
+  const hasDiscord = opts?.hasDiscordAlert === true;
+  const wantEmail = channels.includes('email');
+  const wantDiscord = channels.includes('discord');
+  return {
+    push: channels.includes('phone'),
+    email: wantEmail && hasGoogle,
+    discord: wantDiscord && hasDiscord,
+    needsGoogle: wantEmail,
+    googleMissing: wantEmail && !hasGoogle,
+    needsDiscord: wantDiscord,
+    discordMissing: wantDiscord && !hasDiscord,
+  };
+}
 
 export function resolveNotifyPrefs(
   prefs: NotifyPrefs | null | undefined,
-  opts?: { hasGoogleEmail?: boolean },
+  opts?: { hasGoogleEmail?: boolean; hasDiscordAlert?: boolean },
 ): ResolvedNotifyPrefs {
   const n = normalizeNotifyPrefs(prefs);
-  const hasGoogle = opts?.hasGoogleEmail === true;
   if (n.preset === 'annoying') {
     return {
       preset: 'annoying',
       maxPerDay: null,
       minIntervalMinutes: ANNOYING_INTERVAL_MIN,
-      push: true,
-      email: false,
-      needsGoogle: false,
-      googleMissing: false,
+      ...resolvedChannels(['phone'], opts),
     };
   }
   if (n.preset === 'quiet') {
@@ -138,35 +195,23 @@ export function resolveNotifyPrefs(
       preset: 'quiet',
       maxPerDay: 1,
       minIntervalMinutes: 24 * 60,
-      push: false,
-      email: hasGoogle,
-      needsGoogle: true,
-      googleMissing: !hasGoogle,
+      ...resolvedChannels(['email'], opts),
     };
   }
   if (n.preset === 'custom') {
     const times = n.timesPerDay ?? 1;
-    const how = n.how ?? 'phone';
-    const wantEmail = how === 'email' || how === 'both';
-    const wantPush = how === 'phone' || how === 'both';
     return {
       preset: 'custom',
       maxPerDay: times,
       minIntervalMinutes: Math.max(ANNOYING_INTERVAL_MIN, Math.floor((24 * 60) / times)),
-      push: wantPush,
-      email: wantEmail && hasGoogle,
-      needsGoogle: wantEmail,
-      googleMissing: wantEmail && !hasGoogle,
+      ...resolvedChannels(parseNotifyHow(n.how), opts),
     };
   }
   return {
     preset: 'normal',
     maxPerDay: 1,
     minIntervalMinutes: 24 * 60,
-    push: true,
-    email: false,
-    needsGoogle: false,
-    googleMissing: false,
+    ...resolvedChannels(['phone'], opts),
   };
 }
 
@@ -175,7 +220,7 @@ export function notifyPrefsSummary(prefs: NotifyPrefs | null | undefined): strin
   if (n.preset === 'annoying') return 'Annoying · every 10 min';
   if (n.preset === 'quiet') return 'Quiet · email only';
   if (n.preset === 'custom') {
-    const how = n.how === 'email' ? 'email' : n.how === 'both' ? 'phone + email' : 'phone';
+    const how = parseNotifyHow(n.how).join(' + ');
     const times = n.timesPerDay ?? 1;
     return `Custom · ${times}× a day · ${how}`;
   }
@@ -187,7 +232,7 @@ export function alertNotifyDue(
   resolved: ResolvedNotifyPrefs,
   nowMs = Date.now(),
 ): boolean {
-  if (!resolved.push && !resolved.email) return false;
+  if (!resolved.push && !resolved.email && !resolved.discord) return false;
   const day = utcDayKey(nowMs);
   const count =
     prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;

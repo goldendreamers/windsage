@@ -461,6 +461,7 @@ export default function App() {
         }
         const resolved = resolveNotifyPrefs(settingsRef.current.notifyPrefs, {
           hasGoogleEmail: !!account?.sso?.google?.email,
+          hasDiscordAlert: !!account?.discordAlert?.linked,
         });
         const failed = /not delivered yet/i.test(String(snap?.result?.message || ''));
         await hapticLight();
@@ -470,9 +471,11 @@ export default function App() {
               ? 'Wake-up ringing — tap Stop'
               : failed
                 ? 'Alert ready — allow notifications or install the app'
-                : resolved.email && !resolved.push
+                : resolved.email && !resolved.push && !resolved.discord
                   ? 'Alert emailed'
-                  : 'Alert fired — check phone notifications'
+                  : resolved.discord && !resolved.push && !resolved.email
+                    ? 'Alert sent to Discord'
+                    : 'Alert fired — check phone notifications'
             : 'Cloud check complete',
         );
       } catch (error) {
@@ -1102,6 +1105,7 @@ export default function App() {
         }}
         notifyPrefs={settings.notifyPrefs}
         hasGoogleEmail={!!account?.sso?.google?.email}
+        hasDiscordAlert={!!account?.discordAlert?.linked}
         onChangeNotifyPrefs={(prefs) => {
           void persistSettings({ ...settingsRef.current, notifyPrefs: prefs });
         }}

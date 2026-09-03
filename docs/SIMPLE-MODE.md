@@ -27,7 +27,7 @@ Nimrod can override (“put X in simple”). Until then, do not dump new pickers
 
 ## Current advanced-only (not core)
 
-- Times per day, send-by phone/email/both
+- Times per day, send-by phone/email/Discord (pick any mix)
 - Custom monitoring hours/days
 - Extra alert limits, metric chooser, thresholds, poll interval
 - Other providers, map pins, source IDs, spot vs station
