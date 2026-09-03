@@ -88,12 +88,15 @@ import {
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import {
+  bagDiscordUserId,
   completeDiscordAlertLink,
   discordAlertConfig,
   hookSecretOk,
   publicDiscordAlert,
   sendAlertDiscordDm,
   startDiscordAlertLink,
+  startWakeVoiceCall,
+  stopWakeVoiceCall,
   unlinkDiscordAlert,
   unlinkDiscordAlertByDiscordId,
 } from './lib/discordAlertDm.mjs';
@@ -111,7 +114,9 @@ import {
 } from './lib/notifyPrefs.mjs';
 import {
   alarmPulseDue,
+  discordWakeNeedsStart,
   markAlarmPulsed,
+  markDiscordWakeStarted,
   publicWindAlarm,
   startWindAlarm,
   stopWindAlarm,
@@ -269,9 +274,29 @@ function hydrateUserChannels(store, user) {
   user.webPushSubscriptions = [...webSubs.values()];
 }
 
+async function hangUpWakeVoice(bag) {
+  const discordId = bagDiscordUserId(bag);
+  if (!discordId) return;
+  await stopWakeVoiceCall({ discordUserId: discordId }).catch(() => undefined);
+}
+
+async function endWindAlarm(bag) {
+  const via = bag?.windAlarm?.via === 'discord' ? 'discord' : 'native';
+  const stopped = stopWindAlarm(bag);
+  if (stopped && via === 'discord') await hangUpWakeVoice(bag);
+  return stopped;
+}
+
+async function syncWindAlarmAndHangUp(bag) {
+  const hadDiscord = bag?.windAlarm?.via === 'discord';
+  const stopped = syncWindAlarmWithStations(bag);
+  if (stopped && hadDiscord) await hangUpWakeVoice(bag);
+  return stopped;
+}
+
 async function sendAlarmPulse(bag, alarm) {
   const via = alarm?.via === 'discord' ? 'discord' : 'native';
-  const discordId = bag?.discordAlert?.enabled !== false ? bag?.discordAlert?.discordUserId : null;
+  const discordId = bagDiscordUserId(bag);
   const useDiscord = via === 'discord' && discordId;
   const actualVia = useDiscord ? 'discord' : 'native';
   if (alarm && alarm.via !== actualVia) alarm.via = actualVia;
@@ -284,8 +309,22 @@ async function sendAlarmPulse(bag, alarm) {
   };
   let delivered = 0;
   if (useDiscord) {
-    const discordDm = await sendAlertDiscordDm(discordId, { title, body });
-    if (discordDm?.ok) delivered += 1;
+    if (discordWakeNeedsStart(alarm)) {
+      try {
+        const voice = await startWakeVoiceCall({ discordUserId: discordId, title, body });
+        if (voice?.ok) delivered += 1;
+        else {
+          const fallback = await sendAlertDiscordDm(discordId, {
+            title,
+            body: `${body}\nThe Discord voice call could not start — open Windsage and tap Stop when you are up.`,
+          });
+          if (fallback?.ok) delivered += 1;
+        }
+      } catch (err) {
+        console.error('[notify] discord wake failed', err?.message || err);
+      }
+      markDiscordWakeStarted(alarm);
+    }
   } else {
     const pushTokens = collectPushTokens(bag);
     for (const to of pushTokens) {
@@ -733,10 +772,10 @@ async function pulseBagAlarm(store, bag, { hydrateUser = false } = {}) {
   const due = alarmPulseDue(bag.windAlarm);
   if (due === 'wait' || due === 'none') return false;
   if (due === 'expire') {
-    stopWindAlarm(bag);
+    await endWindAlarm(bag);
     return true;
   }
-  if (syncWindAlarmWithStations(bag)) return true;
+  if (await syncWindAlarmAndHangUp(bag)) return true;
   await sendAlarmPulse(bag, bag.windAlarm);
   return true;
 }
@@ -1143,7 +1182,7 @@ async function handleMe(req, res, pathname) {
     }
     applySimpleMode(user, body);
     applyNotifyPrefs(user, body);
-    syncWindAlarmWithStations(user);
+    await syncWindAlarmAndHangUp(user);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -1244,7 +1283,7 @@ async function handleMe(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/v1/me/wind-alarm/stop') {
     await readBody(req).catch(() => ({}));
-    const stopped = stopWindAlarm(user);
+    const stopped = await endWindAlarm(user);
     if (stopped) {
       user.updatedAt = Date.now();
       await saveStore(DATA_DIR, store);
@@ -1339,7 +1378,7 @@ async function handleDevices(req, res, pathname) {
     }
     applySimpleMode(bag, body);
     applyNotifyPrefs(bag, body);
-    syncWindAlarmWithStations(bag);
+    await syncWindAlarmAndHangUp(bag);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1406,7 +1445,7 @@ async function handleDevices(req, res, pathname) {
 
   if (req.method === 'POST' && rest === '/wind-alarm/stop') {
     await readBody(req).catch(() => ({}));
-    const stopped = stopWindAlarm(bag);
+    const stopped = await endWindAlarm(bag);
     if (stopped) {
       bag.updatedAt = Date.now();
       await saveStore(DATA_DIR, store);

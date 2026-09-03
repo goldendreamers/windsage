@@ -305,7 +305,7 @@ export function AccountScreen({ onBack, onOpenMenu, simpleMode = true, onAuthed,
       </Section>
 
       {simpleMode ? null : (
-      <Section title="Link Discord for alert DMs" icon="bell">
+      <Section title="Link Discord for alerts" icon="bell">
         <DiscordAlertPanel
           signedIn={!!user}
           linked={!!user?.discordAlert?.linked}

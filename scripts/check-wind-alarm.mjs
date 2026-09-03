@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   alarmPulseDue,
+  discordWakeNeedsStart,
+  markDiscordWakeStarted,
   normalizeWakeVia,
   startWindAlarm,
   stopWindAlarm,
@@ -46,6 +48,12 @@ assert.equal(bag.windAlarm, null);
 const copy = wakeCopy('Spot', 'Wind is up', 'native');
 assert.match(copy.title, /WAKE UP/);
 assert.match(copy.body, /phone/);
-assert.match(wakeCopy('Spot', 'Wind is up', 'discord').body, /DMing/);
+assert.match(wakeCopy('Spot', 'Wind is up', 'discord').body, /voice call/);
+assert.equal(discordWakeNeedsStart({ via: 'discord' }), true);
+assert.equal(discordWakeNeedsStart({ via: 'discord', voiceStarted: true }), false);
+assert.equal(discordWakeNeedsStart({ via: 'native' }), false);
+const pending = { via: 'discord' };
+markDiscordWakeStarted(pending);
+assert.equal(discordWakeNeedsStart(pending), false);
 
 console.log('check-wind-alarm: ok');

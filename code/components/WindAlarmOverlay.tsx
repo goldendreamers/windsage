@@ -39,7 +39,7 @@ export function WindAlarmOverlay({ alarm, onStop }: Props) {
         <Text style={styles.via}>
           {native
             ? 'Ringing on this phone until you stop it. Unmute the ringer.'
-            : 'Discord keeps DMing you until you stop it. Check Discord notifications.'}
+            : 'Discord is calling you in a private voice channel until you stop it. Join that call, then tap Stop.'}
         </Text>
         <Pressable
           style={styles.stop}
