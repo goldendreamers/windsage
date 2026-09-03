@@ -154,14 +154,16 @@ export interface LocationBlend {
 }
 
 export type NotifyPreset = 'annoying' | 'normal' | 'quiet' | 'custom';
-export type NotifyHow = 'phone' | 'email' | 'both';
+export type NotifyChannel = 'phone' | 'email' | 'discord';
+/** Legacy single-value how. Prefer `NotifyChannel[]`. `'both'` still loads as phone+email. */
+export type NotifyHow = NotifyChannel | 'both' | NotifyChannel[];
 
 /** How often / how to send wind alerts. Account-level, not per station. */
 export interface NotifyPrefs {
   preset: NotifyPreset;
   /** Advanced custom: 1–24 alerts per UTC day. Ignored for named presets. */
   timesPerDay?: number;
-  /** Advanced custom: phone push, email, or both. */
+  /** Advanced custom: any mix of phone, email, Discord. */
   how?: NotifyHow;
 }
 

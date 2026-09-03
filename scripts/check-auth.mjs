@@ -219,6 +219,15 @@ assert.equal(quietBag.notifyPrefs.preset, 'quiet');
 assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: false }).email, false);
 assert.equal(resolveNotifyPrefs(quietBag.notifyPrefs, { hasGoogleEmail: true }).email, true);
 assert.equal(resolveNotifyPrefs({ preset: 'annoying' }).push, true);
+assert.deepEqual(quietBag.notifyPrefs.how, ['phone']);
+assert.equal(
+  resolveNotifyPrefs({ preset: 'custom', how: ['discord'] }, { hasDiscordAlert: true }).discord,
+  true,
+);
+assert.equal(
+  resolveNotifyPrefs({ preset: 'custom', how: ['discord'] }, { hasDiscordAlert: false }).discord,
+  false,
+);
 assert.equal(publicUser(found)?.notifyPrefs?.preset, 'normal');
 assert.equal(sanitizeDiscordInvite('https://discord.gg/uZSeqTcYq'), 'https://discord.gg/uZSeqTcYq');
 assert.equal(sanitizeDiscordInvite('https://discord.com/invite/uZSeqTcYq'), 'https://discord.gg/uZSeqTcYq');

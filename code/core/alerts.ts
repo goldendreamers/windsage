@@ -172,7 +172,7 @@ export function evaluateAlert(
   prev: AlertState,
   nowMs = Date.now(),
   notifyPrefs?: NotifyPrefs | null,
-  notifyOpts?: { hasGoogleEmail?: boolean },
+  notifyOpts?: { hasGoogleEmail?: boolean; hasDiscordAlert?: boolean },
 ): { result: CheckResult; nextState: AlertState } {
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';

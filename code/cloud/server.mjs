@@ -332,7 +332,10 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     kind: 'alert',
   };
   const googleEmail = bagGoogleEmail(bag);
-  const resolved = resolveNotifyPrefs(bag.notifyPrefs, { hasGoogleEmail: !!googleEmail });
+  const resolved = resolveNotifyPrefs(bag.notifyPrefs, {
+    hasGoogleEmail: !!googleEmail,
+    hasDiscordAlert: !!(bag?.discordAlert?.enabled !== false && bag?.discordAlert?.discordUserId),
+  });
 
   let delivered = 0;
   if (resolved.push) {
@@ -358,7 +361,7 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
 
   const discordId = bag?.discordAlert?.enabled !== false ? bag?.discordAlert?.discordUserId : null;
   let discordDm = { ok: false, skipped: true };
-  if (discordId) {
+  if (resolved.discord && discordId) {
     discordDm = await sendAlertDiscordDm(discordId, { title, body });
     if (discordDm?.ok) delivered += 1;
   }
@@ -640,6 +643,7 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       const history = historyCache.get(histKey);
       const evaluated = evaluateAlert(publicReading, history, station, prev, Date.now(), bag.notifyPrefs, {
         hasGoogleEmail: !!bagGoogleEmail(bag),
+        hasDiscordAlert: !!(bag?.discordAlert?.enabled !== false && bag?.discordAlert?.discordUserId),
       });
       const withForecast = isForecastOnlySpot(station)
         ? {

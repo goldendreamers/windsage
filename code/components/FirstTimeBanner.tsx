@@ -30,7 +30,7 @@ const STEPS: { id: Exclude<HowtoScreen, 'home'>; n: number; short: string; hint:
     id: 'station',
     n: 2,
     short: 'Alert',
-    hint: 'Open the station and set when to notify (wind, gust, temp, or waves). Alerts go to this phone and Discord if linked.',
+    hint: 'Open the station and set when to notify (wind, gust, temp, or waves). Alerts go to this phone; Menu → Alerts can add email or Discord.',
   },
   {
     id: 'install',

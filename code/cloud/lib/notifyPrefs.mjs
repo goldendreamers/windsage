@@ -4,23 +4,39 @@
  */
 
 const NOTIFY_PRESETS = new Set(['annoying', 'normal', 'quiet', 'custom']);
-const NOTIFY_HOWS = new Set(['phone', 'email', 'both']);
+const NOTIFY_CHANNELS = ['phone', 'email', 'discord'];
 const ANNOYING_INTERVAL_MIN = 10;
 
 export const DEFAULT_NOTIFY_PREFS = {
   preset: 'normal',
   timesPerDay: 1,
-  how: 'phone',
+  how: ['phone'],
 };
 
 export function utcDayKey(nowMs = Date.now()) {
   return new Date(nowMs).toISOString().slice(0, 10);
 }
 
+export function parseNotifyHow(raw) {
+  const src = Array.isArray(raw)
+    ? raw
+    : raw === 'both'
+      ? ['phone', 'email']
+      : raw == null || raw === ''
+        ? []
+        : [raw];
+  const seen = new Set();
+  for (const item of src) {
+    if (item === 'phone' || item === 'email' || item === 'discord') seen.add(item);
+  }
+  const ordered = NOTIFY_CHANNELS.filter((channel) => seen.has(channel));
+  return ordered.length ? ordered : ['phone'];
+}
+
 export function normalizeNotifyPrefs(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const preset = NOTIFY_PRESETS.has(String(src.preset)) ? src.preset : 'normal';
-  const how = NOTIFY_HOWS.has(String(src.how)) ? src.how : 'phone';
+  const how = parseNotifyHow(src.how);
   const n = Math.trunc(Number(src.timesPerDay));
   const timesPerDay = Number.isFinite(n) ? Math.min(24, Math.max(1, n)) : 1;
   return { preset, timesPerDay, how };
@@ -33,18 +49,30 @@ export function bagGoogleEmail(bag) {
   return trimmed.includes('@') ? trimmed : null;
 }
 
+function resolvedChannels(channels, opts = {}) {
+  const hasGoogle = opts.hasGoogleEmail === true;
+  const hasDiscord = opts.hasDiscordAlert === true;
+  const wantEmail = channels.includes('email');
+  const wantDiscord = channels.includes('discord');
+  return {
+    push: channels.includes('phone'),
+    email: wantEmail && hasGoogle,
+    discord: wantDiscord && hasDiscord,
+    needsGoogle: wantEmail,
+    googleMissing: wantEmail && !hasGoogle,
+    needsDiscord: wantDiscord,
+    discordMissing: wantDiscord && !hasDiscord,
+  };
+}
+
 export function resolveNotifyPrefs(prefs, opts = {}) {
   const n = normalizeNotifyPrefs(prefs);
-  const hasGoogle = opts.hasGoogleEmail === true;
   if (n.preset === 'annoying') {
     return {
       preset: 'annoying',
       maxPerDay: null,
       minIntervalMinutes: ANNOYING_INTERVAL_MIN,
-      push: true,
-      email: false,
-      needsGoogle: false,
-      googleMissing: false,
+      ...resolvedChannels(['phone'], opts),
     };
   }
   if (n.preset === 'quiet') {
@@ -52,40 +80,28 @@ export function resolveNotifyPrefs(prefs, opts = {}) {
       preset: 'quiet',
       maxPerDay: 1,
       minIntervalMinutes: 24 * 60,
-      push: false,
-      email: hasGoogle,
-      needsGoogle: true,
-      googleMissing: !hasGoogle,
+      ...resolvedChannels(['email'], opts),
     };
   }
   if (n.preset === 'custom') {
     const times = n.timesPerDay ?? 1;
-    const how = n.how ?? 'phone';
-    const wantEmail = how === 'email' || how === 'both';
-    const wantPush = how === 'phone' || how === 'both';
     return {
       preset: 'custom',
       maxPerDay: times,
       minIntervalMinutes: Math.max(ANNOYING_INTERVAL_MIN, Math.floor((24 * 60) / times)),
-      push: wantPush,
-      email: wantEmail && hasGoogle,
-      needsGoogle: wantEmail,
-      googleMissing: wantEmail && !hasGoogle,
+      ...resolvedChannels(parseNotifyHow(n.how), opts),
     };
   }
   return {
     preset: 'normal',
     maxPerDay: 1,
     minIntervalMinutes: 24 * 60,
-    push: true,
-    email: false,
-    needsGoogle: false,
-    googleMissing: false,
+    ...resolvedChannels(['phone'], opts),
   };
 }
 
 export function alertNotifyDue(prev, resolved, nowMs = Date.now()) {
-  if (!resolved.push && !resolved.email) return false;
+  if (!resolved.push && !resolved.email && !resolved.discord) return false;
   const day = utcDayKey(nowMs);
   const count = prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
   if (resolved.maxPerDay != null && count >= resolved.maxPerDay) return false;
