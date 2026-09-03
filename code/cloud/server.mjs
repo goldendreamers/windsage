@@ -310,14 +310,18 @@ async function sendAlarmPulse(bag, alarm) {
   let delivered = 0;
   if (useDiscord) {
     if (discordWakeNeedsStart(alarm)) {
-      const voice = await startWakeVoiceCall({ discordUserId: discordId, title, body });
-      if (voice?.ok) delivered += 1;
-      else {
-        const fallback = await sendAlertDiscordDm(discordId, {
-          title,
-          body: `${body}\nThe Discord voice call could not start — open Windsage and tap Stop when you are up.`,
-        });
-        if (fallback?.ok) delivered += 1;
+      try {
+        const voice = await startWakeVoiceCall({ discordUserId: discordId, title, body });
+        if (voice?.ok) delivered += 1;
+        else {
+          const fallback = await sendAlertDiscordDm(discordId, {
+            title,
+            body: `${body}\nThe Discord voice call could not start — open Windsage and tap Stop when you are up.`,
+          });
+          if (fallback?.ok) delivered += 1;
+        }
+      } catch (err) {
+        console.error('[notify] discord wake failed', err?.message || err);
       }
       markDiscordWakeStarted(alarm);
     }

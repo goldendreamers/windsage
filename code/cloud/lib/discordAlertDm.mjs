@@ -119,22 +119,27 @@ export function unlinkDiscordAlert(user) {
 async function discordFetch(path, { method = 'GET', body } = {}) {
   const { token, enabled } = discordAlertConfig();
   if (!enabled) return { ok: false, skipped: true, status: 0 };
-  const res = await fetch(`${DISCORD_API}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bot ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json = null;
   try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+    const res = await fetch(`${DISCORD_API}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bot ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    return { ok: res.ok, status: res.status, json, text };
+  } catch (err) {
+    console.error('[discord-alert] fetch failed', err?.message || err);
+    return { ok: false, status: 0, json: null, text: String(err?.message || err) };
   }
-  return { ok: res.ok, status: res.status, json, text };
 }
 
 /** Open (or reuse) a DM channel, then send the alert copy. */
