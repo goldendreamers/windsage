@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Windsage Discord alert DMs. Separate from Helper, website OAuth, and Cursor ops.",
+  "description": "Windsage Discord alerts: station DMs plus wake voice calls. Separate from Helper, website OAuth, and Cursor ops.",
   "engines": {
     "node": ">=20"
   },
@@ -11,6 +11,9 @@
     "start": "node src/index.mjs"
   },
   "dependencies": {
-    "discord.js": "^14.21.0"
+    "@discordjs/voice": "^0.18.0",
+    "discord.js": "^14.21.0",
+    "libsodium-wrappers": "^0.7.15",
+    "opusscript": "^0.1.1"
   }
 }

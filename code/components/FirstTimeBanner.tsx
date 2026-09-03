@@ -36,7 +36,7 @@ const STEPS: { id: Exclude<HowtoScreen, 'home'>; n: number; short: string; hint:
     id: 'install',
     n: 3,
     short: 'Install',
-    hint: 'Menu → Install app for lock-screen. Discord DMs: Menu → Discord alerts (join, code, /link)',
+    hint: 'Menu → Install app for lock-screen. Discord: Menu → Discord alerts (join, code, /link). Wake-up can start a Discord call.',
   },
   {
     id: 'account',

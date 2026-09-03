@@ -1,6 +1,6 @@
-# Windsage Alerts (Discord DMs)
+# Windsage Alerts (Discord DMs + wake voice call)
 
-A **new Discord application** that DMs you when a followed station alerts. Separate from:
+A **new Discord application** that DMs you when a followed station alerts, and opens a **private voice channel** for wake-on-wind (Discord bots cannot start a DM incoming call). Separate from:
 
 - Windsage Helper (`/ask` `/ruach` `/mod`)
 - Website **Continue with Discord** OAuth
@@ -14,7 +14,7 @@ It never reads `/data/windsage/data/store.json`. Cloud keeps the mapping; this p
 2. Join the Windsage Discord server
 3. **Menu → Discord alerts** (or Account) → **Get a link code**
 4. In any Windsage Discord channel type `/link CODE` (slash command, then the 6-character code)
-5. Discord privacy: allow DMs from server members
+5. Discord privacy: allow DMs from server members (needed for the one wake join DM)
 
 Unlink: Account → Stop Discord alerts, or `/unlink` in Discord.
 
@@ -28,10 +28,10 @@ Unlink: Account → Stop Discord alerts, or `/unlink` in Discord.
    - If Discord still says *“Private application cannot have a default authorisation link”*, you saved Public Bot off while Install Link was still Discord Provided Link. Set Install Link to None, Save, refresh the page, *then* Bot → Public Bot off.
 3. Bot → Add Bot. Public Bot **off**. Privileged intents: all **off**
 4. OAuth2 → URL Generator: scopes `bot` and `applications.commands` (one-off invite only; not a default link)
-5. Bot permissions: View Channel, Send Messages, Embed Links (integer `19456`)
+5. Bot permissions: View Channel, Send Messages, Embed Links, Manage Channels, Create Instant Invite, Connect, Speak (integer `3159201`)
 6. Invite into the Windsage guild only. Do **not** turn Bot on the OAuth app or the Helper app.
 
-`https://discord.com/oauth2/authorize?client_id=CLIENT_ID&scope=bot%20applications.commands&permissions=19456`
+`https://discord.com/oauth2/authorize?client_id=CLIENT_ID&scope=bot%20applications.commands&permissions=3159201`
 
 Paste token + Client ID + Guild ID in Cursor chat (not email). Operator writes env files and restarts.
 

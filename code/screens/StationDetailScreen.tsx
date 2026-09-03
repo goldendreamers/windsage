@@ -791,7 +791,7 @@ export function StationDetailScreen({
             <Text style={styles.sectionTitle}>Monitoring</Text>
             {monitor.detailHint ? <Text style={styles.hint}>{monitor.detailHint}</Text> : (
               <Text style={styles.hint}>
-                Phone, and Discord DMs after you link (Join Discord → code → /link).
+                Phone, and a Discord voice call after you link (Join Discord → code → /link).
               </Text>
             )}
           </View>
@@ -832,7 +832,7 @@ export function StationDetailScreen({
                 <View style={styles.segment}>
                   {([
                     { id: 'native' as const, label: 'This phone' },
-                    { id: 'discord' as const, label: 'Discord DMs' },
+                    { id: 'discord' as const, label: 'Discord call' },
                   ]).map((opt) => {
                     const active = (station.wakeOnWindVia === 'discord' ? 'discord' : 'native') === opt.id;
                     return (
@@ -857,7 +857,7 @@ export function StationDetailScreen({
                 <Text style={styles.hint}>
                   {station.wakeOnWindVia === 'discord'
                     ? discordAlertLinked
-                      ? 'Discord will DM you every ~30 seconds until you stop it. This phone will not siren.'
+                      ? 'Discord opens a private voice channel and plays a siren until you tap Stop. You get one join DM — not repeating messages. This phone will not siren.'
                       : 'Link Discord alerts first — until then this phone rings instead.'
                     : 'This phone keeps pushing and sirens in the app until you stop it.'}
                 </Text>

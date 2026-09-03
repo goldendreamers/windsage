@@ -1,5 +1,5 @@
 [Unit]
-Description=Windsage Discord alert DMs (not helper, not website OAuth)
+Description=Windsage Discord alerts and wake voice calls (not helper, not website OAuth)
 After=network-online.target windsage.service
 Wants=network-online.target
 
@@ -15,8 +15,8 @@ ExecStart=/usr/bin/node /usr/local/windsage-alerts/src/index.mjs
 Restart=on-failure
 RestartSec=8
 Nice=15
-CPUQuota=10%
-MemoryMax=96M
+CPUQuota=25%
+MemoryMax=192M
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

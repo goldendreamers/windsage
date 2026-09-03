@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  bagDiscordUserId,
   completeDiscordAlertLink,
   findUserByDiscordAlertId,
   hashLinkCode,
@@ -58,5 +59,8 @@ assert.equal(publicDiscordAlert(store.users.u1).username, 'nimrod');
 
 unlinkDiscordAlert(store.users.u1);
 assert.equal(publicDiscordAlert(store.users.u1).linked, false);
+assert.equal(bagDiscordUserId({ discordAlert: { discordUserId: '42', enabled: true } }), '42');
+assert.equal(bagDiscordUserId({ discordAlert: { discordUserId: '42', enabled: false } }), null);
+assert.equal(bagDiscordUserId({}), null);
 
 console.log('check-discord-alert: ok');

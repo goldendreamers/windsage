@@ -6,12 +6,13 @@ export function loadConfig() {
   const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
   const hookSecret = String(process.env.DISCORD_ALERT_HOOK_SECRET || '').trim();
   const cloudUrl = String(process.env.WINDSAGE_CLOUD_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
+  const alertsPort = Math.max(1, Number(process.env.WINDSAGE_ALERTS_PORT || 8788) || 8788);
   const missing = [];
   if (!token) missing.push('DISCORD_TOKEN');
   if (!clientId) missing.push('DISCORD_CLIENT_ID');
   if (!guildId) missing.push('DISCORD_GUILD_ID');
   if (!hookSecret) missing.push('DISCORD_ALERT_HOOK_SECRET');
-  return { token, clientId, guildId, hookSecret, cloudUrl, missing };
+  return { token, clientId, guildId, hookSecret, cloudUrl, alertsPort, missing };
 }
 
 export function linkCommand() {
@@ -26,7 +27,7 @@ export function linkCommand() {
 export function unlinkCommand() {
   return new SlashCommandBuilder()
     .setName('unlink')
-    .setDescription('Stop Discord DMs when a Windsage station alerts');
+    .setDescription('Stop Windsage Discord alerts for this account');
 }
 
 export async function cloudPost(cfg, path, body) {

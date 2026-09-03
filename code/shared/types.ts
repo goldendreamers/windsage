@@ -119,7 +119,7 @@ export interface FollowedStation {
   starred?: boolean;
   /**
    * Advanced mode only. When the alert fires, keep ringing until Stop.
-   * Default off. Delivery is this phone or repeating Discord DMs.
+   * Default off. Delivery is this phone or a Discord voice call.
    */
   wakeOnWind?: boolean;
   wakeOnWindVia?: 'native' | 'discord';

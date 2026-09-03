@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, Options, REST, Routes } from 'discord.js';
 import { cloudPost, linkCommand, loadConfig, unlinkCommand } from './config.mjs';
+import { startWakeHttp } from './http.mjs';
 
 const cfg = loadConfig();
 if (cfg.missing.length) {
@@ -8,7 +9,7 @@ if (cfg.missing.length) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
   makeCache: Options.cacheWithLimits({
     ...Options.DefaultMakeCacheSettings,
     MessageManager: 0,
@@ -39,6 +40,7 @@ client.once('ready', async () => {
   } catch {
     /* ignore */
   }
+  startWakeHttp(client, cfg);
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -61,7 +63,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
       await interaction.editReply(
-        'Linked. When a followed station alerts, Windsage will DM you here. Keep DMs from server members on.',
+        'Linked. Station alerts can DM you. Wake-up uses a private voice call (plus one join DM). Keep DMs from server members on.',
       );
       return;
     }

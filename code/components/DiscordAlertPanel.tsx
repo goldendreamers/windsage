@@ -43,15 +43,16 @@ export function DiscordAlertPanel({
   return (
     <View style={styles.wrap}>
       <Text style={styles.lead}>
-        Discord DMs are not automatic. You join the Windsage Discord server, then attach that Discord
+        Discord alerts are not automatic. You join the Windsage Discord server, then attach that Discord
         user to this Windsage login with a one-time code.
       </Text>
 
       {linked ? (
         <>
           <Text style={styles.hint}>
-            Linked to {username ? `@${username}` : 'your Discord account'}. When a followed station
-            alerts, Windsage DMs that user. Unlink here or type /unlink in Discord.
+            Linked to {username ? `@${username}` : 'your Discord account'}. Station alerts can DM that
+            user. Wake-up uses a private Discord voice call (one join DM, not repeating messages).
+            Unlink here or type /unlink in Discord.
           </Text>
           <Pressable
             style={[styles.btn, styles.btnSecondary, busy && styles.btnDisabled]}

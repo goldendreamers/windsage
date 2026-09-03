@@ -1,5 +1,5 @@
 /**
- * Discord DMs when a station alerts.
+ * Discord station DMs and wake voice-call hooks.
  * Separate bot from Helper, website OAuth, and the Cursor ops bot.
  * Never reads store.json itself — cloud calls these helpers.
  */
@@ -12,9 +12,11 @@ const LINK_TTL_MS = 10 * 60 * 1000;
 export function discordAlertConfig() {
   const token = String(process.env.DISCORD_ALERT_BOT_TOKEN || process.env.DISCORD_TOKEN || '').trim();
   const hookSecret = String(process.env.DISCORD_ALERT_HOOK_SECRET || '').trim();
+  const alertsUrl = String(process.env.DISCORD_ALERTS_URL || 'http://127.0.0.1:8788').replace(/\/$/, '');
   return {
     token,
     hookSecret,
+    alertsUrl,
     enabled: token.length > 20,
     hookEnabled: token.length > 20 && hookSecret.length >= 16,
   };
@@ -162,4 +164,47 @@ export async function sendAlertDiscordDm(discordUserId, { title, body }) {
     return { ok: false, status: sent.status };
   }
   return { ok: true };
+}
+
+export function bagDiscordUserId(bag) {
+  if (!bag?.discordAlert || bag.discordAlert.enabled === false) return null;
+  const id = String(bag.discordAlert.discordUserId || '').trim();
+  return id || null;
+}
+
+async function alertsBotPost(path, body) {
+  const cfg = discordAlertConfig();
+  if (!cfg.hookEnabled) return { ok: false, skipped: true };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 12_000);
+  try {
+    const res = await fetch(`${cfg.alertsUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-windsage-hook': cfg.hookSecret,
+      },
+      body: JSON.stringify(body || {}),
+      signal: ac.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok && json?.ok !== false, status: res.status, ...json };
+  } catch (err) {
+    console.error('[discord-alert] wake bot failed', err?.message || err);
+    return { ok: false, error: err?.message || 'wake bot failed' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function startWakeVoiceCall({ discordUserId, title, body }) {
+  const id = String(discordUserId || '').trim();
+  if (!id) return { ok: false, skipped: true };
+  return alertsBotPost('/v1/wake/start', { discordUserId: id, title, body });
+}
+
+export async function stopWakeVoiceCall({ discordUserId }) {
+  const id = String(discordUserId || '').trim();
+  if (!id) return { ok: false, skipped: true };
+  return alertsBotPost('/v1/wake/stop', { discordUserId: id });
 }

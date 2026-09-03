@@ -1,6 +1,6 @@
 /**
  * Advanced-mode per-station “wake me up when there is wind”.
- * Rings natively (phone push + in-app siren) or via repeating Discord DMs until stopped.
+ * Rings natively (phone push + in-app siren) or via a Discord voice call until stopped.
  */
 
 export const ALARM_PULSE_MS = 25_000;
@@ -75,10 +75,20 @@ export function publicWindAlarm(bag) {
   };
 }
 
+export function discordWakeNeedsStart(alarm) {
+  if (!alarm || normalizeWakeVia(alarm.via) !== 'discord') return false;
+  return alarm.voiceStarted !== true;
+}
+
+export function markDiscordWakeStarted(alarm) {
+  if (!alarm) return;
+  alarm.voiceStarted = true;
+}
+
 export function wakeCopy(title, body, via) {
   const ring =
     via === 'discord'
-      ? 'This keeps DMing until you open Windsage and tap Stop ringing.'
+      ? 'Join the Discord voice call. It keeps ringing there until you tap Stop in Windsage.'
       : 'This keeps ringing on your phone until you open Windsage and tap Stop ringing.';
   return {
     title: `WAKE UP · ${title || 'Windsage'}`,

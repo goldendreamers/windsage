@@ -32,6 +32,7 @@ DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
 DISCORD_ALERT_HOOK_SECRET=$secret
 WINDSAGE_CLOUD_URL=http://127.0.0.1:8787
+WINDSAGE_ALERTS_PORT=8788
 EOF
 fi
 chmod 600 "$DEST/alerts.env"
@@ -52,6 +53,7 @@ if [[ ! -f /data/windsage/discord-alert.env ]]; then
   cat > /data/windsage/discord-alert.env <<EOF
 DISCORD_ALERT_BOT_TOKEN=
 DISCORD_ALERT_HOOK_SECRET=$HOOK
+DISCORD_ALERTS_URL=http://127.0.0.1:8788
 EOF
   chmod 600 /data/windsage/discord-alert.env
   chown nimrodw:nimrodw /data/windsage/discord-alert.env
@@ -59,6 +61,9 @@ else
   # Keep hook secrets in sync if cloud file has an empty secret.
   if ! grep -qE '^DISCORD_ALERT_HOOK_SECRET=.+' /data/windsage/discord-alert.env; then
     printf '\nDISCORD_ALERT_HOOK_SECRET=%s\n' "$HOOK" >> /data/windsage/discord-alert.env
+  fi
+  if ! grep -qE '^DISCORD_ALERTS_URL=' /data/windsage/discord-alert.env; then
+    printf '\nDISCORD_ALERTS_URL=http://127.0.0.1:8788\n' >> /data/windsage/discord-alert.env
   fi
   chmod 600 /data/windsage/discord-alert.env
   chown nimrodw:nimrodw /data/windsage/discord-alert.env
