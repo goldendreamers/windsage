@@ -18,6 +18,7 @@ npm run release:web
 2. Do **not** leave `dist/` stale — re-export and upload after every finished step.
 
 3. Email when the step (and deploy) is done, per the notify-email rule.
+4. Post to Discord **windsage updates**, per the notify-discord rule.
 
 ## Prune rule (built into `scripts/release-web.py`)
 
