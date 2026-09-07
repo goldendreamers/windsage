@@ -30,7 +30,7 @@ import {
   syncStationsToCloud,
   type CloudAnnouncement,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, createFollowedStation, displayName, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, createFollowedStation, displayName, normalizeUiMode, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
@@ -304,6 +304,7 @@ export default function App() {
       const next: AppSettings = {
         stations,
         pollIntervalMinutes: Math.max(10, payload.pollIntervalMinutes || 10),
+        uiMode: normalizeUiMode(settingsRef.current.uiMode),
       };
       setSettings(next);
       await saveSettings(next);
@@ -458,7 +459,12 @@ export default function App() {
                 // Always take the cloud bag when signed in — never push leftover
                 // guest follows from a previous person on this phone into the account.
                 const cloudStations = withStationDefaults(pulled.stations);
-                const merged = { ...pulled, stations: cloudStations };
+                const merged = {
+                  ...settingsRef.current,
+                  stations: cloudStations,
+                  pollIntervalMinutes: Math.max(10, pulled.pollIntervalMinutes || 10),
+                  uiMode: normalizeUiMode(settingsRef.current.uiMode),
+                };
                 setSettings(merged);
                 await saveSettings(merged);
               }
@@ -592,11 +598,21 @@ export default function App() {
         <AccountScreen
           onBack={() => setAccountOpen(false)}
           onAuthed={(payload) => void applyAccountPayload(payload)}
+          uiMode={normalizeUiMode(settings.uiMode)}
+          onUiModeChange={(mode) => {
+            const next = {
+              ...settingsRef.current,
+              uiMode: normalizeUiMode(mode),
+            };
+            setSettings(next);
+            void saveSettings(next);
+          }}
           onLoggedOut={() => {
             setAccount(null);
             const cleared: AppSettings = {
               stations: [],
               pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
+              uiMode: normalizeUiMode(settingsRef.current.uiMode),
             };
             setSettings(cleared);
             void saveSettings(cleared);
@@ -672,6 +688,7 @@ export default function App() {
           onOpenDownload={openDownload}
           announcement={announcement}
           onDismissAnnouncement={() => void onDismissAnnouncement()}
+          uiMode={normalizeUiMode(settings.uiMode)}
           accountLabel={
             account
               ? account.username

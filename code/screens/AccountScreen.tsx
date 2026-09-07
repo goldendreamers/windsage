@@ -24,8 +24,11 @@ import {
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
+import { GithubViewLink } from '../components/GithubViewLink';
 import { registerWebPushSubscription, ensureNotificationPermissions, isInstalledPwa } from '../core/notifications';
 import { isRunningAsInstalledApp, getInstallPlatform } from '../core/pwaInstall';
+import type { UiMode } from '../shared/types';
+import { normalizeUiMode } from '../shared/defaults';
 
 type Props = {
   onBack: () => void;
@@ -38,9 +41,11 @@ type Props = {
     opts?: { importLocalGuestFollows?: boolean },
   ) => void;
   onLoggedOut: () => void;
+  uiMode?: UiMode;
+  onUiModeChange?: (mode: UiMode) => void;
 };
 
-export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
+export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeChange }: Props) {
   const [user, setUser] = useState<CloudUser | null>(null);
   const [providers, setProviders] = useState({ google: false, facebook: false, apple: false });
   const [username, setUsername] = useState('');
@@ -137,6 +142,36 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         Optional. Sign in to sync stations across phones and browsers. Guest mode still works —
         all data stays on your Wald home server.
       </Text>
+
+      <Section title="Map & search" icon="wind">
+        <View style={styles.segment}>
+          {([
+            { key: 'simple' as const, label: 'Simple' },
+            { key: 'advanced' as const, label: 'Advanced' },
+          ]).map((option) => {
+            const active = normalizeUiMode(uiMode) === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                style={[styles.segmentItem, active && styles.segmentItemActive]}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onUiModeChange?.(option.key);
+                }}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.hint}>
+          {normalizeUiMode(uiMode) === 'advanced'
+            ? 'Follow form can paste Google Maps links and search through Google. Map pin and GPS still work.'
+            : 'Follow a map pin with GPS or a tap. Google Maps search stays hidden until you switch to Advanced.'}
+        </Text>
+      </Section>
 
       {user ? (
         <Section title="Signed in" icon="station">
@@ -357,6 +392,14 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
         {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
       </Section>
 
+      <Section
+        title="Source"
+        icon="wind"
+        hint="Read-only view of the Windsage code. The live app stays at windsage.nimrod.bio."
+      >
+        <GithubViewLink variant="button" />
+      </Section>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
   );
@@ -424,4 +467,27 @@ const styles = StyleSheet.create({
   guest: { alignItems: 'center', paddingVertical: 12 },
   guestText: { color: colors.muted, fontWeight: '600' },
   error: { color: colors.danger, fontSize: 13, textAlign: 'center' },
+  segment: {
+    flexDirection: 'row',
+    backgroundColor: colors.input,
+    borderRadius: 10,
+    padding: 3,
+    marginTop: 8,
+  },
+  segmentItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  segmentItemActive: {
+    backgroundColor: colors.accent,
+  },
+  segmentText: {
+    color: colors.muted,
+    fontWeight: '700',
+  },
+  segmentTextActive: {
+    color: '#042018',
+  },
 });

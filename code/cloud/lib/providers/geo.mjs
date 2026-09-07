@@ -39,10 +39,29 @@ export function mapsStatus() {
     googleGeocode: server,
     googleMapsJs: browser,
     browserKey: browser ? googleBrowserKey() : null,
-    // Search always tries Google Maps (API or maps URL); free geocoders are fallback.
+    // Default search tries Google Maps (API or maps URL); free geocoders are fallback.
+    // Simple UI mode uses via=osm (Photon / Open-Meteo) and never hits Google.
     searchVia: 'google-maps',
     fallback: 'photon',
   };
+}
+
+function wantsOsm(via) {
+  const v = String(via || '').trim().toLowerCase();
+  return v === 'osm' || v === 'free' || v === 'photon';
+}
+
+/** Build a short address from Photon / Nominatim-style property bags. */
+export function formatGeoLabel(props, fallback = '') {
+  const p = props && typeof props === 'object' ? props : {};
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ').trim();
+  const name = String(p.name || p.display_name || street || '').trim();
+  const city = p.city || p.town || p.village || p.locality || p.county || '';
+  const parts = [name, city, p.state, p.country]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+  const address = [...new Set(parts)].join(', ') || name;
+  return address || String(fallback || '').trim();
 }
 
 async function googleGeocodeApi(query) {
@@ -136,13 +155,7 @@ async function photonSearch(query, limit = 6) {
         const lat = asNumber(Array.isArray(coords) ? coords[1] : null);
         if (lat == null || lon == null) return null;
         const props = feature.properties || {};
-        const street = [props.housenumber, props.street].filter(Boolean).join(' ').trim();
-        const name = String(props.name || street || '').trim();
-        const city = props.city || props.town || props.village || props.locality || '';
-        const parts = [name, city, props.state, props.country]
-          .map((p) => String(p || '').trim())
-          .filter(Boolean);
-        const address = [...new Set(parts)].join(', ') || name;
+        const address = formatGeoLabel(props);
         if (!address) return null;
         return { lat, lon, address, placeId: null, provider: 'photon' };
       })
@@ -179,49 +192,134 @@ async function openMeteoSearch(query, count = 6) {
   }
 }
 
-export async function geocodeAddress(query) {
+async function photonReverse(lat, lon) {
+  const url = new URL('https://photon.komoot.io/reverse');
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lon));
+  url.searchParams.set('lang', 'en');
+  try {
+    const data = await fetchJson(url.toString(), { 'User-Agent': GEO_UA });
+    const feature = data?.features?.[0];
+    const address = formatGeoLabel(feature?.properties || {});
+    if (!address) return null;
+    return { provider: 'photon', address };
+  } catch {
+    return null;
+  }
+}
+
+async function nominatimReverse(lat, lon) {
+  const url = new URL('https://nominatim.openstreetmap.org/reverse');
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lon));
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('zoom', '16');
+  try {
+    const data = await fetchJson(url.toString(), { 'User-Agent': GEO_UA });
+    const address =
+      formatGeoLabel({
+        name: data?.name,
+        display_name: data?.display_name,
+        ...(data?.address || {}),
+      }) || String(data?.display_name || '').trim();
+    if (!address) return null;
+    return { provider: 'nominatim', address };
+  } catch {
+    return null;
+  }
+}
+
+export async function reverseGeocode(lat, lon, { via } = {}) {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+    throw new Error('Need lat,lon to reverse-geocode');
+  }
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) {
+    throw new Error('Coordinates out of range');
+  }
+  const osmFirst = wantsOsm(via) || !googleKey();
+  const order = osmFirst
+    ? [() => photonReverse(la, lo), () => nominatimReverse(la, lo)]
+    : [
+        async () => {
+          const address = await googleReverseApi(la, lo);
+          return address ? { provider: 'google', address } : null;
+        },
+        () => photonReverse(la, lo),
+        () => nominatimReverse(la, lo),
+      ];
+  for (const step of order) {
+    const hit = await step();
+    if (hit?.address) {
+      return { lat: la, lon: lo, address: hit.address, provider: hit.provider, placeId: null };
+    }
+  }
+  return {
+    lat: la,
+    lon: lo,
+    address: `${la.toFixed(4)}, ${lo.toFixed(4)}`,
+    provider: 'coords',
+    placeId: null,
+  };
+}
+
+export async function geocodeAddress(query, opts = {}) {
   const q = String(query || '').trim();
+  const via = opts.via;
+  const osmOnly = wantsOsm(via);
   if (q.length < 2) {
-    throw new Error('Enter an address, coordinates, or Google Maps link');
+    throw new Error(
+      osmOnly
+        ? 'Enter an address, place, or coordinates'
+        : 'Enter an address, coordinates, or Google Maps link',
+    );
   }
 
   // Pasted coordinates
   const bare = parseLatLon(q) || parseCoordsFromMapText(q);
   if (bare && !looksLikeMapUrl(q) && !/^https?:\/\//i.test(q)) {
-    const address = (await googleReverseApi(bare.lat, bare.lon)) || `${bare.lat.toFixed(4)}, ${bare.lon.toFixed(4)}`;
-    return { provider: 'coords', lat: bare.lat, lon: bare.lon, address, placeId: null };
+    const reversed = await reverseGeocode(bare.lat, bare.lon, { via: osmOnly ? 'osm' : via });
+    return {
+      provider: 'coords',
+      lat: bare.lat,
+      lon: bare.lon,
+      address: reversed.address,
+      placeId: null,
+    };
   }
 
   // Pasted Google Maps / Apple / Waze / OSM / geo: links
   if (looksLikeMapUrl(q) || /^https?:\/\//i.test(q)) {
     const resolved = await resolveMapInput(q);
     if (resolved.coords) {
-      const address =
-        (await googleReverseApi(resolved.coords.lat, resolved.coords.lon)) ||
-        resolved.placeQuery ||
-        q;
+      const reversed = await reverseGeocode(resolved.coords.lat, resolved.coords.lon, {
+        via: osmOnly ? 'osm' : via,
+      });
       return {
         provider: 'maps-url',
         lat: resolved.coords.lat,
         lon: resolved.coords.lon,
-        address,
+        address: reversed.address || resolved.placeQuery || q,
         placeId: null,
       };
     }
     if (resolved.placeQuery && resolved.placeQuery !== q) {
-      return geocodeAddress(resolved.placeQuery);
+      return geocodeAddress(resolved.placeQuery, opts);
     }
   }
 
-  // 1) Google Geocoding API (when keyed on Wald)
-  const apiHit = await googleGeocodeApi(q);
-  if (apiHit) return apiHit;
+  if (!osmOnly) {
+    // 1) Google Geocoding API (when keyed on Wald)
+    const apiHit = await googleGeocodeApi(q);
+    if (apiHit) return apiHit;
 
-  // 2) Google Maps search URL → coordinates (works without a billed key)
-  const mapsHit = await resolveViaGoogleMapsSearch(q);
-  if (mapsHit) return mapsHit;
+    // 2) Google Maps search URL → coordinates (works without a billed key)
+    const mapsHit = await resolveViaGoogleMapsSearch(q);
+    if (mapsHit) return mapsHit;
+  }
 
-  // 3) Free fallbacks
+  // Free geocoders (simple mode, or Google fallback)
   const photon = await photonSearch(q, 1);
   if (photon[0]) {
     return {
@@ -246,8 +344,9 @@ export async function geocodeAddress(query) {
   throw new Error(`No place found for “${q}”`);
 }
 
-export async function autocompletePlaces(query) {
+export async function autocompletePlaces(query, opts = {}) {
   const q = String(query || '').trim();
+  const osmOnly = wantsOsm(opts.via);
   if (q.length < 2) return [];
 
   // Coordinate / maps-link paste: single synthetic suggestion
@@ -275,7 +374,7 @@ export async function autocompletePlaces(query) {
     ];
   }
 
-  const key = googleKey();
+  const key = osmOnly ? '' : googleKey();
   if (key) {
     const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
     url.searchParams.set('input', q);

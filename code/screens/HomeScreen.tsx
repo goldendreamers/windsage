@@ -20,6 +20,7 @@ import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
 import { StationCard } from '../components/StationCard';
+import { GithubViewLink } from '../components/GithubViewLink';
 import { buildGlanceRows, glanceHeadline } from '../shared/glance';
 
 type LiveMap = Record<
@@ -62,6 +63,7 @@ type Props = {
   onOpenDownload?: () => void;
   announcement?: CloudAnnouncement | null;
   onDismissAnnouncement?: () => void;
+  uiMode?: import('../shared/types').UiMode;
 };
 
 export function HomeScreen({
@@ -82,6 +84,7 @@ export function HomeScreen({
   onOpenDownload,
   announcement,
   onDismissAnnouncement,
+  uiMode,
 }: Props) {
   const hasStations = stations.length > 0;
   const [installedApp, setInstalledApp] = useState(() =>
@@ -291,6 +294,7 @@ export function HomeScreen({
             <Text style={styles.downloadLinkText}>Install app</Text>
           </Pressable>
         ) : null}
+        <GithubViewLink />
       </ScrollView>
 
       <AddStationModal
@@ -300,6 +304,7 @@ export function HomeScreen({
         onReuse={onReuse}
         existingStations={stations}
         catalogStations={catalogStations}
+        uiMode={uiMode}
       />
     </View>
   );

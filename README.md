@@ -3,7 +3,7 @@
 Wind-alert PWA: the cloud polls weather sources and notifies you when a station stays past your threshold long enough.
 
 **Default rule:** average wind **≥ 15 knots for 20 minutes**  
-**Cloud poll:** every **10 minutes** on your server (not on the phone)
+**Cloud poll:** every **10 minutes** on the server (`WINDSAGE_POLL=1`). A laptop clone of `server.mjs` does **not** poll unless you set that.
 
 Live instance: https://windsage.nimrod.bio/
 

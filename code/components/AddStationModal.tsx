@@ -35,7 +35,8 @@ import {
 import { parseWindguruRef } from '../core/windguru';
 import { getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
-import type { LocationBlend } from '../shared/types';
+import type { LocationBlend, UiMode } from '../shared/types';
+import { normalizeUiMode } from '../shared/defaults';
 
 type Props = {
   visible: boolean;
@@ -57,6 +58,7 @@ type Props = {
   onReuse: (followId: string) => void;
   existingStations: FollowedStation[];
   catalogStations?: CatalogStation[];
+  uiMode?: UiMode;
 };
 
 export function AddStationModal({
@@ -66,6 +68,7 @@ export function AddStationModal({
   onReuse,
   existingStations,
   catalogStations = [],
+  uiMode,
 }: Props) {
   const [provider, setProvider] = useState<StationProvider>('windguru');
   const [stationId, setStationId] = useState('');
@@ -80,6 +83,12 @@ export function AddStationModal({
   const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
   const nicknameInputRef = useRef<TextInput>(null);
+  const mode = normalizeUiMode(uiMode);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (mode !== 'advanced') setProvider('location');
+  }, [visible, mode]);
 
   useEffect(() => {
     if (!visible) return;
@@ -200,7 +209,7 @@ export function AddStationModal({
   const submit = async () => {
     if (provider === 'location') {
       if (!locationPick) {
-        setError('Search an address or tap the map to place a pin');
+        setError('Drop a pin on the map or use your location');
         return;
       }
       setBusy(true);
@@ -358,10 +367,17 @@ export function AddStationModal({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetScrollContent}
+          >
           <Text style={styles.title}>Follow a station</Text>
           <Text style={styles.hint}>
-            Pick a data source, then paste an id or URL. Matching follows you already have open
-            instead of duplicating.
+            {mode === 'advanced'
+              ? 'Pick a data source, then paste an id or URL. Matching follows you already have open instead of duplicating.'
+              : 'Drop a pin where you sail — or pick another source. Matching follows you already have open instead of duplicating.'}
           </Text>
 
           <Text style={styles.label}>Source</Text>
@@ -461,6 +477,7 @@ export function AddStationModal({
           {provider === 'location' ? (
             <LocationPicker
               initial={locationPick}
+              uiMode={mode}
               onPicked={(pick) => {
                 setLocationPick(pick);
                 setError(null);
@@ -540,6 +557,7 @@ export function AddStationModal({
           {catalogNeedsNickname && !error ? (
             <Text style={styles.linkHint}>Nickname required before Add to home</Text>
           ) : null}
+          </ScrollView>
 
           <View style={styles.actions}>
             <Pressable style={styles.secondary} onPress={close} disabled={busy}>
@@ -581,6 +599,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     maxHeight: '92%',
+  },
+  sheetScroll: {
+    maxHeight: '100%',
+  },
+  sheetScrollContent: {
+    gap: 8,
+    paddingBottom: 8,
   },
   title: {
     color: colors.text,

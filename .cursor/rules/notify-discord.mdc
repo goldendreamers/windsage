@@ -1,0 +1,26 @@
+---
+description: Post every Windsage change to Discord #windsage-updates
+alwaysApply: true
+---
+
+# Discord updates (Windsage) — MANDATORY
+
+Whenever you **make a change** to Windsage, post a message to the Discord channel **windsage updates** (`#windsage-updates`).
+
+Use `/Users/goldendreamers/windsage/scripts/notify-discord.sh` (or `scripts/notify-discord.sh` from the clone root). Webhook lives in gitignored `.env.smtp` / `discord-updates.env` as `WINDSAGE_DISCORD_UPDATES_WEBHOOK`.
+
+**Never skip Discord after a landed change.** Chat or email alone is not enough.
+
+Send a message when a discrete change is finished (feature, fix, docs/rule, config, release). One post per finished step — not per file.
+
+```bash
+scripts/notify-discord.sh "short title" "what changed, in a few lines. Include PR/live URLs."
+```
+
+Guidelines:
+
+- Post in the same turn as the chat reply (before ending the turn).
+- This is the **ops** channel, not user wind-alert DMs.
+- Do not print the webhook URL or tokens.
+- Still reply in chat and send the notify-email.
+- If the webhook is missing, or Discord returns an error (including cloud egress blocked), treat it as **ACTION NEEDED**: tell Nimrod in chat and email with subject starting `Windsage · ACTION NEEDED:`.

@@ -1,6 +1,7 @@
 /**
  * Windsage cloud worker — runs on Wald home server.
  * Serves the web app + API, polls Windguru, pushes Expo notifications.
+ * Alert polling is Wald-only (`WINDSAGE_POLL=1` on windsage.service).
  * Zero npm dependencies (Node 22 builtins only).
  */
 import http from 'node:http';
@@ -24,8 +25,8 @@ import {
   mapsStatus,
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
-import { autocompletePlaces, geocodeAddress, placeDetails } from './lib/providers/geo.mjs';
-import { resolveLocation } from './lib/providers/location.mjs';
+import { autocompletePlaces, geocodeAddress, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
+import { previewMapLocation, resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
   saveStore,
@@ -68,13 +69,20 @@ import {
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
+import { pollReason, shouldPollAlerts } from './lib/poll.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
 const PORT = Number(process.env.WINDSAGE_PORT || 8787);
 const DATA_DIR = process.env.WINDSAGE_DATA || path.join(__dirname, 'data');
 const WEB_DIR = process.env.WINDSAGE_WEB || path.join(__dirname, 'web');
+const PUBLIC_DIR = path.join(__dirname, '../../public');
 const DEFAULT_POLL_MIN = 10;
+/** Process-local poll telemetry for /health (not persisted). */
+let lastPollAllAt = null;
+let lastPollAllDurationMs = null;
+let lastPollAllBags = 0;
+const POLL_ON = shouldPollAlerts(DATA_DIR);
 /** Reuse provider "current" across bags/checks within this window (shared sensors). */
 const READING_CACHE_TTL_MS = 90_000;
 /** Spot model forecast changes slowly — reuse prior snap / skip provider hit when fresh. */
@@ -565,8 +573,11 @@ async function pollAll() {
   }
 
   if (touched) await saveStore(DATA_DIR, store);
+  lastPollAllAt = Date.now();
+  lastPollAllDurationMs = Date.now() - t0;
+  lastPollAllBags = bags;
   console.log(
-    `[poll] done durationMs=${Date.now() - t0} bags=${bags} readingCache=${globalReadingCache.size} ${new Date().toISOString()}`,
+    `[poll] done durationMs=${lastPollAllDurationMs} bags=${bags} readingCache=${globalReadingCache.size} ${new Date().toISOString()}`,
   );
 }
 
@@ -633,13 +644,30 @@ async function serveStatic(req, res, pathname) {
       st = await fs.stat(filePath);
     }
   } catch {
-    filePath = path.join(WEB_DIR, 'index.html');
-    try {
-      await fs.stat(filePath);
-    } catch {
-      cors(res);
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      return res.end('Windsage web UI not deployed yet. Run npm run export:web');
+    const publicFile = path.join(PUBLIC_DIR, rel);
+    const publicRoot = path.resolve(PUBLIC_DIR);
+    let servedPublic = false;
+    if (
+      rel.startsWith('/vendor/') &&
+      path.resolve(publicFile).startsWith(publicRoot)
+    ) {
+      try {
+        await fs.stat(publicFile);
+        filePath = publicFile;
+        servedPublic = true;
+      } catch {
+        servedPublic = false;
+      }
+    }
+    if (!servedPublic) {
+      filePath = path.join(WEB_DIR, 'index.html');
+      try {
+        await fs.stat(filePath);
+      } catch {
+        cors(res);
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        return res.end('Windsage web UI not deployed yet. Run npm run export:web');
+      }
     }
   }
 
@@ -1195,10 +1223,17 @@ async function handleApi(req, res, pathname, url) {
       maps: mapsStatus(),
       announcementId: store.announcement?.id || null,
       webPush: vapidConfig().enabled,
+      poll: {
+        enabled: POLL_ON,
+        reason: pollReason(DATA_DIR),
+        lastPollAt: lastPollAllAt,
+        lastDurationMs: lastPollAllDurationMs,
+        bags: lastPollAllBags,
+      },
       // Stable-ish second bucket for short CDN/browser revalidation (not live ts).
       ts: Math.floor(Date.now() / 1000) * 1000,
     };
-    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}"`;
+    const etag = `W/"health-${body.ts}-${body.announcementId || 'none'}-${body.webPush ? 1 : 0}-${body.poll.enabled ? 1 : 0}"`;
     const inm = req.headers['if-none-match'];
     if (inm && inm === etag) {
       cors(res);
@@ -1298,11 +1333,47 @@ async function handleApi(req, res, pathname, url) {
       return json(res, 429, { error: 'Too many autocomplete requests. Try again later.' });
     }
     const q = String(url.searchParams.get('q') || '').trim();
+    const via = String(url.searchParams.get('via') || '').trim();
     try {
-      const suggestions = await autocompletePlaces(q);
+      const suggestions = await autocompletePlaces(q, { via });
       return json(res, 200, { ok: true, suggestions });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Autocomplete failed' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/geo/reverse') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-rev:${ip}`, { limit: 90, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many reverse-geocode requests. Try again later.' });
+    }
+    const lat = Number(url.searchParams.get('lat'));
+    const lon = Number(url.searchParams.get('lon'));
+    const via = String(url.searchParams.get('via') || 'osm').trim();
+    try {
+      const hit = await reverseGeocode(lat, lon, { via });
+      return json(res, 200, { ok: true, ...hit });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Reverse geocode failed' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/geo/map-preview') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-preview:${ip}`, { limit: 90, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many map preview requests. Try again later.' });
+    }
+    const lat = Number(url.searchParams.get('lat'));
+    const lon = Number(url.searchParams.get('lon'));
+    try {
+      const preview = await previewMapLocation(lat, lon);
+      return json(res, 200, { ok: true, ...preview });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Map preview failed' });
     }
   }
 
@@ -1325,7 +1396,8 @@ async function handleApi(req, res, pathname, url) {
           : typeof body.address === 'string'
             ? body.address
             : '';
-      const hit = await geocodeAddress(query);
+      const via = typeof body.via === 'string' ? body.via : '';
+      const hit = await geocodeAddress(query, { via });
       return json(res, 200, { ok: true, ...hit });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Geocode failed' });
@@ -1422,6 +1494,13 @@ server.listen(PORT, HOST, async () => {
     );
   } catch (e) {
     console.error('[windsage-cloud] store migrate failed', e);
+  }
+  console.log(`[windsage-cloud] poll=${POLL_ON ? 'on' : 'off'} ${pollReason(DATA_DIR)}`);
+  if (!POLL_ON) {
+    console.log(
+      '[windsage-cloud] alert polling is Wald-only (windsage.service). Mac/dev: leave off, or set WINDSAGE_POLL=1 to test.',
+    );
+    return;
   }
   setTimeout(() => {
     pollAll().catch((e) => console.error(e));

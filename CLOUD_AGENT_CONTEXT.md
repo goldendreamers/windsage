@@ -33,7 +33,7 @@ code/core/          cloud client, alerts, stations, windguru, notifications
 code/shared/        types, defaults, providers, glance, theme, assets
 code/cloud/         Node server (server.mjs, lib/*, providers/*)
 public/             PWA (sw.js, icons, privacy)
-scripts/            release-web.py, notify-email.sh, backup-windsage-store.sh, checks
+scripts/            release-web.py, notify-email.sh, notify-discord.sh, backup-windsage-store.sh, checks
 docs/               OUTSTANDING.md, SSO-SETUP.md, STORE-PUBLISH.md
 ```
 
@@ -42,7 +42,7 @@ docs/               OUTSTANDING.md, SSO-SETUP.md, STORE-PUBLISH.md
 | Layer | Role |
 | --- | --- |
 | Expo RN (web + native) | UI, follow list, sync, receive push |
-| Cloud (`windsage.service`) | Poll providers, alert logic, Expo + Web Push |
+| Cloud (`windsage.service`) | Poll providers, alert logic, Expo + Web Push (`WINDSAGE_POLL=1`). Local `server.mjs` does not poll unless you set that. |
 | Store | `$WINDSAGE_DATA/store.json` — **never wipe users/stations** |
 
 **Providers:** windguru, ndbc, openmeteo, location (map/address blend), plus token-gated synoptic/tempest/windfinder.
@@ -55,10 +55,11 @@ docs/               OUTSTANDING.md, SSO-SETUP.md, STORE-PUBLISH.md
 2. Email via `scripts/notify-email.sh` when `WINDSAGE_EMAIL_TO` / `.env.smtp` is configured:
    - Blocked → subject starts with `Windsage · ACTION NEEDED:`
    - Step done → subject starts with `Windsage · done:`
-3. Full absolute URLs / `file://` paths in chat.
-4. **Never** wipe `store.json` users/stations.
-5. Do not commit secrets (`.env`, `oauth.env`, `code/cloud/data/`).
-6. Expo docs: see `docs/AGENTS.md` (check current Expo version docs before inventing APIs).
+3. After **any landed change**, post to Discord channel **windsage updates** via `scripts/notify-discord.sh` (webhook `WINDSAGE_DISCORD_UPDATES_WEBHOOK` in `.env.smtp` or `discord-updates.env`). Chat/email is not a substitute. Missing webhook or Discord HTTP failure → ACTION NEEDED email. Cloud VMs also need `discord.com` on the egress allowlist.
+4. Full absolute URLs / `file://` paths in chat.
+5. **Never** wipe `store.json` users/stations. Saves refuse empty-users overwrite; use `clearStations: true` only for intentional unfollow-all.
+6. Do not commit secrets (`.env`, `oauth.env`, `code/cloud/data/`, webhook URLs).
+7. Expo docs: see `docs/AGENTS.md` (check current Expo version docs before inventing APIs).
 
 ## Smoke checks
 
@@ -78,3 +79,4 @@ find code/cloud -name "*.mjs" -print0 | xargs -0 -n1 node --check
 | `docs/SSO-SETUP.md` | Google/Facebook/Apple OAuth |
 | `docs/STORE-PUBLISH.md` | Store publish notes (PWA-first) |
 | `docs/AGENTS.md` | Expo version doc reminder |
+| `.cursor/rules/*.mdc` | Email, Discord updates, and web-export rules (local Cursor) |

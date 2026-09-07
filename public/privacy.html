@@ -29,13 +29,66 @@
       h2 { font-size: 1.2rem; margin-top: 28px; }
       p, li { color: var(--muted); }
       .meta { color: var(--muted); font-size: 0.95rem; margin-bottom: 24px; }
+      .plain {
+        background: rgba(46, 196, 168, 0.1);
+        border: 1px solid rgba(46, 196, 168, 0.35);
+        border-radius: 14px;
+        padding: 18px 18px 8px;
+        margin: 0 0 32px;
+      }
+      .plain h2 {
+        margin: 0 0 6px;
+        color: var(--text);
+      }
+      .plain .plain-note {
+        color: var(--accent);
+        font-size: 0.9rem;
+        font-weight: 700;
+        margin: 0 0 12px;
+      }
+      .plain p, .plain li {
+        color: var(--text);
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>Windsage Privacy Policy</h1>
-      <p class="meta">Last updated: 12 August 2026 · Contact: <a href="mailto:shakedwald@gmail.com">shakedwald@gmail.com</a></p>
+      <p class="meta">Last updated: 7 September 2026 · Contact: <a href="mailto:shakedwald@gmail.com">shakedwald@gmail.com</a></p>
 
+      <section class="plain" aria-label="Plain-language summary, not legally binding">
+        <h2>In plain words</h2>
+        <p class="plain-note">Not legally binding. The official policy is the legal text below. If they differ, the legal text wins.</p>
+        <p>
+          Windsage watches the wind spots you follow and can ping your phone when your rules hit.
+          That is the whole product.
+        </p>
+        <p>We keep only what we need to do that:</p>
+        <ul>
+          <li>Your username, and your Google email if you sign in with Google.</li>
+          <li>The stations or map pins you follow, plus the alert rules you set.</li>
+          <li>A device id so settings can sync, and a push subscription so alerts can reach your phone.</li>
+          <li>Ordinary server logs (when a request happened, and errors).</li>
+        </ul>
+        <p>
+          We do not sell your data. We do not put ads or ad trackers in the app. We do not need to
+          follow you around town — a station id or a pin you chose on the map is enough.
+        </p>
+        <p>
+          Your Windsage data lives on the server behind
+          <a href="https://windsage.nimrod.bio/">https://windsage.nimrod.bio/</a>.
+          Live wind numbers come from Windguru.
+        </p>
+        <p>
+          You can use the app as a guest with no account. You can unfollow spots, pause alerts, or
+          wipe local app data. To delete an account, email
+          <a href="mailto:shakedwald@gmail.com">shakedwald@gmail.com</a>.
+          You can also turn off phone notifications in your phone’s settings.
+        </p>
+        <p>Windsage is not for children under 13.</p>
+      </section>
+
+      <h2>Official policy</h2>
       <p>
         Windsage (“the app”) helps you follow Windguru spots and live stations and receive alerts when
         your wind rules are met. This policy explains what we store and why.
@@ -81,6 +134,12 @@
 
       <h2>Changes</h2>
       <p>We may update this policy. The “Last updated” date above will change when we do.</p>
+
+      <h2>Source</h2>
+      <p>
+        The app is open to view on GitHub (read-only):
+        <a href="https://github.com/goldendreamers/windsage">https://github.com/goldendreamers/windsage</a>.
+      </p>
 
       <p><a href="/">← Back to Windsage</a></p>
     </main>

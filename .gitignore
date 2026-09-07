@@ -37,6 +37,9 @@ yarn-error.*
 .env*.local
 .env
 .env.smtp
+discord-updates.env
+discord-cursor.env
+.env.discord-cursor.local
 
 # typescript
 *.tsbuildinfo
@@ -60,5 +63,7 @@ docs/RECOMMENDATIONS*
 docs/Windsage-recommendations*
 docs/PROGRESS_REVIEW.md
 
-# Agent runtime state
-.cursor/
+# Agent runtime state (keep committed Cursor rules)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**

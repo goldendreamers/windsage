@@ -13,6 +13,8 @@ Environment=WINDSAGE_HOST=0.0.0.0
 Environment=WINDSAGE_PORT=8787
 Environment=WINDSAGE_DATA=/data/windsage/data
 Environment=WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
+# Wind-alert poller runs here, not on a Mac laptop:
+Environment=WINDSAGE_POLL=1
 # Optional secrets (GOOGLE_*, FACEBOOK_*, APPLE_*, WEB_PUSH_VAPID_*, PUBLIC_URL):
 #   /data/windsage/oauth.env  (see oauth.env.example)
 # Canonical public HTTPS (Cloudflare Tunnel on nimrod.bio):
