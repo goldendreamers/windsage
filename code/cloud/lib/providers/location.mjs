@@ -322,6 +322,81 @@ export async function fetchLocationHistory(station, metric, hours = 6) {
   }
 }
 
+const previewCache = new Map();
+const PREVIEW_TTL_MS = 90_000;
+
+/**
+ * Map picker payload: reverse-geocoded pin + model wind + nearby station markers.
+ */
+export async function previewMapLocation(lat, lon, { radiusKm = 50, maxStations = 8 } = {}) {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+    throw new Error('Need lat,lon for map preview');
+  }
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) {
+    throw new Error('Coordinates out of range');
+  }
+  const key = `${la.toFixed(3)},${lo.toFixed(3)}`;
+  const cached = previewCache.get(key);
+  if (cached && Date.now() - cached.at < PREVIEW_TTL_MS) return cached.value;
+
+  const nearby = await findNearbyStations(la, lo, {
+    radiusKm: Math.max(5, Number(radiusKm) || 50),
+    maxStations: Math.max(2, Math.min(12, Number(maxStations) || 8)),
+  }).catch(() => []);
+
+  const points = [
+    { lat: la, lon: lo },
+    ...nearby.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lon)),
+  ];
+  const [{ fetchOpenMeteoCurrentMany }, { reverseGeocode }] = await Promise.all([
+    import('./openmeteo.mjs'),
+    import('./geo.mjs'),
+  ]);
+  const [winds, reversed] = await Promise.all([
+    fetchOpenMeteoCurrentMany(points).catch(() => []),
+    reverseGeocode(la, lo, { via: 'osm' }).catch(() => null),
+  ]);
+  const pinWind = winds[0] || null;
+  const nearbyOut = nearby.map((m, i) => {
+    const w = winds[i + 1] || null;
+    return {
+      provider: m.provider,
+      stationId: m.stationId,
+      name: m.name,
+      distanceKm: Math.round((Number(m.distanceKm) || 0) * 10) / 10,
+      lat: m.lat,
+      lon: m.lon,
+      virtual: !!m.virtual,
+      wind_avg: w?.wind_avg ?? null,
+      wind_max: w?.wind_max ?? null,
+      wind_direction: w?.wind_direction ?? null,
+    };
+  });
+  const value = {
+    lat: la,
+    lon: lo,
+    address: reversed?.address || `${la.toFixed(4)}, ${lo.toFixed(4)}`,
+    addressProvider: reversed?.provider || null,
+    wind: pinWind
+      ? {
+          wind_avg: pinWind.wind_avg,
+          wind_max: pinWind.wind_max,
+          wind_direction: pinWind.wind_direction,
+          temperature: pinWind.temperature,
+        }
+      : null,
+    nearby: nearbyOut,
+  };
+  previewCache.set(key, { at: Date.now(), value });
+  if (previewCache.size > 80) {
+    const oldest = previewCache.keys().next().value;
+    if (oldest) previewCache.delete(oldest);
+  }
+  return value;
+}
+
 export async function resolveLocation(input, extras = {}) {
   let coords = parseLocationId(input);
   let address = extras.address || null;

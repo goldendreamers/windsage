@@ -24,8 +24,8 @@ import {
   mapsStatus,
 } from './lib/providers/index.mjs';
 import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
-import { autocompletePlaces, geocodeAddress, placeDetails } from './lib/providers/geo.mjs';
-import { resolveLocation } from './lib/providers/location.mjs';
+import { autocompletePlaces, geocodeAddress, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
+import { previewMapLocation, resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
   saveStore,
@@ -1298,11 +1298,47 @@ async function handleApi(req, res, pathname, url) {
       return json(res, 429, { error: 'Too many autocomplete requests. Try again later.' });
     }
     const q = String(url.searchParams.get('q') || '').trim();
+    const via = String(url.searchParams.get('via') || '').trim();
     try {
-      const suggestions = await autocompletePlaces(q);
+      const suggestions = await autocompletePlaces(q, { via });
       return json(res, 200, { ok: true, suggestions });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Autocomplete failed' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/geo/reverse') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-rev:${ip}`, { limit: 90, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many reverse-geocode requests. Try again later.' });
+    }
+    const lat = Number(url.searchParams.get('lat'));
+    const lon = Number(url.searchParams.get('lon'));
+    const via = String(url.searchParams.get('via') || 'osm').trim();
+    try {
+      const hit = await reverseGeocode(lat, lon, { via });
+      return json(res, 200, { ok: true, ...hit });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Reverse geocode failed' });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/geo/map-preview') {
+    const ip = clientIp(req);
+    const limited = takeToken(`geo-preview:${ip}`, { limit: 90, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      res.setHeader('Retry-After', String(limited.retryAfterSec));
+      return json(res, 429, { error: 'Too many map preview requests. Try again later.' });
+    }
+    const lat = Number(url.searchParams.get('lat'));
+    const lon = Number(url.searchParams.get('lon'));
+    try {
+      const preview = await previewMapLocation(lat, lon);
+      return json(res, 200, { ok: true, ...preview });
+    } catch (error) {
+      return json(res, 400, { error: error.message || 'Map preview failed' });
     }
   }
 
@@ -1325,7 +1361,8 @@ async function handleApi(req, res, pathname, url) {
           : typeof body.address === 'string'
             ? body.address
             : '';
-      const hit = await geocodeAddress(query);
+      const via = typeof body.via === 'string' ? body.via : '';
+      const hit = await geocodeAddress(query, { via });
       return json(res, 200, { ok: true, ...hit });
     } catch (error) {
       return json(res, 400, { error: error.message || 'Geocode failed' });

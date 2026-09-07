@@ -116,9 +116,14 @@ export interface LocationBlend {
   updatedAt?: number;
 }
 
+/** Simple: map pin + GPS. Advanced: Google Maps search still available. */
+export type UiMode = 'simple' | 'advanced';
+
 export interface AppSettings {
   stations: FollowedStation[];
   pollIntervalMinutes: number;
+  /** Local UI preference; default simple. Not synced to the cloud. */
+  uiMode?: UiMode;
 }
 
 export interface StationReading {
