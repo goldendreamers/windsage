@@ -20,6 +20,7 @@ import { colors } from '../shared/theme';
 import { BrandHero } from '../components/BrandHero';
 import { AddStationModal } from '../components/AddStationModal';
 import { StationCard } from '../components/StationCard';
+import { GithubViewLink } from '../components/GithubViewLink';
 import { buildGlanceRows, glanceHeadline } from '../shared/glance';
 
 type LiveMap = Record<
@@ -291,6 +292,7 @@ export function HomeScreen({
             <Text style={styles.downloadLinkText}>Install app</Text>
           </Pressable>
         ) : null}
+        <GithubViewLink />
       </ScrollView>
 
       <AddStationModal

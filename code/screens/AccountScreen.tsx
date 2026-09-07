@@ -24,6 +24,7 @@ import {
 } from '../core/cloud';
 import { colors } from '../shared/theme';
 import { Section } from '../components/Section';
+import { GithubViewLink } from '../components/GithubViewLink';
 import { registerWebPushSubscription, ensureNotificationPermissions, isInstalledPwa } from '../core/notifications';
 import { isRunningAsInstalledApp, getInstallPlatform } from '../core/pwaInstall';
 
@@ -355,6 +356,14 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut }: Props) {
           <Text style={styles.btnPrimaryText}>Send test phone alert</Text>
         </Pressable>
         {phoneAlertMsg ? <Text style={styles.hint}>{phoneAlertMsg}</Text> : null}
+      </Section>
+
+      <Section
+        title="Source"
+        icon="wind"
+        hint="Read-only view of the Windsage code. The live app stays at windsage.nimrod.bio."
+      >
+        <GithubViewLink variant="button" />
       </Section>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
