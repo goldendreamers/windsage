@@ -8,6 +8,7 @@ import {
   promptPwaInstall,
 } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
+import { GithubViewLink } from '../components/GithubViewLink';
 
 const PUBLIC_APP = 'https://windsage.nimrod.bio/';
 
@@ -151,6 +152,7 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
         often holds alerts until you unlock the phone.
       </Text>
       <Text style={styles.footUrl}>{PUBLIC_APP}</Text>
+      <GithubViewLink />
     </ScrollView>
   );
 }

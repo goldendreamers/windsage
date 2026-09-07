@@ -91,6 +91,9 @@ export const METRIC_OPTIONS = [
 
 export const BACKGROUND_TASK_NAME = 'WINDSAGE_POLL_TASK';
 
+/** Public read-only GitHub view of this app (not a clone/edit invite). */
+export const GITHUB_VIEW_URL = 'https://github.com/goldendreamers/windsage';
+
 export function metricUnitShort(metric: MetricKey): string {
   if (metric === 'temperature') return '°C';
   if (metric === 'wave_height') return 'm';
