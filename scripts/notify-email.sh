@@ -16,7 +16,7 @@
 #
 # Usage:
 #   scripts/notify-email.sh "subject" "body" [to]
-# Default to: shakedwald@gmail.com
+# Default to: WINDSAGE_EMAIL_TO or you@example.com
 
 set -euo pipefail
 
@@ -31,11 +31,16 @@ fi
 
 SUBJECT="${1:-}"
 BODY="${2:-}"
-TO="${3:-${WINDSAGE_EMAIL_TO:-shakedwald@gmail.com}}"
+TO="${3:-${WINDSAGE_EMAIL_TO:-}}"
 
 if [[ -z "$SUBJECT" || -z "$BODY" ]]; then
   echo "usage: $0 \"subject\" \"body\" [to]" >&2
   exit 2
+fi
+
+if [[ -z "$TO" ]]; then
+  echo "BLOCKED: set WINDSAGE_EMAIL_TO or pass [to]. Do not hardcode a personal inbox." >&2
+  exit 1
 fi
 
 if [[ -n "${RESEND_API_KEY:-}" ]]; then

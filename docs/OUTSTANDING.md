@@ -4,26 +4,25 @@ What still needs a decision or secret from the operator, what already works, and
 
 ## Still needed from user (action list)
 
-1. **Phone lock-screen alerts** — Windsage does **not** email wind alerts. The “Email notify” already shipped is **agent ops mail** (`scripts/notify-email.sh`), not a user alert channel. Phone alerts are Web Push on the installed PWA. Need on Wald: `WEB_PUSH_VAPID_PUBLIC` + `WEB_PUSH_VAPID_PRIVATE` in `/data/windsage/oauth.env` so https://windsage.nimrod.bio/health shows `"webPush": true`. On the phone: Safari (not Chrome on iPhone) → Add to Home Screen → Account → **Send test phone alert**. See https://github.com/goldendreamers/windsage/pull/8 and `docs/MAC_AGENT_PROMPTS.md`.
+1. **Phone lock-screen alerts** — Windsage does **not** email wind alerts. Phone alerts are Web Push on the installed PWA. Need on the cloud host: `WEB_PUSH_VAPID_PUBLIC` + `WEB_PUSH_VAPID_PRIVATE` in `oauth.env` so https://windsage.nimrod.bio/health shows `"webPush": true`. On the phone: Safari (not Chrome on iPhone) → Add to Home Screen → Account → **Send test phone alert**. See https://github.com/goldendreamers/windsage/pull/8.
 
-2. **Optional provider tokens** — Synoptic / Tempest / Windfinder stay env-gated. Free sources already work. **Map search works without any Google key** (Maps search URL → coordinates; Photon/Open-Meteo fallback). Optional: `GOOGLE_MAPS_API_KEY` on Wald only improves Places autocomplete.
+2. **Optional provider tokens** — Synoptic / Tempest / Windfinder stay env-gated. Free sources already work. **Map search works without any Google key**. Optional: `GOOGLE_MAPS_API_KEY` only improves Places autocomplete.
 
-3. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
+3. **Paid apex domain (optional)** — Free branded HTTPS is live at `https://windsage.nimrod.bio/`. Buying a dedicated apex needs budget approval.
 
-**Done recently:** Multi-source follows (WG/NDBC/Open-Meteo/location + tokened sources). Map/address blend. Store wipe-proofing + daily backup cron. Login/register rate limits. Home “right now” glance + trend. Weather-source hiccup banner. Alert good/meh feedback. Google SSO live. Agent email notify (`notify-email.sh`, not wind alerts). Shared catalog. Faster first load. Map-pin Identity (PR #7) live on Wald.
+**Done recently:** Multi-source follows (WG/NDBC/Open-Meteo/location + tokened sources). Map/address blend. Store wipe-proofing + daily backup cron. Login/register rate limits. Home “right now” glance + trend. Weather-source hiccup banner. Alert good/meh feedback. Google SSO live. Shared catalog. Faster first load. Map-pin Identity (PR #7) live.
 
-**Also (same pattern, lower priority):** Facebook and Apple SSO are **env-gated** but need a short code pass for start/callback (see SSO-SETUP.md). They stay off until secrets + that wiring land.
+**Also (same pattern, lower priority):** Facebook and Apple SSO are **env-gated** but need a short code pass for start/callback (see SSO-SETUP.md).
 
 **Explicitly out of scope:** SMS / mobile OTP; “who’s out there” social check-ins (review idea — later).
 
 ## What works now (brief)
 
 - Guest mode + username/password accounts + multi-device sync + Google SSO
-- Multi-provider resolve + spot URL resolve via Wald
+- Multi-provider resolve + spot URL resolve via the cloud
 - Metric-aware alert limits + per-metric defaults
 - Optional gust / wave / wind / direction limits
 - Public HTTPS: `https://windsage.nimrod.bio/`
-- Tailnet HTTPS: `https://windsage.taild8a1d4.ts.net/`
 
 ## Deferred from progress review (not obsolete, not this pass)
 

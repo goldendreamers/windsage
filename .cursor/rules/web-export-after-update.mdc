@@ -7,11 +7,11 @@ alwaysApply: true
 
 When you finish a discrete work step (feature, fix, UI/cloud change, or other product update):
 
-1. Run the release script (export + version snapshot + prune + Wald deploy):
+1. Run the release script (export + version snapshot + prune + deploy):
 
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
-cd "/Users/goldendreamers/windsage"
+cd "$(git rev-parse --show-toplevel)"
 npm run release:web
 ```
 

@@ -10,7 +10,7 @@ let warnedSkip = false;
 export function vapidConfig() {
   const publicKey = (process.env.WEB_PUSH_VAPID_PUBLIC || '').trim();
   const privateKey = (process.env.WEB_PUSH_VAPID_PRIVATE || '').trim();
-  const subject = (process.env.WEB_PUSH_CONTACT || 'mailto:shakedwald@gmail.com').trim();
+  const subject = (process.env.WEB_PUSH_CONTACT || 'mailto:webpush@localhost').trim();
   return {
     publicKey,
     privateKey,

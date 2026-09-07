@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=nimrodw
-Group=nimrodw
+User=windsage
+Group=windsage
 WorkingDirectory=/data/windsage
 Environment=NODE_ENV=production
 Environment=WINDSAGE_HOST=0.0.0.0
@@ -19,8 +19,7 @@ Environment=WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 #   WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 # Google redirect URI (exact):
 #   https://windsage.nimrod.bio/v1/auth/google/callback
-# Tailscale MagicDNS (tailnet HTTP fallback):
-#   http://waldhomeserver.taild8a1d4.ts.net:8787
+# Set User=/Group= to the Linux account that owns WorkingDirectory.
 EnvironmentFile=-/data/windsage/oauth.env
 ExecStart=/usr/bin/node /data/windsage/server.mjs
 Restart=always
