@@ -1,50 +1,22 @@
 # Windsage
 
-**שקד / סשן Cursor:** אחרי `git checkout main && git pull` התחל ב־[`docs/SHAKED.md`](docs/SHAKED.md). דוח מחליט: [`docs/shaked/decision-brief.md`](docs/shaked/decision-brief.md) (לא PDF — Cursor מציג PDF ריק).
-
-Mobile app that watches [Windguru](https://www.windguru.cz) stations and notifies you when a parameter stays past a threshold long enough.
+Wind-alert PWA: the cloud polls weather sources and notifies you when a station stays past your threshold long enough.
 
 **Default rule:** average wind **≥ 15 knots for 20 minutes**  
-**Cloud poll:** every **10 minutes** on the Wald home server (`windsage.service`, `WINDSAGE_POLL=1`). A Mac clone of `server.mjs` does **not** poll unless you set `WINDSAGE_POLL=1`.
+**Cloud poll:** every **10 minutes** on the server (`WINDSAGE_POLL=1`). A laptop clone of `server.mjs` does **not** poll unless you set that.
+
+Live instance: https://windsage.nimrod.bio/
 
 ## Battery model
 
 | Layer | Role |
 | --- | --- |
-| Phone | Follow list UI, sync stations, receive Expo push, refresh only on open / pull |
-| Wald cloud | Polls Windguru, evaluates hold-time rules, sends pushes |
+| Phone / browser | Follow list, sync, receive push. Refresh on open / pull |
+| Cloud | Polls providers, evaluates hold-time rules, sends Expo + Web Push |
 
-Local background Windguru polling is **off**. The phone no longer wakes every 10 minutes.
+Local background Windguru polling is **off**.
 
-## Cloud (Wald home server)
-
-Same Tailscale host as Minecraft (`ssh wald-mc` → `nimrodw@100.125.98.56`).
-
-| Item | Value |
-| --- | --- |
-| Service | `windsage.service` |
-| Code | `/data/windsage/` |
-| Data | `/data/windsage/data/store.json` |
-| Public URL | `https://windsage.nimrod.bio/` (Cloudflare Tunnel → Wald `:8787`) |
-| Tailnet HTTPS | `https://windsage.taild8a1d4.ts.net/` (Tailscale Serve) |
-| IP fallback | `http://100.125.98.56:8787` |
-| RAM | ~60MB Node process (`MemoryMax=96M`) |
-
-```bash
-ssh wald-mc 'systemctl status windsage --no-pager | head -20'
-curl -sS https://windsage.nimrod.bio/health
-```
-
-Redeploy from this Mac:
-
-```bash
-rsync -av --delete --exclude data \
-  "/Users/goldendreamers/windsage/code/cloud/" \
-  wald-mc:/data/windsage/
-ssh wald-mc 'sudo systemctl restart windsage'
-```
-
-## Folder layout
+## Repo layout
 
 ```
 windsage/
@@ -54,50 +26,46 @@ windsage/
 │   ├── screens/     Home + station detail
 │   ├── components/  reusable UI
 │   ├── core/        cloud client, local storage helpers
-│   ├── cloud/       Wald worker (zero npm deps)
+│   ├── cloud/       Node worker (zero required npm deps)
 │   └── shared/      types, defaults, theme
+├── public/          PWA assets + privacy policy
 ├── scripts/
 └── docs/
 ```
 
-## Use in the browser
-
-Open with HTTPS padlock:
-
-- **https://windsage.nimrod.bio/** (public, Cloudflare)
-- **https://windsage.taild8a1d4.ts.net/** (Tailscale on phone/laptop)
-
-Rebuild + redeploy web (versioned snapshot + prune + Wald):
+## Run locally
 
 ```bash
-export PATH="$HOME/.local/node/bin:$PATH"
-cd "/Users/goldendreamers/windsage"
-npm run release:web
+npm install
+npm run cloud                 # http://127.0.0.1:8787/health  (if the script exists)
+# or:
+cd code/cloud && node server.mjs
 ```
 
-Snapshots land in `file:///Users/goldendreamers/windsage/releases/web/`.  
-Keep newest **3**, plus versions aged **>1 day and <7 days**; prune the rest.
-
-Local web preview:
+Point the client at that API:
 
 ```bash
-npm run web
+EXPO_PUBLIC_WINDSAGE_URL=http://127.0.0.1:8787 npm run web
 ```
 
-## Phone (Expo Go)
-
-Phone must be on Tailscale (or same LAN path to `100.125.98.56`).
+Phone (Expo Go) against a deployed cloud:
 
 ```bash
-export PATH="$HOME/.local/node/bin:$PATH"
-cd "/Users/goldendreamers/windsage"
-npm start
+EXPO_PUBLIC_WINDSAGE_URL=https://windsage.nimrod.bio npm start
 ```
 
-Allow notifications. Follow a station — Wald takes over the watch.
+## Self-host
 
+1. Copy `code/cloud/oauth.env.example` to `oauth.env` on the server (`chmod 600`). Fill only the secrets you use. Never commit that file.
+2. Install `code/cloud/windsage.service` as a systemd unit. Set `User=` / `Group=` to the account that owns the data directory.
+3. Data lives in `$WINDSAGE_DATA/store.json` (default `code/cloud/data/` locally, `/data/windsage/data` in the example unit). Do not wipe users/stations.
+4. Put a reverse proxy (HTTPS) in front of port `8787`. Set `WINDSAGE_PUBLIC_URL` to that origin.
+5. Web Push (lock-screen alerts): generate VAPID keys and set `WEB_PUSH_VAPID_*` in `oauth.env`.
+
+Deploy helpers (`scripts/release-web.py`) rsync the cloud worker and exported web build. Set `WINDSAGE_DEPLOY_HOST` to your SSH host.
 
 ## Notes
 
+- Secrets belong in gitignored env files (`.env.smtp`, `oauth.env`, `code/cloud/data/`).
 - Expo push works best in Expo Go / an EAS build with a real `extra.eas.projectId`.
-- Minecraft stack is untouched (`minecraft-mc` / playit / crafty).
+- Privacy policy for the live app: https://windsage.nimrod.bio/privacy

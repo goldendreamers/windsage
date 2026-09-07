@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -25,7 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTIFY = ROOT / "scripts" / "notify-email.sh"
-REMOTE = "wald-mc"
+REMOTE = os.environ.get("WINDSAGE_DEPLOY_HOST", "wald-mc")
 STORE = "/data/windsage/data/store.json"
 PUBLIC = "https://windsage.nimrod.bio"
 

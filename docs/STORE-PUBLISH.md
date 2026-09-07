@@ -20,7 +20,7 @@ Public URL: https://windsage.nimrod.bio/privacy
 
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
-cd /Users/goldendreamers/windsage
+cd /path/to/windsage
 npx eas-cli login
 npx eas-cli init   # replaces placeholder projectId in app.json
 ```
@@ -65,4 +65,4 @@ npx eas-cli submit --platform ios --profile production
 
 ## Support contact
 
-shakedwald@gmail.com
+Use a public address you are willing to publish (also listed on `/privacy`).

@@ -23,7 +23,7 @@ import { hashPassword, verifyPassword, validateUsername, validatePassword } from
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'windsage-auth-'));
 
-const u = validateUsername('nimrod');
+const u = validateUsername('alice');
 assert.equal(u.ok, true);
 const p = validatePassword('secret123');
 assert.equal(p.ok, true);
@@ -35,7 +35,7 @@ assert.equal(await verifyPassword('wrong', passwordHash, passwordSalt), false);
 let store = await loadStore(dir);
 assert.equal(store.version, 3);
 const user = createUser(store, {
-  username: 'nimrod',
+  username: 'alice',
   passwordHash,
   passwordSalt,
   stations: [{ id: 'st_a', stationId: '2259', nickname: 'Caesarea', enabled: true, rule: {} }],
@@ -44,7 +44,7 @@ const token = createSession(store, user.id);
 await saveStore(dir, store);
 
 store = await loadStore(dir);
-const found = findUserByUsername(store, 'Nimrod');
+const found = findUserByUsername(store, 'Alice');
 assert.ok(found);
 assert.equal(found.id, user.id);
 const session = getSession(store, token);
@@ -60,7 +60,7 @@ const merged = mergeStations(
 );
 assert.equal(merged.length, 2);
 assert.equal(merged.find((s) => s.stationId === '2259')?.nickname, 'User');
-assert.ok(publicUser(found)?.username === 'nimrod');
+assert.ok(publicUser(found)?.username === 'alice');
 
 // Shared-phone leak regression: login must NOT merge leftover guest follows
 // (e.g. "Test reef") into an existing account.

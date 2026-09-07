@@ -50,6 +50,19 @@ discord-cursor.env
 code/cloud/data/
 releases/local-zips/
 
+# Private operator / client notes (keep on the operator machine only)
+docs/shaked/
+docs/SHAKED.md
+docs/SHAKED_*
+docs/MAC_AGENT_PROMPTS.md
+docs/SESSION_REQUIREMENTS*
+docs/FRIEND_GROUP_VISION*
+docs/ISRAEL_KITE_PRODUCT*
+docs/WEEKLY_REVIEW*
+docs/RECOMMENDATIONS*
+docs/Windsage-recommendations*
+docs/PROGRESS_REVIEW.md
+
 # Agent runtime state (keep committed Cursor rules)
 .cursor/*
 !.cursor/rules/

@@ -154,7 +154,8 @@ def build_downloadable_zip(dist: Path = DIST) -> Path:
     return zip_path
 
 
-def deploy(remote: str = "wald-mc", remote_web: str = "/data/windsage/web") -> None:
+def deploy(remote: str | None = None, remote_web: str = "/data/windsage/web") -> None:
+    remote = remote or os.environ.get("WINDSAGE_DEPLOY_HOST", "wald-mc")
     env = os.environ.copy()
     # Cloud code without wiping remote web/
     run(

@@ -5,11 +5,20 @@
 #   https://login.tailscale.com/admin/dns
 #   → enable "HTTPS Certificates"
 #
-# Canonical HTTPS URL after success:
-#   https://windsage.taild8a1d4.ts.net/
+# Enable HTTPS for Windsage via Tailscale Serve / Funnel (optional).
+#
+# Prerequisite (one-time, Tailscale admin console):
+#   https://login.tailscale.com/admin/dns
+#   → enable "HTTPS Certificates"
+#
+# Set WINDSAGE_DOMAIN to your MagicDNS hostname. There is no default.
 set -euo pipefail
 
-DOMAIN="${WINDSAGE_DOMAIN:-windsage.taild8a1d4.ts.net}"
+DOMAIN="${WINDSAGE_DOMAIN:-}"
+if [[ -z "$DOMAIN" ]]; then
+  echo "usage: WINDSAGE_DOMAIN=your-host.ts.net $0" >&2
+  exit 2
+fi
 UPSTREAM="${WINDSAGE_UPSTREAM:-http://127.0.0.1:8787}"
 
 echo "Domain: https://$DOMAIN/"

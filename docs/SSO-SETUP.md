@@ -27,16 +27,16 @@ Canonical public URL: **https://windsage.nimrod.bio**
 
 ### B. Put secrets on Wald
 
-SSH to the home server (`wald-mc`), then:
+SSH to the host that runs `windsage.service`, then:
 
 ```bash
-sudo -u nimrodw tee /data/windsage/oauth.env >/dev/null <<'EOF'
+sudo -u windsage tee /data/windsage/oauth.env >/dev/null <<'EOF'
 WINDSAGE_PUBLIC_URL=https://windsage.nimrod.bio
 GOOGLE_CLIENT_ID=PASTE_CLIENT_ID_HERE
 GOOGLE_CLIENT_SECRET=PASTE_CLIENT_SECRET_HERE
 EOF
 sudo chmod 600 /data/windsage/oauth.env
-sudo chown nimrodw:nimrodw /data/windsage/oauth.env
+sudo chown windsage:windsage /data/windsage/oauth.env
 sudo systemctl restart windsage
 curl -sS http://127.0.0.1:8787/health
 ```
@@ -107,5 +107,5 @@ Typical return URL:
 ## Security
 
 - Never commit `oauth.env` or client secrets to git.
-- File on Wald: `chmod 600`, owned by `nimrodw`.
+- File on the host: `chmod 600`, owned by the `windsage` service user.
 - After any change: `sudo systemctl restart windsage`.

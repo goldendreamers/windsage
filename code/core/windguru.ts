@@ -15,9 +15,10 @@ function resolveCloudBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     if (
-      host === '100.125.98.56' ||
-      host === 'waldhomeserver' ||
       host === 'windsage.nimrod.bio' ||
+      host.endsWith('.ts.net') ||
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
       host.endsWith('.ts.net') ||
       window.location.port === '8787'
     ) {
