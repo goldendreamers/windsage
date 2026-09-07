@@ -5,7 +5,7 @@
 Mobile app that watches [Windguru](https://www.windguru.cz) stations and notifies you when a parameter stays past a threshold long enough.
 
 **Default rule:** average wind **≥ 15 knots for 20 minutes**  
-**Cloud poll:** every **10 minutes** on the Wald home server (not on your phone)
+**Cloud poll:** every **10 minutes** on the Wald home server (`windsage.service`, `WINDSAGE_POLL=1`). A Mac clone of `server.mjs` does **not** poll unless you set `WINDSAGE_POLL=1`.
 
 ## Battery model
 

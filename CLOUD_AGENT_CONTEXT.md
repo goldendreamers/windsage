@@ -51,7 +51,7 @@ releases/           local web snapshots / zips (often gitignored)
 | Layer | Role |
 | --- | --- |
 | Expo RN (web + native) | UI, follow list, sync, receive push |
-| Wald cloud (`windsage.service`) | Poll providers, alert logic, Expo + Web Push |
+| Wald cloud (`windsage.service`) | Poll providers, alert logic, Expo + Web Push (`WINDSAGE_POLL=1`). Mac/dev `server.mjs` does not poll. |
 | Store | `/data/windsage/data/store.json` on Wald — **never wipe users/stations** |
 
 **Providers:** windguru, ndbc, openmeteo, location (map/address blend), plus token-gated synoptic/tempest/windfinder.
@@ -76,7 +76,8 @@ On the Mac, after `npm install`:
 # Real phone (Expo Go) against live Wald:
 EXPO_PUBLIC_WINDSAGE_URL=https://windsage.nimrod.bio npm start
 
-# Or local cloud + Expo web (no phone):
+# Or local cloud + Expo web (no phone). Local cloud does **not** poll wind alerts
+# unless WINDSAGE_POLL=1 — production polling is windsage.service on Wald.
 npm run cloud                 # http://127.0.0.1:8787/health
 EXPO_PUBLIC_WINDSAGE_URL=http://127.0.0.1:8787 npm run web
 ```

@@ -285,6 +285,10 @@ export async function runStationCheck(
   }
 }
 
+/**
+ * Client-side check helper for tests / one-off UI. Production wind alerts
+ * poll on Wald (`windsage.service` → `runBagChecks`). Do not call this on a timer.
+ */
 export async function runAllStationChecks(
   stations: FollowedStation[],
   states: Record<string, AlertState>,

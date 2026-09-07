@@ -37,7 +37,47 @@ Nimrod (or you, if Discord is open on this Mac) should:
 Update docs/MAC_AGENT_PROMPTS.md (move this to Done) after the test message appears in #windsage-updates.
 ```
 
-### 1) Enable phone Web Push on Wald + release PR #8
+### 1) Deploy Wald-only wind-alert poller + confirm Mac is not polling
+
+**Why:** Wind alerts must run on Wald `windsage.service`, not a Mac `node server.mjs`. PR for `WINDSAGE_POLL=1` on Wald + poll off by default on laptop clones.
+
+**Paste this entire block into a local Mac Cursor agent:**
+
+```
+You are on the Mac at /Users/goldendreamers/windsage with Tailscale to Wald.
+Read file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md and file:///Users/goldendreamers/windsage/CLOUD_AGENT_CONTEXT.md.
+Do not wipe store.json / stations. Do not merge to main unless Nimrod asks.
+Do not copy the repo windsage.service over the live unit if it would change User= away from nimrodw.
+
+export PATH="$HOME/.local/node/bin:$PATH"
+cd /Users/goldendreamers/windsage
+git fetch origin cursor/wald-alert-poll-a8a2
+git checkout cursor/wald-alert-poll-a8a2
+git pull --ff-only origin cursor/wald-alert-poll-a8a2
+
+1) Stop any Mac-local cloud poller (production alerts must not run here):
+   pgrep -fl 'node.*server.mjs' || true
+   If a local windsage server.mjs is running for production watching, stop it.
+   Expo `npm start` / `npm run web` is fine — that is UI, not the poller.
+
+2) Deploy cloud worker to Wald:
+   npm run release:web
+
+3) Prove Wald is the poller:
+   ssh wald-mc 'systemctl is-active windsage; grep -E WINDSAGE_POLL /etc/systemd/system/windsage.service /data/windsage/windsage.service; journalctl -u windsage -n 40 --no-pager | tail -40'
+   curl -sS https://windsage.nimrod.bio/health | python3 -m json.tool | head -50
+   Health must show poll.enabled true. After ~15s, poll.lastPollAt should be non-null.
+   journalctl must show "[windsage-cloud] poll=on" and later "[poll] done".
+
+4) Email Nimrod:
+   scripts/notify-email.sh "Windsage · done: wind alerts poll on Wald" "windsage.service active; /health poll.enabled true. Mac is not the poller."
+   or ACTION NEEDED if systemd/health is wrong.
+
+Update docs/MAC_AGENT_PROMPTS.md (move this to Done with today’s date) after health shows poll.enabled true on https://windsage.nimrod.bio/health.
+Prefer absolute file:// and https:// links.
+```
+
+### 2) Enable phone Web Push on Wald + release PR #8
 
 **Why:** https://github.com/goldendreamers/windsage/pull/8 is **merged** (`594621e` on `main`). Live https://windsage.nimrod.bio/ still needs VAPID keys (if `webPush` is false) and `npm run release:web`. Windsage does **not** send wind-alert emails.
 
@@ -77,7 +117,7 @@ Prefer absolute file:// and https:// links.
 
 ### 2026-08-14 — PR #8 merged on GitHub (cloud agent)
 
-Merged https://github.com/goldendreamers/windsage/pull/8 (`594621e`). Web Push subscribe now syncs to Wald; test-push explains missing VAPID; Account/Download call out Safari-on-iPhone. Wald VAPID + `npm run release:web` still pending (item 1 above).
+Merged https://github.com/goldendreamers/windsage/pull/8 (`594621e`). Web Push subscribe now syncs to Wald; test-push explains missing VAPID; Account/Download call out Safari-on-iPhone. Wald VAPID + `npm run release:web` still pending (item 2 above).
 
 ### 2026-08-13 — Wald release of merged PR #7 (Mac + Tailscale)
 
