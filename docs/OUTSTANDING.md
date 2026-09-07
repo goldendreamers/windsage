@@ -10,6 +10,8 @@ What still needs a decision or secret from the operator, what already works, and
 
 3. **Paid apex domain (optional)** — `windsage.com` / `windsage.app` are taken. Free branded HTTPS is live at `https://windsage.nimrod.bio/` via Cloudflare Tunnel. Buying a dedicated apex needs budget approval.
 
+4. **Discord #windsage-updates webhook (agent ops)** — After every landed change, agents must post via `scripts/notify-discord.sh`. Need: incoming webhook URL as `WINDSAGE_DISCORD_UPDATES_WEBHOOK` in gitignored `.env.smtp` (Mac) **and** as a Cursor Cloud secret; plus `discord.com` / `discordapp.com` on the cloud egress allowlist. Not a user wind-alert channel.
+
 **Done recently:** Multi-source follows (WG/NDBC/Open-Meteo/location + tokened sources). Map/address blend. Store wipe-proofing + daily backup cron. Login/register rate limits. Home “right now” glance + trend. Weather-source hiccup banner. Alert good/meh feedback. Google SSO live. Agent email notify (`notify-email.sh`, not wind alerts). Shared catalog. Faster first load. Map-pin Identity (PR #7) live on Wald.
 
 **Also (same pattern, lower priority):** Facebook and Apple SSO are **env-gated** but need a short code pass for start/callback (see SSO-SETUP.md). They stay off until secrets + that wiring land.

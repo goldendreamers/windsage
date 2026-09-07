@@ -2,13 +2,40 @@
 
 **Running handoff file.** When you open Cursor on the Mac (`/Users/goldendreamers/windsage`), paste the **next pending** prompt below into a new **local** agent chat (not a cloud agent).
 
-Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. Anything that needs a live deploy or Mac-local secrets lands here.
+Cloud agents often cannot Tailscale/SSH to Wald, send `notify-email.sh` mail, or reach Discord unless `discord.com` is on the cloud egress allowlist and `WINDSAGE_DISCORD_UPDATES_WEBHOOK` is a cloud secret. Anything that needs a live deploy or Mac-local secrets lands here.
 
 **How to maintain:** after a Mac run finishes (or a new cloud task leaves Mac work), edit this file — move the prompt under **Done**, add any new pending prompts at the top of **Pending**.
 
 ---
 
 ## Pending (newest first)
+
+### 0) Discord #windsage-updates webhook for agent change posts
+
+**Why:** Every Windsage agent must post to Discord **windsage updates** after a landed change (`scripts/notify-discord.sh`). The webhook URL is not in this clone.
+
+**Paste this entire block into a local Mac Cursor agent:**
+
+```
+You are on the Mac at /Users/goldendreamers/windsage.
+Read file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md and file:///Users/goldendreamers/windsage/.cursor/rules/notify-discord.mdc.
+
+Nimrod (or you, if Discord is open on this Mac) should:
+
+1) Open Discord → channel "windsage updates" → Edit Channel → Integrations → Webhooks → New Webhook.
+   Name it "Windsage agent". Copy the webhook URL. Never commit it, never email it.
+
+2) Append to file:///Users/goldendreamers/windsage/.env.smtp (create from .env.smtp.example if needed):
+   WINDSAGE_DISCORD_UPDATES_WEBHOOK=https://discord.com/api/webhooks/...
+
+3) Test:
+   cd /Users/goldendreamers/windsage
+   scripts/notify-discord.sh "Windsage · done: Discord webhook test" "Agent ops posts to #windsage-updates are live."
+
+4) Also add that same env var as a Cursor Cloud Agent secret, and allow egress to discord.com (and discordapp.com) so cloud agents can post.
+
+Update docs/MAC_AGENT_PROMPTS.md (move this to Done) after the test message appears in #windsage-updates.
+```
 
 ### 1) Enable phone Web Push on Wald + release PR #8
 

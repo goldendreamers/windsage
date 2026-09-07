@@ -37,6 +37,9 @@ yarn-error.*
 .env*.local
 .env
 .env.smtp
+discord-updates.env
+discord-cursor.env
+.env.discord-cursor.local
 
 # typescript
 *.tsbuildinfo
@@ -47,5 +50,7 @@ yarn-error.*
 code/cloud/data/
 releases/local-zips/
 
-# Agent runtime state
-.cursor/
+# Agent runtime state (keep committed Cursor rules)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
