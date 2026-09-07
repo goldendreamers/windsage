@@ -142,11 +142,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeC
         all data stays on your Wald home server.
       </Text>
 
-      <Section
-        title="Map & search"
-        icon="wind"
-        hint="Simple drops a pin like Windguru. Advanced still has Google Maps paste/search."
-      >
+      <Section title="Map & search" icon="wind">
         <View style={styles.segment}>
           {([
             { key: 'simple' as const, label: 'Simple' },
