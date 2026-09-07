@@ -74,6 +74,7 @@ const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
 const PORT = Number(process.env.WINDSAGE_PORT || 8787);
 const DATA_DIR = process.env.WINDSAGE_DATA || path.join(__dirname, 'data');
 const WEB_DIR = process.env.WINDSAGE_WEB || path.join(__dirname, 'web');
+const PUBLIC_DIR = path.join(__dirname, '../../public');
 const DEFAULT_POLL_MIN = 10;
 /** Reuse provider "current" across bags/checks within this window (shared sensors). */
 const READING_CACHE_TTL_MS = 90_000;
@@ -633,13 +634,30 @@ async function serveStatic(req, res, pathname) {
       st = await fs.stat(filePath);
     }
   } catch {
-    filePath = path.join(WEB_DIR, 'index.html');
-    try {
-      await fs.stat(filePath);
-    } catch {
-      cors(res);
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      return res.end('Windsage web UI not deployed yet. Run npm run export:web');
+    const publicFile = path.join(PUBLIC_DIR, rel);
+    const publicRoot = path.resolve(PUBLIC_DIR);
+    let servedPublic = false;
+    if (
+      rel.startsWith('/vendor/') &&
+      path.resolve(publicFile).startsWith(publicRoot)
+    ) {
+      try {
+        await fs.stat(publicFile);
+        filePath = publicFile;
+        servedPublic = true;
+      } catch {
+        servedPublic = false;
+      }
+    }
+    if (!servedPublic) {
+      filePath = path.join(WEB_DIR, 'index.html');
+      try {
+        await fs.stat(filePath);
+      } catch {
+        cors(res);
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        return res.end('Windsage web UI not deployed yet. Run npm run export:web');
+      }
     }
   }
 

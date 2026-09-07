@@ -590,14 +590,28 @@ async function ensureLeaflet() {
     `;
     document.head.appendChild(style);
   }
-  if ((window as any).L) return;
+  if ((window as any).L) {
+    try {
+      (window as any).L.Icon.Default.imagePath = '/vendor/leaflet/images/';
+    } catch {
+      // ignore
+    }
+    return;
+  }
+  const localCss = '/vendor/leaflet/leaflet.css';
+  const localJs = '/vendor/leaflet/leaflet.js';
+  const cdnCss = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  const cdnJs = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
   await new Promise<void>((resolve, reject) => {
     const cssId = 'leaflet-css';
     if (!document.getElementById(cssId)) {
       const link = document.createElement('link');
       link.id = cssId;
       link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.href = localCss;
+      link.onerror = () => {
+        link.href = cdnCss;
+      };
       document.head.appendChild(link);
     }
     const existing = document.getElementById('leaflet-js');
@@ -608,9 +622,20 @@ async function ensureLeaflet() {
     }
     const script = document.createElement('script');
     script.id = 'leaflet-js';
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Could not load map library'));
+    script.src = localJs;
+    script.onload = () => {
+      try {
+        (window as any).L.Icon.Default.imagePath = '/vendor/leaflet/images/';
+      } catch {
+        // ignore
+      }
+      resolve();
+    };
+    script.onerror = () => {
+      script.onload = () => resolve();
+      script.src = cdnJs;
+      script.onerror = () => reject(new Error('Could not load map library'));
+    };
     document.head.appendChild(script);
   });
 }
