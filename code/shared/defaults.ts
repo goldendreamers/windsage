@@ -6,6 +6,7 @@ import type {
   Comparison,
   FollowedStation,
   MetricKey,
+  UiMode,
   WindguruKind,
 } from './types';
 
@@ -51,7 +52,12 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
 export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
+  uiMode: 'simple',
 };
+
+export function normalizeUiMode(value: unknown): UiMode {
+  return value === 'advanced' ? 'advanced' : 'simple';
+}
 
 export const DEFAULT_ALERT_STATE: AlertState = {
   conditionSinceMs: null,

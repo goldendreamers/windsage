@@ -72,6 +72,20 @@ function parseId(stationId) {
   return coords;
 }
 
+function currentFromOpenMeteoPayload(data) {
+  const c = data?.current || {};
+  const time = typeof c.time === 'string' ? c.time : null;
+  const unixtime = time ? Math.floor(Date.parse(`${time}Z`) / 1000) : null;
+  return reading({
+    wind_avg: asNumber(c.wind_speed_10m),
+    wind_max: asNumber(c.wind_gusts_10m),
+    wind_direction: asNumber(c.wind_direction_10m),
+    temperature: asNumber(c.temperature_2m),
+    datetime: time ? `${time}Z` : null,
+    unixtime,
+  });
+}
+
 export async function fetchOpenMeteoCurrent(stationId) {
   const { lat, lon } = parseId(stationId);
   const url = new URL('https://api.open-meteo.com/v1/forecast');
@@ -84,16 +98,39 @@ export async function fetchOpenMeteoCurrent(stationId) {
   url.searchParams.set('wind_speed_unit', 'kn');
   url.searchParams.set('timezone', 'UTC');
   const data = await fetchJson(url.toString());
-  const c = data?.current || {};
-  const time = typeof c.time === 'string' ? c.time : null;
-  const unixtime = time ? Math.floor(Date.parse(`${time}Z`) / 1000) : null;
-  return reading({
-    wind_avg: asNumber(c.wind_speed_10m),
-    wind_max: asNumber(c.wind_gusts_10m),
-    wind_direction: asNumber(c.wind_direction_10m),
-    temperature: asNumber(c.temperature_2m),
-    datetime: time ? `${time}Z` : null,
-    unixtime,
+  return currentFromOpenMeteoPayload(data);
+}
+
+/**
+ * Current wind at many lat/lon points in one Open-Meteo call.
+ * @param {Array<{lat:number,lon:number}>} points
+ */
+export async function fetchOpenMeteoCurrentMany(points) {
+  const list = (Array.isArray(points) ? points : [])
+    .map((p) => ({ lat: Number(p?.lat), lon: Number(p?.lon) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  if (!list.length) return [];
+  const url = new URL('https://api.open-meteo.com/v1/forecast');
+  url.searchParams.set('latitude', list.map((p) => p.lat).join(','));
+  url.searchParams.set('longitude', list.map((p) => p.lon).join(','));
+  url.searchParams.set(
+    'current',
+    'wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m',
+  );
+  url.searchParams.set('wind_speed_unit', 'kn');
+  url.searchParams.set('timezone', 'UTC');
+  const data = await fetchJson(url.toString());
+  const rows = Array.isArray(data) ? data : [data];
+  return list.map((p, i) => {
+    const r = currentFromOpenMeteoPayload(rows[i] || {});
+    return {
+      lat: p.lat,
+      lon: p.lon,
+      wind_avg: r.wind_avg,
+      wind_max: r.wind_max,
+      wind_direction: r.wind_direction,
+      temperature: r.temperature,
+    };
   });
 }
 

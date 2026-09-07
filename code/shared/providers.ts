@@ -40,8 +40,8 @@ export const PROVIDER_META: Record<
   location: {
     label: 'Map / Address',
     short: 'MAP',
-    hint: 'Pick an address or drop a pin — blends nearby stations by distance, accuracy & rating.',
-    placeholder: 'Herzliya Marina or tap the map',
+    hint: 'Drop a pin on the map or use your location — blends nearby stations by distance, accuracy & rating.',
+    placeholder: 'Tap the map or search a place',
     needsToken: false,
   },
   ndbc: {

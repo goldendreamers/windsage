@@ -4,6 +4,7 @@ import {
   DEFAULT_RULE,
   DEFAULT_SETTINGS,
   createFollowedStation,
+  normalizeUiMode,
 } from '../shared/defaults';
 import type { AlertState, AlertStateMap, AppSettings, FollowedStation } from '../shared/types';
 
@@ -41,6 +42,7 @@ function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
       10,
       raw.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes,
     ),
+    uiMode: normalizeUiMode(raw.uiMode ?? DEFAULT_SETTINGS.uiMode),
   };
 }
 
@@ -67,6 +69,7 @@ async function migrateLegacySettings(): Promise<AppSettings | null> {
     const migrated: AppSettings = {
       stations,
       pollIntervalMinutes: Math.max(10, legacy.pollIntervalMinutes ?? 10),
+      uiMode: 'simple',
     };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(migrated));
     return migrated;

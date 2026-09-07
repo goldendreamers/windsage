@@ -9,7 +9,8 @@ import {
   parseCoordsFromMapText,
   parseLatLon,
 } from '../code/cloud/lib/providers/mapsUrl.mjs';
-import { geocodeAddress } from '../code/cloud/lib/providers/geo.mjs';
+import { formatGeoLabel, geocodeAddress, reverseGeocode } from '../code/cloud/lib/providers/geo.mjs';
+import { previewMapLocation } from '../code/cloud/lib/providers/location.mjs';
 
 const caesarea = parseCoordsFromMapText(
   'https://www.google.com/maps/place/Caesarea/@32.501,34.892,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d32.5194!4d34.9045',
@@ -65,6 +66,16 @@ assert.ok(dms.lat > 32.16 && dms.lat < 32.17);
 assert.equal(parseLatLon('15 20'), null);
 assert.equal(parseLatLon('Herzliya Marina'), null);
 assert.equal(parseLatLon('2259'), null);
+
+assert.equal(
+  formatGeoLabel({ name: 'Herzliya Marina', city: 'Herzliya', country: 'Israel' }),
+  'Herzliya Marina, Herzliya, Israel',
+);
+assert.equal(formatGeoLabel({ housenumber: '12', street: 'HaYarkon', city: 'Tel Aviv' }), '12 HaYarkon, Tel Aviv');
+assert.equal(formatGeoLabel({}), '');
+
+await assert.rejects(() => reverseGeocode(99.2, 34.8), /out of range/);
+await assert.rejects(() => previewMapLocation('x', 'y'), /Need lat,lon/);
 
 const fromBare = await geocodeAddress('32.1645, 34.7961');
 assert.equal(fromBare.provider, 'coords');
