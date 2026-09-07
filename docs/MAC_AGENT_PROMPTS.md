@@ -2,7 +2,7 @@
 
 **Running handoff file.** When you open Cursor on the Mac (`/Users/goldendreamers/windsage`), paste the **next pending** prompt below into a new **local** agent chat (not a cloud agent).
 
-Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. Anything that needs a live deploy or Mac-local secrets lands here.
+Cloud agents often cannot Tailscale/SSH to Wald, send `notify-email.sh` mail, or reach Discord unless `discord.com` is on the cloud egress allowlist and `WINDSAGE_DISCORD_UPDATES_WEBHOOK` is a cloud secret. Anything that needs a live deploy or Mac-local secrets lands here.
 
 **How to maintain:** after a Mac run finishes (or a new cloud task leaves Mac work), edit this file — move the prompt under **Done**, add any new pending prompts at the top of **Pending**.
 
@@ -10,7 +10,34 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 
 ## Pending (newest first)
 
-### 0) Deploy Wald-only wind-alert poller + confirm Mac is not polling
+### 0) Discord #windsage-updates webhook for agent change posts
+
+**Why:** Every Windsage agent must post to Discord **windsage updates** after a landed change (`scripts/notify-discord.sh`). The webhook URL is not in this clone.
+
+**Paste this entire block into a local Mac Cursor agent:**
+
+```
+You are on the Mac at /Users/goldendreamers/windsage.
+Read file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md and file:///Users/goldendreamers/windsage/.cursor/rules/notify-discord.mdc.
+
+Nimrod (or you, if Discord is open on this Mac) should:
+
+1) Open Discord → channel "windsage updates" → Edit Channel → Integrations → Webhooks → New Webhook.
+   Name it "Windsage agent". Copy the webhook URL. Never commit it, never email it.
+
+2) Append to file:///Users/goldendreamers/windsage/.env.smtp (create from .env.smtp.example if needed):
+   WINDSAGE_DISCORD_UPDATES_WEBHOOK=https://discord.com/api/webhooks/...
+
+3) Test:
+   cd /Users/goldendreamers/windsage
+   scripts/notify-discord.sh "Windsage · done: Discord webhook test" "Agent ops posts to #windsage-updates are live."
+
+4) Also add that same env var as a Cursor Cloud Agent secret, and allow egress to discord.com (and discordapp.com) so cloud agents can post.
+
+Update docs/MAC_AGENT_PROMPTS.md (move this to Done) after the test message appears in #windsage-updates.
+```
+
+### 1) Deploy Wald-only wind-alert poller + confirm Mac is not polling
 
 **Why:** Wind alerts must run on Wald `windsage.service`, not a Mac `node server.mjs`. PR for `WINDSAGE_POLL=1` on Wald + poll off by default on laptop clones.
 
@@ -20,6 +47,7 @@ Cloud agents often cannot Tailscale/SSH to Wald or send `notify-email.sh` mail. 
 You are on the Mac at /Users/goldendreamers/windsage with Tailscale to Wald.
 Read file:///Users/goldendreamers/windsage/docs/MAC_AGENT_PROMPTS.md and file:///Users/goldendreamers/windsage/CLOUD_AGENT_CONTEXT.md.
 Do not wipe store.json / stations. Do not merge to main unless Nimrod asks.
+Do not copy the repo windsage.service over the live unit if it would change User= away from nimrodw.
 
 export PATH="$HOME/.local/node/bin:$PATH"
 cd /Users/goldendreamers/windsage
@@ -34,10 +62,6 @@ git pull --ff-only origin cursor/wald-alert-poll-a8a2
 
 2) Deploy cloud worker to Wald:
    npm run release:web
-   # If release:web cannot run, at least:
-   rsync -av --delete --exclude data --exclude web --exclude node_modules --exclude oauth.env --exclude scripts \
-     /Users/goldendreamers/windsage/code/cloud/ wald-mc:/data/windsage/
-   ssh wald-mc 'sudo cp /data/windsage/windsage.service /etc/systemd/system/windsage.service && sudo systemctl daemon-reload && sudo systemctl restart windsage'
 
 3) Prove Wald is the poller:
    ssh wald-mc 'systemctl is-active windsage; grep -E WINDSAGE_POLL /etc/systemd/system/windsage.service /data/windsage/windsage.service; journalctl -u windsage -n 40 --no-pager | tail -40'
@@ -53,7 +77,7 @@ Update docs/MAC_AGENT_PROMPTS.md (move this to Done with today’s date) after h
 Prefer absolute file:// and https:// links.
 ```
 
-### 1) Enable phone Web Push on Wald + release PR #8
+### 2) Enable phone Web Push on Wald + release PR #8
 
 **Why:** https://github.com/goldendreamers/windsage/pull/8 is **merged** (`594621e` on `main`). Live https://windsage.nimrod.bio/ still needs VAPID keys (if `webPush` is false) and `npm run release:web`. Windsage does **not** send wind-alert emails.
 
@@ -93,7 +117,7 @@ Prefer absolute file:// and https:// links.
 
 ### 2026-08-14 — PR #8 merged on GitHub (cloud agent)
 
-Merged https://github.com/goldendreamers/windsage/pull/8 (`594621e`). Web Push subscribe now syncs to Wald; test-push explains missing VAPID; Account/Download call out Safari-on-iPhone. Wald VAPID + `npm run release:web` still pending (item 1 above).
+Merged https://github.com/goldendreamers/windsage/pull/8 (`594621e`). Web Push subscribe now syncs to Wald; test-push explains missing VAPID; Account/Download call out Safari-on-iPhone. Wald VAPID + `npm run release:web` still pending (item 2 above).
 
 ### 2026-08-13 — Wald release of merged PR #7 (Mac + Tailscale)
 

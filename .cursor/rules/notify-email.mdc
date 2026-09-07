@@ -20,3 +20,4 @@ Guidelines:
 - Body: what happened / what you need, in a few lines; include URLs when relevant.
 - Prefer Resend/SMTP via the script; do not print secrets in the email body.
 - Still reply in chat; email is a required extra signal.
+- After a landed change, also post to Discord **windsage updates** (`scripts/notify-discord.sh`).
