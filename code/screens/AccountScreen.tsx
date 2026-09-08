@@ -42,11 +42,12 @@ type Props = {
     opts?: { importLocalGuestFollows?: boolean },
   ) => void;
   onLoggedOut: () => void;
+  onOpenMenu?: () => void;
   uiMode?: UiMode;
   onUiModeChange?: (mode: UiMode) => void;
 };
 
-export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeChange }: Props) {
+export function AccountScreen({ onBack, onAuthed, onLoggedOut, onOpenMenu, uiMode, onUiModeChange }: Props) {
   const [user, setUser] = useState<CloudUser | null>(null);
   const [providers, setProviders] = useState({ google: false, facebook: false, apple: false });
   const [username, setUsername] = useState('');
@@ -135,9 +136,24 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeC
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable style={styles.back} onPress={onBack}>
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable style={styles.back} onPress={onBack}>
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <Text style={styles.title}>Account</Text>
       <Text style={styles.sub}>
@@ -322,12 +338,12 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeC
       <Section
         title="Phone alerts"
         icon="bell"
-        hint="Lock-screen push only — Windsage does not send email when wind hits."
+        hint="Lock-screen push for phone alerts. Quiet / email uses the Google address on this account (Menu → Alerts)."
       >
         {webPushOn === false ? (
           <Text style={[styles.hint, styles.warnHint]}>
             Server phone push is off (no VAPID keys on Wald). Until that is set, the cloud cannot
-            wake your phone. Email is not a Windsage alert channel.
+            wake your phone. Quiet email alerts still need Google linked (Menu → Alerts).
           </Text>
         ) : null}
         {installPlatform === 'ios-other' ? (
@@ -416,6 +432,24 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   back: { alignSelf: 'flex-start', paddingVertical: 4 },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
   backText: { color: colors.accent, fontSize: 16, fontWeight: '700' },
   title: { color: colors.text, fontSize: 28, fontWeight: '800' },
   sub: { color: colors.muted, fontSize: 14, lineHeight: 20 },

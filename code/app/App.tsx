@@ -617,6 +617,7 @@ export default function App() {
       {downloadOpen ? (
         <DownloadScreen
           onBack={closeDownload}
+          onOpenMenu={() => setMenuOpen(true)}
           onOpenApp={() => {
             closeDownload();
           }}
@@ -624,6 +625,7 @@ export default function App() {
       ) : accountOpen ? (
         <AccountScreen
           onBack={() => setAccountOpen(false)}
+          onOpenMenu={() => setMenuOpen(true)}
           onAuthed={(payload) => void applyAccountPayload(payload)}
           uiMode={normalizeUiMode(settings.uiMode)}
           onUiModeChange={(mode) => {
@@ -737,8 +739,32 @@ export default function App() {
         notifyPrefs={settings.notifyPrefs}
         hasGoogleEmail={!!account?.sso?.google?.email}
         showCustom={normalizeUiMode(settings.uiMode) === 'advanced'}
+        simpleMode={normalizeUiMode(settings.uiMode) !== 'advanced'}
+        accountLabel={
+          account
+            ? account.username
+              ? `@${account.username}`
+              : account.sso.google?.email || 'Account'
+            : 'Account'
+        }
         onChangeNotifyPrefs={(prefs) => {
           void persistSettings({ ...settingsRef.current, notifyPrefs: prefs });
+        }}
+        onToggleSimple={(on) => {
+          void persistSettings({
+            ...settingsRef.current,
+            uiMode: on ? 'simple' : 'advanced',
+          });
+        }}
+        onAccount={() => {
+          setMenuOpen(false);
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAccountOpen(true);
+        }}
+        onInstall={() => {
+          setMenuOpen(false);
+          openDownload();
         }}
         onNeedGoogle={() => {
           setMenuOpen(false);

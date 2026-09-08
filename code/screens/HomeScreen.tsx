@@ -73,7 +73,6 @@ export function HomeScreen({
   refreshing,
   addOpen,
   cloudStatus,
-  accountLabel,
   onOpenAdd,
   onCloseAdd,
   onAdd,
@@ -81,7 +80,6 @@ export function HomeScreen({
   catalogStations = [],
   onRefresh,
   onOpenStation,
-  onOpenAccount,
   onOpenDownload,
   onOpenMenu,
   announcement,
@@ -200,17 +198,6 @@ export function HomeScreen({
                   : 'Follow spots or stations you care about'}
             </Text>
           </View>
-          {onOpenAccount ? (
-            <Pressable
-              style={styles.accountBtn}
-              onPress={() => {
-                void Haptics.selectionAsync();
-                onOpenAccount();
-              }}
-            >
-              <Text style={styles.accountBtnText}>{accountLabel || 'Account'}</Text>
-            </Pressable>
-          ) : null}
           <View style={styles.headerActions}>
             <Pressable
               style={styles.addBtn}

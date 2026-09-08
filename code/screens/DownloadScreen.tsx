@@ -15,9 +15,10 @@ const PUBLIC_APP = 'https://windsage.nimrod.bio/';
 type Props = {
   onBack: () => void;
   onOpenApp: () => void;
+  onOpenMenu?: () => void;
 };
 
-export function DownloadScreen({ onBack, onOpenApp }: Props) {
+export function DownloadScreen({ onBack, onOpenApp, onOpenMenu }: Props) {
   const [installed, setInstalled] = useState(() => isRunningAsInstalledApp());
   const [canPrompt, setCanPrompt] = useState(() => canPromptInstall());
   const [hint, setHint] = useState<string | null>(null);
@@ -93,15 +94,30 @@ export function DownloadScreen({ onBack, onOpenApp }: Props) {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable
-        style={styles.back}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          onBack();
-        }}
-      >
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable
+          style={styles.back}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            onBack();
+          }}
+        >
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.hero}>
         <Text style={styles.title}>Install Windsage</Text>
@@ -165,6 +181,24 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   back: { alignSelf: 'flex-start', paddingVertical: 4 },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
   backText: { color: colors.accent, fontSize: 16, fontWeight: '700' },
   hero: { gap: 8, marginBottom: 8 },
   title: { color: colors.text, fontSize: 32, fontWeight: '800' },

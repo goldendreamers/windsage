@@ -10,7 +10,7 @@ import {
   modelGustAtLeastAvg,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, resolveNotifyPrefs, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, resolveNotifyPrefs, ruleForMetric, toggleNotifyChannel } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -250,5 +250,9 @@ assert.equal(again.result.shouldNotify, true);
 const flipped = applyMonitoringSchedule({ enabled: true, monitoringUntilMs: Date.now() - 1 });
 assert.equal(flipped.enabled, false);
 assert.equal(flipped.monitoringUntilMs, null);
+
+assert.deepEqual(toggleNotifyChannel(['phone'], 'email'), ['phone', 'email']);
+assert.deepEqual(toggleNotifyChannel(['phone', 'email'], 'email'), ['phone']);
+assert.deepEqual(toggleNotifyChannel(['phone'], 'phone'), ['phone']);
 
 console.log('check-alerts: ok');

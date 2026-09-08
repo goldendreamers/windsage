@@ -110,6 +110,19 @@ export function notifyChannelsOf(prefs: NotifyPrefs | null | undefined): NotifyC
   return ['phone'];
 }
 
+export function toggleNotifyChannel(
+  current: NotifyChannel[] | null | undefined,
+  channel: NotifyChannel,
+): NotifyChannel[] {
+  const have = parseNotifyHow(current);
+  const on = have.includes(channel);
+  if (on) {
+    const next = have.filter((item) => item !== channel);
+    return next.length ? next : have;
+  }
+  return parseNotifyHow([...have, channel]);
+}
+
 export function utcDayKey(nowMs = Date.now()): string {
   return new Date(nowMs).toISOString().slice(0, 10);
 }

@@ -68,6 +68,7 @@ import {
   sendWebPushMany,
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
+import { sendAlertEmail } from './lib/alertEmail.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
 import { pollReason, shouldPollAlerts } from './lib/poll.mjs';
 import { applyBagMonitoringSchedules } from './lib/monitoring.mjs';
@@ -75,6 +76,7 @@ import {
   applyNotifyPrefs,
   bagGoogleEmail,
   normalizeNotifyPrefs,
+  resolveNotifyPrefs,
 } from './lib/notifyPrefs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,23 +225,35 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     liveStationId: station.liveStationId || station.linkedLiveStation?.id || sid,
     kind: 'alert',
   };
+  const googleEmail = bagGoogleEmail(bag);
+  const resolved = resolveNotifyPrefs(bag.notifyPrefs, {
+    hasGoogleEmail: !!googleEmail,
+  });
 
   let delivered = 0;
-  const pushTokens = collectPushTokens(bag);
-  for (const to of pushTokens) {
-    const r = await sendExpoPush({ to, title, body, data });
-    if (r?.ok) delivered += 1;
+  if (resolved.push) {
+    const pushTokens = collectPushTokens(bag);
+    for (const to of pushTokens) {
+      const r = await sendExpoPush({ to, title, body, data });
+      if (r?.ok) delivered += 1;
+    }
+
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, { title, body, data });
+      bag.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
   }
 
-  const subs = collectWebPushSubscriptions(bag);
-  if (subs.length) {
-    const { results, alive } = await sendWebPushMany(subs, { title, body, data });
-    bag.webPushSubscriptions = alive;
-    delivered += results.filter((r) => r.ok).length;
-  }
+  const emailed =
+    resolved.email && googleEmail
+      ? await sendAlertEmail({ title, body, to: googleEmail })
+      : { ok: false, skipped: true };
+  if (emailed?.ok) delivered += 1;
 
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length}`,
+    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0}`,
   );
   return { delivered, title, body };
 }
@@ -496,7 +510,7 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
             bag.snapshots[station.id].result = {
               ...result,
               shouldNotify: true,
-              message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+              message: `${result.message} · alert not delivered yet (allow notifications, install app, or link Google for email)`,
             };
           }
           console.warn(`[notify] no delivery for ${station.id} — will retry`);
@@ -1218,13 +1232,13 @@ async function handleDevices(req, res, pathname) {
     if (!delivered) {
       if (!webPushConfigured && !expoCount) {
         error =
-          'Phone lock-screen push is off on the server (missing WEB_PUSH_VAPID keys). Windsage does not send email alerts.';
+          'Phone lock-screen push is off on the server (missing WEB_PUSH_VAPID keys). Use Menu → Alerts → Quiet for email if Google is linked.';
       } else if (!subs.length && !expoCount) {
         error =
-          'This phone is not subscribed yet. Open the home-screen app in Safari (iPhone) or Chrome (Android), allow notifications, then try again. Windsage does not send email alerts.';
+          'This phone is not subscribed yet. Open the home-screen app in Safari (iPhone) or Chrome (Android), allow notifications, then try again. Quiet email still needs Google linked.';
       } else {
         error =
-          'Push send failed. Re-open the installed app, allow notifications, and try again. Windsage does not send email alerts.';
+          'Push send failed. Re-open the installed app, allow notifications, and try again. Quiet email still needs Google linked.';
       }
     }
     return json(res, delivered ? 200 : 400, {

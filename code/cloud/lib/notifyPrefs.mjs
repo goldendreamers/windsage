@@ -32,6 +32,16 @@ export function parseNotifyHow(raw) {
   return ordered.length ? ordered : ['phone'];
 }
 
+export function toggleNotifyChannel(current, channel) {
+  const have = parseNotifyHow(current);
+  const on = have.includes(channel);
+  if (on) {
+    const next = have.filter((item) => item !== channel);
+    return next.length ? next : have;
+  }
+  return parseNotifyHow([...have, channel]);
+}
+
 export function normalizeNotifyPrefs(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const preset = NOTIFY_PRESETS.has(String(src.preset)) ? src.preset : 'normal';
