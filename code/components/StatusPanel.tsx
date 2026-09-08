@@ -14,6 +14,8 @@ type Props = {
   progress: number;
   /** Alert threshold only, e.g. "15 kt" — never a live reading. */
   ruleHint?: string | null;
+  /** Evaluated live metric, e.g. "18.4 kt" — never the GFS hour. */
+  evaluatedLabel?: string | null;
 };
 
 export function StatusPanel({
@@ -22,6 +24,7 @@ export function StatusPanel({
   sustainedMinutes,
   progress,
   ruleHint,
+  evaluatedLabel,
 }: Props) {
   const width = useRef(new Animated.Value(0)).current;
 
@@ -53,8 +56,10 @@ export function StatusPanel({
       : condition || 'Waiting for first check…';
 
   const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
+  const liveAt = String(evaluatedLabel ?? '').trim() || null;
   const metaParts = [
     !paused && thresholdText && condition ? condition : null,
+    result?.conditionMet && liveAt ? `at ${liveAt}` : null,
     result?.conditionMet
       ? `Held ${formatDuration(result.sustainedMs ?? 0)} of ${sustainedMinutes}m`
       : `Need ${sustainedMinutes}m steady`,

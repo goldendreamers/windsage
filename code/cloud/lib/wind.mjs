@@ -68,8 +68,31 @@ function normalizeReading(raw) {
     wave_height: pickWaveHeight(raw),
     datetime: typeof raw.datetime === 'string' ? raw.datetime : null,
     unixtime: asNumber(raw.unixtime),
+    source: 'live',
   };
 }
+
+/** True when this object is a Windguru GFS/model hour, not an anemometer sample. */
+export function isForecastModelReading(reading) {
+  return reading?.source === 'forecast';
+}
+
+/**
+ * GFS gust diagnostic is often a few tenths below 10m wind at the same hour.
+ * Only model hours get this floor — live sensors stay raw.
+ */
+export function modelGustAtLeastAvg(wind_avg, wind_max) {
+  if (wind_max == null) return null;
+  if (wind_avg == null) return wind_max;
+  return Math.max(wind_max, wind_avg);
+}
+
+/**
+ * Live stations report ~10 min averages. Gaps bigger than this are not a
+ * continuous hold — GFS 3-hour steps used to walk as one run and inflate Held
+ * to 20h while the on-screen hour sat at 8.9 kt.
+ */
+export const MAX_SUSTAINED_SAMPLE_GAP_SEC = 25 * 60;
 
 const FETCH_TIMEOUT_MS = 12_000;
 
@@ -372,6 +395,10 @@ export async function fixSpotStations(stations = []) {
   return { stations: out, changed };
 }
 
+/**
+ * Live reading for a Windguru station ID or spot ID (spot→nearest live at fetch).
+ * Never returns a GFS/model hour.
+ */
 export async function fetchCurrentReading(stationId) {
   const resolved = await resolveWindguruId(stationId);
   if (!resolved.liveStationId) {
@@ -382,7 +409,7 @@ export async function fetchCurrentReading(stationId) {
 
 /**
  * Current (nearest-hour) GFS/model forecast for a Windguru spot.
- * Used when a spot has no native live sensor — UI shows forecast; alerts use nearest live.
+ * UI context only — alerts must keep using the nearest live anemometer.
  */
 export async function fetchSpotForecastNow(spotId, preferredModel = null) {
   const id = String(spotId || '').trim();
@@ -449,17 +476,20 @@ export async function fetchSpotForecastNow(spotId, preferredModel = null) {
       if (wave != null) break;
     }
   }
+  const wind_avg = asNumber(windspd[best]);
+  const wind_max = modelGustAtLeastAvg(wind_avg, asNumber(gust[best]));
 
   return {
     reading: {
-      wind_avg: asNumber(windspd[best]),
-      wind_max: asNumber(gust[best]),
+      wind_avg,
+      wind_max,
       wind_min: null,
       wind_direction: asNumber(winddir[best]),
       temperature: asNumber(tmp[best]),
       wave_height: wave,
       datetime: new Date(unixtime * 1000).toISOString(),
       unixtime,
+      source: 'forecast',
     },
     modelName:
       fcst.model_name ||
@@ -472,7 +502,7 @@ export async function fetchSpotForecastNow(spotId, preferredModel = null) {
   };
 }
 
-/** Spot uses nearest-live fallback (no native sensor on the spot). */
+/** Spot has no native live sensor — UI may show GFS; alerts still use nearest live. */
 export function isForecastOnlySpot(station) {
   return (
     station?.kind === 'spot' &&
@@ -573,7 +603,7 @@ function formatDirectionSector(fromDeg, toDeg) {
   return `${from}–${to}°`;
 }
 
-export function sustainedDurationMs(history, rule) {
+export function sustainedDurationMs(history, rule, maxGapSec = MAX_SUSTAINED_SAMPLE_GAP_SEC) {
   if (!history.unixtime?.length) return 0;
   const points = history.unixtime
     .map((ts, index) => ({ ts, value: history.values[index] ?? null }))
@@ -582,6 +612,8 @@ export function sustainedDurationMs(history, rule) {
   if (!points.length || !meetsRule(points[0].value, rule)) return 0;
   let oldestOk = points[0].ts;
   for (let i = 1; i < points.length; i += 1) {
+    const gap = points[i - 1].ts - points[i].ts;
+    if (gap > maxGapSec) break;
     if (!meetsRule(points[i].value, rule)) break;
     oldestOk = points[i].ts;
   }
@@ -591,6 +623,7 @@ export function sustainedDurationMs(history, rule) {
 /** True when the current reading fully satisfies the station alert rule. */
 export function alertConditionMet(reading, station) {
   if (!reading || reading.error) return false;
+  if (isForecastModelReading(reading)) return false;
   const metric = station.rule?.metric;
   if (!metric || !station.rule) return false;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
@@ -620,6 +653,27 @@ export function needsAlertHistory(reading, station, prev) {
 }
 
 export function evaluateAlert(reading, history, station, prev, nowMs = Date.now()) {
+  if (isForecastModelReading(reading)) {
+    return {
+      result: {
+        reading: null,
+        metricValue: null,
+        conditionMet: false,
+        sustainedMs: 0,
+        shouldNotify: false,
+        message: 'Need a live station — model forecast is not the alert',
+      },
+      nextState: {
+        conditionSinceMs: null,
+        notifiedForRun: false,
+        lastCheckMs: nowMs,
+        lastValue: null,
+        lastError: 'Refused to evaluate a model forecast as a live reading',
+        lastStationId: station.stationId,
+      },
+    };
+  }
+
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
   const wavePrimary = metric === 'wave_height';

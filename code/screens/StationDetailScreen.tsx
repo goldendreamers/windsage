@@ -17,6 +17,7 @@ import {
   displayName,
   followSourceRef,
   formatAlertTrigger,
+  formatReadingNumber,
   ruleForMetric,
 } from '../shared/defaults';
 import {
@@ -494,18 +495,13 @@ export function StationDetailScreen({
           icon="wind"
           hint={
             result?.forecastModel
-              ? `${result.forecastModel} · nearest model hour for this spot`
-              : 'Model forecast for this spot (no native live sensor)'
-          }
-          right={
-            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
-              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
-            </Pressable>
+              ? `${result.forecastModel} · nearest model hour at this spot — not what the alert watches`
+              : 'Model forecast for this spot — not what the alert watches'
           }
         >
           <View style={styles.metricsRow}>
             {metricReadingPills(station.rule.metric, forecast, {
-              emphasize: true,
+              emphasize: false,
               windDirEnabled: !!station.rule.windDirEnabled,
               maxWindEnabled: !!station.rule.maxWindEnabled,
               maxWaveEnabled: !!station.rule.maxWaveEnabled,
@@ -532,16 +528,14 @@ export function StationDetailScreen({
             : undefined
         }
         right={
-          showForecast ? undefined : (
-            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
-              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
-            </Pressable>
-          )
+          <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
+            <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
+          </Pressable>
         }
       >
         <View style={styles.metricsRow}>
           {metricReadingPills(station.rule.metric, reading, {
-            emphasize: !showForecast,
+            emphasize: true,
             windDirEnabled: !!station.rule.windDirEnabled,
             maxWindEnabled: !!station.rule.maxWindEnabled,
             maxWaveEnabled: !!station.rule.maxWaveEnabled,
@@ -562,6 +556,11 @@ export function StationDetailScreen({
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
           ruleHint={formatAlertTrigger(station.rule, 'short')}
+          evaluatedLabel={
+            result?.metricValue != null
+              ? `${formatReadingNumber(result.metricValue)} ${metricUnit(station.rule.metric)}`
+              : null
+          }
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>

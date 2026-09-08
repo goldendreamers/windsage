@@ -97,7 +97,9 @@ export async function resolveFollowInput(provider, input, extras = {}) {
 }
 
 /**
- * @returns {Promise<object>} StationReading, or for location: reading with _blend meta
+ * @returns {Promise<object>} StationReading, or for location: reading with _blend meta.
+ * Windguru forecast-only spots still fetch the nearest live anemometer here.
+ * Never return a GFS/model hour as `current` — that is `fetchProviderForecast`.
  */
 export async function fetchProviderCurrent(station, ctx = {}) {
   const provider = providerOf(station);

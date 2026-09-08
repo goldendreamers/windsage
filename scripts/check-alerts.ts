@@ -3,8 +3,11 @@ import {
   directionInSector,
   evaluateAlert,
   gustSpreadOk,
+  isForecastModelReading,
   maxWaveOk,
   maxWindOk,
+  MAX_SUSTAINED_SAMPLE_GAP_SEC,
+  modelGustAtLeastAvg,
   sustainedDurationMs,
 } from '../code/core/alerts';
 import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
@@ -171,5 +174,47 @@ assert.notEqual(alertCol.value, String(below.result.metricValue));
 assert.equal(alertConditionLabel(below.result.message), null); // bare reading → not a status chip
 assert.equal(alertConditionLabel('Holding · 16 kt'), 'Holding');
 assert.equal(alertConditionLabel('Too gusty'), 'Too gusty');
+
+assert.equal(isForecastModelReading({ source: 'forecast' }), true);
+assert.equal(isForecastModelReading({ source: 'live' }), false);
+assert.equal(modelGustAtLeastAvg(8.9, 8.5), 8.9);
+assert.equal(modelGustAtLeastAvg(8.9, 12.2), 12.2);
+
+const gfsHistory: HistorySeries = {
+  unixtime: [nowSec - 21 * 3600, nowSec - 18 * 3600, nowSec - 15 * 3600, nowSec],
+  values: [18, 17, 16, 8.9],
+};
+assert.equal(sustainedDurationMs(gfsHistory, station.rule), 0);
+assert.ok(MAX_SUSTAINED_SAMPLE_GAP_SEC < 3 * 3600);
+
+const gfsHoldHistory: HistorySeries = {
+  unixtime: [
+    nowSec - 21 * 3600,
+    nowSec - 18 * 3600,
+    nowSec - 15 * 3600,
+    nowSec - 12 * 3600,
+    nowSec,
+  ],
+  values: [18, 17, 16, 16, 16],
+};
+assert.equal(sustainedDurationMs(gfsHoldHistory, station.rule), 0);
+
+const gfsReading: StationReading = {
+  ...reading(8.9, 8.5),
+  datetime: '2026-09-08T09:00:00.000Z',
+  source: 'forecast',
+};
+const hotPrev = {
+  ...DEFAULT_ALERT_STATE,
+  conditionSinceMs: Date.now() - 21 * 60 * 60 * 1000,
+  notifiedForRun: true,
+  lastStationId: station.stationId,
+};
+const refused = evaluateAlert(gfsReading, gfsHistory, station, hotPrev, Date.now());
+assert.equal(refused.result.conditionMet, false);
+assert.equal(refused.result.reading, null);
+assert.equal(refused.nextState.conditionSinceMs, null);
+assert.equal(refused.nextState.notifiedForRun, false);
+assert.match(refused.result.message, /live station/i);
 
 console.log('check-alerts: ok');

@@ -135,6 +135,11 @@ export interface StationReading {
   wave_height: number | null;
   datetime: string | null;
   unixtime: number | null;
+  /**
+   * `forecast` = Windguru GFS/model hour. Alerts must never evaluate this.
+   * Live anemometers/blends omit it or use `live`.
+   */
+  source?: 'live' | 'forecast';
 }
 
 export interface HistorySeries {
@@ -159,8 +164,8 @@ export interface CheckResult {
   /** Live sensor reading used for alert evaluation (native or nearest). */
   reading: StationReading | null;
   /**
-   * Spot model forecast “now” — set when the followed spot has no native live sensor.
-   * Home/detail show this; alerts still use `reading` from the nearest live station.
+   * Spot model forecast “now” — context only when the followed spot has no native live sensor.
+   * Never used for alert evaluation, home Alert-column hold, or StatusPanel.
    */
   forecast?: StationReading | null;
   /** Windguru model label for `forecast` (e.g. GFS 13 km). */

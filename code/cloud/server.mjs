@@ -394,10 +394,15 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       const cached = readingCache.get(key);
       const priorSnap = bag.snapshots[station.id];
 
-      if (!cached || cached.error) {
-        const message = cached?.error || 'No reading';
+      if (!cached || cached.error || cached.source === 'forecast') {
+        const message =
+          cached?.source === 'forecast'
+            ? 'Need a live station — model forecast is not the alert'
+            : cached?.error || 'No reading';
         const nextState = {
           ...prev,
+          conditionSinceMs: null,
+          notifiedForRun: false,
           lastCheckMs: Date.now(),
           lastError: message,
           lastStationId: sid,

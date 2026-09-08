@@ -13,6 +13,32 @@ function meetsRule(value: number | null, rule: FollowedStation['rule']): boolean
   return rule.comparison === 'gte' ? value >= rule.threshold : value <= rule.threshold;
 }
 
+/** True when this object is a Windguru GFS/model hour, not an anemometer sample. */
+export function isForecastModelReading(
+  reading: { source?: string | null } | null | undefined,
+): boolean {
+  return reading?.source === 'forecast';
+}
+
+/**
+ * GFS gust diagnostic is often a few tenths below 10m wind at the same hour.
+ * Live sensors should stay raw; only model hours get this floor.
+ */
+export function modelGustAtLeastAvg(
+  wind_avg: number | null,
+  wind_max: number | null,
+): number | null {
+  if (wind_max == null) return null;
+  if (wind_avg == null) return wind_max;
+  return Math.max(wind_max, wind_avg);
+}
+
+/**
+ * Live stations report ~10 min averages. Gaps bigger than this are not “continuous
+ * hold” — GFS 3-hour steps used to walk as one run and inflate Held to 20h.
+ */
+export const MAX_SUSTAINED_SAMPLE_GAP_SEC = 25 * 60;
+
 /** Gust − avg (knots). Null if either reading is missing. */
 export function gustSpreadKnots(reading: StationReading): number | null {
   if (reading.wind_avg == null || reading.wind_max == null) return null;
@@ -97,6 +123,7 @@ export function formatDirectionSector(fromDeg: number, toDeg: number): string {
 export function sustainedDurationMs(
   history: HistorySeries,
   rule: FollowedStation['rule'],
+  maxGapSec = MAX_SUSTAINED_SAMPLE_GAP_SEC,
 ): number {
   if (history.unixtime.length === 0) return 0;
 
@@ -110,6 +137,8 @@ export function sustainedDurationMs(
 
   let oldestOk = points[0].ts;
   for (let i = 1; i < points.length; i += 1) {
+    const gap = points[i - 1].ts - points[i].ts;
+    if (gap > maxGapSec) break;
     if (!meetsRule(points[i].value, rule)) break;
     oldestOk = points[i].ts;
   }
@@ -125,6 +154,27 @@ export function evaluateAlert(
   prev: AlertState,
   nowMs = Date.now(),
 ): { result: CheckResult; nextState: AlertState } {
+  if (isForecastModelReading(reading)) {
+    return {
+      result: {
+        reading: null,
+        metricValue: null,
+        conditionMet: false,
+        sustainedMs: 0,
+        shouldNotify: false,
+        message: 'Need a live station — model forecast is not the alert',
+      },
+      nextState: {
+        conditionSinceMs: null,
+        notifiedForRun: false,
+        lastCheckMs: nowMs,
+        lastValue: null,
+        lastError: 'Refused to evaluate a model forecast as a live reading',
+        lastStationId: station.stationId,
+      },
+    };
+  }
+
   const metric = station.rule.metric;
   const windPrimary = metric === 'wind_avg' || metric === 'wind_max';
   const wavePrimary = metric === 'wave_height';

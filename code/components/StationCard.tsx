@@ -31,9 +31,7 @@ export const StationCard = memo(function StationCard({
   const provider = normalizeProvider(station.provider);
   const providerShort = PROVIDER_META[provider]?.short || 'WG';
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
-  const displayReading =
-    forecastOnly && result?.forecast ? result.forecast : reading;
-  const showingForecast = forecastOnly && !!result?.forecast;
+  const displayReading = reading ?? result?.reading ?? null;
   const holding = !!result?.conditionMet;
   const errored = !!alertState?.lastError && !reading && !result?.forecast;
   const prev = alertState?.lastValue;
@@ -55,7 +53,7 @@ export const StationCard = memo(function StationCard({
           : '↓'
       : '';
 
-  const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, showingForecast);
+  const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, false);
   const alertCol = alertThresholdDisplay(station.rule);
 
   return (
@@ -78,11 +76,8 @@ export const StationCard = memo(function StationCard({
             <Text style={styles.meta} numberOfLines={2}>
               {providerShort} · {followSourceRef(station)}
               {station.enabled === false ? ' · paused' : ''}
-              {showingForecast
-                ? ` · forecast${result?.forecastModel ? ` (${result.forecastModel})` : ''}`
-                : ''}
               {forecastOnly && station.linkedLiveStation
-                ? ` · alerts via #${station.linkedLiveStation.id}`
+                ? ` · alerts via live #${station.linkedLiveStation.id}`
                 : ''}
             </Text>
             {station.liveLinkWarning && station.linkedLiveStation ? (
