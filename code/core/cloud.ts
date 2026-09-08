@@ -436,9 +436,86 @@ export async function syncStationsToCloud(
   };
 }
 
+export type CatalogSearchResult = {
+  stations: Array<
+    Pick<
+      FollowedStation,
+      | 'provider'
+      | 'stationId'
+      | 'kind'
+      | 'sourceName'
+      | 'liveStationId'
+      | 'linkedLiveStation'
+      | 'liveLinkWarning'
+    >
+  >;
+  total: number;
+  catalogSize: number;
+  fromServer: boolean;
+};
+
+function mapCatalogRows(
+  rows: Array<{
+    provider?: FollowedStation['provider'];
+    stationId?: string;
+    kind?: FollowedStation['kind'];
+    sourceName?: string | null;
+    liveStationId?: string | null;
+    linkedLiveStation?: FollowedStation['linkedLiveStation'];
+    liveLinkWarning?: string | null;
+  }>,
+): CatalogSearchResult['stations'] {
+  return rows
+    .filter((s) => s.stationId?.trim())
+    .map((s) => ({
+      provider: s.provider || 'windguru',
+      stationId: String(s.stationId).trim(),
+      kind: s.kind === 'spot' ? 'spot' : 'station',
+      sourceName: s.sourceName ?? null,
+      liveStationId: s.liveStationId ?? null,
+      linkedLiveStation: s.linkedLiveStation ?? null,
+      liveLinkWarning: s.liveLinkWarning ?? null,
+    }));
+}
+
+/** Ranked lookup over the live directory. Server searches all ~6,900 names; client does not need the full dump. */
+export async function fetchCatalogSearch(
+  query: string,
+  opts?: { limit?: number; provider?: string | null; kind?: string | null },
+): Promise<CatalogSearchResult> {
+  const q = query.trim();
+  const limit = opts?.limit && opts.limit > 0 ? Math.min(opts.limit, 400) : 40;
+  if (!q) return { stations: [], total: 0, catalogSize: 0, fromServer: false };
+  try {
+    const params = new URLSearchParams();
+    params.set('q', q);
+    params.set('limit', String(limit));
+    if (opts?.provider) params.set('provider', opts.provider);
+    if (opts?.kind) params.set('kind', opts.kind);
+    const data = await cloudFetch<{
+      stations?: CatalogSearchResult['stations'];
+      total?: number;
+      catalogSize?: number;
+      query?: string;
+    }>(`/v1/catalog/stations?${params.toString()}`, { method: 'GET' });
+    if (Array.isArray(data.stations) && typeof data.total === 'number') {
+      return {
+        stations: mapCatalogRows(data.stations),
+        total: data.total,
+        catalogSize: Number(data.catalogSize) || 0,
+        fromServer: true,
+      };
+    }
+  } catch {
+    /* fall through — caller ranks a locally cached catalog */
+  }
+  return { stations: [], total: 0, catalogSize: 0, fromServer: false };
+}
+
 export async function fetchCatalogStations(): Promise<
   Pick<
     FollowedStation,
+    | 'provider'
     | 'stationId'
     | 'kind'
     | 'sourceName'
@@ -450,6 +527,7 @@ export async function fetchCatalogStations(): Promise<
   try {
     const data = await cloudFetch<{
       stations: Array<{
+        provider?: FollowedStation['provider'];
         stationId: string;
         kind?: FollowedStation['kind'];
         sourceName?: string | null;
@@ -458,9 +536,10 @@ export async function fetchCatalogStations(): Promise<
         liveLinkWarning?: string | null;
       }>;
     }>('/v1/catalog/stations', { method: 'GET' });
-    return (data.stations || [])
+    const rows = (data.stations || [])
       .filter((s) => s.stationId?.trim())
       .map((s) => ({
+        provider: s.provider || 'windguru',
         stationId: String(s.stationId).trim(),
         kind: s.kind === 'spot' ? 'spot' : 'station',
         sourceName: s.sourceName ?? null,
@@ -468,6 +547,9 @@ export async function fetchCatalogStations(): Promise<
         linkedLiveStation: s.linkedLiveStation ?? null,
         liveLinkWarning: s.liveLinkWarning ?? null,
       }));
+    // Old servers dumped the full ~6,900-row directory on empty GET — never keep that in RN state.
+    if (rows.length > 400) return [];
+    return rows;
   } catch {
     return [];
   }

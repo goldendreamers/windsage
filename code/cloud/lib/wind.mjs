@@ -183,6 +183,81 @@ export async function getStationListForNearby() {
   return getStationList();
 }
 
+function catalogFromStationList(list) {
+  const out = [];
+  const seen = new Set();
+  for (const row of list) {
+    const rawId = row?.id_station;
+    if (rawId == null || rawId === '') continue;
+    const n = Number(rawId);
+    if (!Number.isFinite(n)) continue;
+    const sid = String(Math.trunc(n));
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    const name = String(row.name || row.spotname || '').trim();
+    const lat = asNumber(row.lat);
+    const lon = asNumber(row.lon);
+    out.push({
+      provider: 'windguru',
+      stationId: sid,
+      kind: 'station',
+      sourceName: name || null,
+      liveStationId: sid,
+      linkedLiveStation: null,
+      liveLinkWarning: null,
+      ...(lat != null && lon != null ? { lat, lon } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Compact live-station directory for Follow search (names + ids only).
+ * Fetched from Windguru station_list and cached in memory with that list.
+ */
+export async function windguruCatalogStations() {
+  const { persistWindguruNameFiles, readCompactCatalog } = await import('./windguruNames.mjs');
+  try {
+    const list = await getStationList();
+    const out = catalogFromStationList(list);
+    persistWindguruNameFiles(out).catch((e) => {
+      console.error('[windsage-cloud] windguru names file write failed', e);
+    });
+    return out;
+  } catch (error) {
+    const cached = await readCompactCatalog();
+    if (cached.length) return cached;
+    throw error;
+  }
+}
+
+export function shouldResolveWindguruCatalogQuery(query, catalog) {
+  const parsed = parseWindguruRef(query);
+  if (!parsed) return false;
+  if (parsed.kindHint === 'spot') return true;
+  return !(catalog || []).some(
+    (row) =>
+      String(row?.provider || 'windguru').toLowerCase() === 'windguru' &&
+      String(row?.stationId ?? '').trim() === parsed.id,
+  );
+}
+
+/** Catalog row for a resolved Windguru station or forecast spot. */
+export function catalogRowFromWindguruResolved(resolved) {
+  const id = String(resolved?.inputId || '').trim();
+  if (!id) return null;
+  const kind = resolved.kind === 'spot' ? 'spot' : 'station';
+  return {
+    provider: 'windguru',
+    stationId: id,
+    kind,
+    sourceName: resolved.spotName || null,
+    liveStationId: resolved.liveStationId || (kind === 'station' ? id : null),
+    linkedLiveStation: resolved.linkedLiveStation || null,
+    liveLinkWarning: resolved.warning || null,
+  };
+}
+
 /** Nearest live station to a lat/lon from Windguru's public station_list. */
 export async function findNearestLiveStation(lat, lon) {
   const latitude = asNumber(lat);

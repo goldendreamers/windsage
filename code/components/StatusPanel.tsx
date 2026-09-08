@@ -16,6 +16,8 @@ type Props = {
   ruleHint?: string | null;
   /** Evaluated live metric, e.g. "18.4 kt" — never the GFS hour. */
   evaluatedLabel?: string | null;
+  /** Hide caption noise in simple mode (Wald quiet simple). */
+  quiet?: boolean;
 };
 
 export function StatusPanel({
@@ -25,6 +27,7 @@ export function StatusPanel({
   progress,
   ruleHint,
   evaluatedLabel,
+  quiet = false,
 }: Props) {
   const width = useRef(new Animated.Value(0)).current;
 
@@ -92,10 +95,14 @@ export function StatusPanel({
         />
       </View>
 
-      <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
-      {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
-        <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
-      ) : null}
+      {quiet ? null : (
+        <>
+          <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
+          {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
+            <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
+          ) : null}
+        </>
+      )}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>
   );

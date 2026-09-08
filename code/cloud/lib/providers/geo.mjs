@@ -264,6 +264,29 @@ export async function reverseGeocode(lat, lon, { via } = {}) {
   };
 }
 
+const PLACE_GEO_TTL_MS = 30 * 60 * 1000;
+const placeGeoCache = new Map();
+
+/** Fast place pin for Follow search — Photon / Open-Meteo, no Maps scrape. */
+export async function geocodePlaceName(query) {
+  const q = String(query || '').trim();
+  if (q.length < 2 || /^\d+$/.test(q)) return null;
+  const key = q.toLowerCase();
+  const cached = placeGeoCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.value;
+  let hits = await photonSearch(q, 1);
+  if (!hits.length) hits = await openMeteoSearch(q, 1);
+  const value = hits[0]
+    ? { lat: hits[0].lat, lon: hits[0].lon, address: hits[0].address || q }
+    : null;
+  if (placeGeoCache.size > 200) {
+    const first = placeGeoCache.keys().next().value;
+    if (first) placeGeoCache.delete(first);
+  }
+  placeGeoCache.set(key, { value, expires: Date.now() + PLACE_GEO_TTL_MS });
+  return value;
+}
+
 export async function geocodeAddress(query, opts = {}) {
   const q = String(query || '').trim();
   const via = opts.via;

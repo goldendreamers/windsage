@@ -24,8 +24,8 @@ import {
   cacheKey,
   mapsStatus,
 } from './lib/providers/index.mjs';
-import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
-import { autocompletePlaces, geocodeAddress, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
+import { normalizeWindguruFollowInput, fetchSpotForecastNow, parseWindguruRef, resolveWindguruId, windguruCatalogStations, shouldResolveWindguruCatalogQuery, catalogRowFromWindguruResolved } from './lib/wind.mjs';
+import { autocompletePlaces, geocodeAddress, geocodePlaceName, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
 import { previewMapLocation, resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
@@ -72,6 +72,14 @@ import { sendAlertEmail } from './lib/alertEmail.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
 import { pollReason, shouldPollAlerts } from './lib/poll.mjs';
 import { applyBagMonitoringSchedules } from './lib/monitoring.mjs';
+import {
+  mergeCatalogRows,
+  nearbyCatalogStations,
+  prependCatalogHit,
+  searchCatalogStations,
+  unionCatalogHits,
+} from './lib/catalogSearch.mjs';
+import { NAME_FILES, persistWindguruNameFiles } from './lib/windguruNames.mjs';
 import {
   applyNotifyPrefs,
   bagGoogleEmail,
@@ -1468,13 +1476,98 @@ async function handleApi(req, res, pathname, url) {
     }
   }
 
-  // Shared catalog for follow suggestions only — never auto-added to user bags.
+  // Follow search directory: Windguru live names (public station_list) + a
+  // PII-stripped leftover catalog. Personal follows are not copied here.
+  // With ?q= rank over the full directory and return a page (phones never need all ~7k rows).
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
+    const shared = publicCatalogStations(store);
+    let windguru = [];
+    try {
+      windguru = await windguruCatalogStations();
+    } catch (e) {
+      console.error('[windsage-cloud] windguru directory failed', e);
+    }
+    const merged = mergeCatalogRows([windguru, shared]);
+    const q = String(url.searchParams.get('q') || '').trim();
+    const limitRaw = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+    const provider = String(url.searchParams.get('provider') || '').trim() || null;
+    const kind = String(url.searchParams.get('kind') || '').trim() || null;
+    if (!q) {
+      return json(res, 200, {
+        ok: true,
+        stations: shared.slice(0, limit),
+        total: shared.length,
+        catalogSize: merged.length,
+      });
+    }
+    const found = searchCatalogStations(merged, q, { limit: Math.max(limit, 80), provider, kind });
+    let stations = found.stations;
+    let total = found.total;
+    if (shouldResolveWindguruCatalogQuery(q, merged) && (!provider || provider === 'windguru')) {
+      try {
+        const parsed = parseWindguruRef(q);
+        if (parsed) {
+          const resolved = await resolveWindguruId(parsed.id);
+          const hit = catalogRowFromWindguruResolved(resolved);
+          if (hit) {
+            const already = stations.some(
+              (row) =>
+                String(row.provider || 'windguru').toLowerCase() === 'windguru' &&
+                String(row.stationId) === hit.stationId,
+            );
+            stations = prependCatalogHit(stations, hit, limit);
+            if (!already) total += 1;
+          }
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] windguru catalog id resolve failed', e);
+      }
+    }
+    if (!/^\d+$/.test(q) && total < 12) {
+      try {
+        const geo = await geocodePlaceName(q);
+        if (geo?.lat != null && geo?.lon != null) {
+          const extra = nearbyCatalogStations(merged, geo.lat, geo.lon, {
+            radiusKm: 80,
+            limit: 80,
+            provider,
+            kind,
+          });
+          const combined = unionCatalogHits(stations, extra, limit);
+          stations = combined.stations;
+          total = combined.total;
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] catalog place expand failed', e);
+      }
+    }
     return json(res, 200, {
       ok: true,
-      stations: publicCatalogStations(store),
+      stations,
+      total,
+      catalogSize: merged.length,
+      query: q,
+      limit,
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/catalog/station-names') {
+    const filePath = path.join(DATA_DIR, NAME_FILES.meta);
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const meta = JSON.parse(raw);
+      return json(res, 200, { ok: true, ...meta });
+    } catch {
+      try {
+        const rows = await windguruCatalogStations();
+        const meta = await persistWindguruNameFiles(rows, [WEB_DIR]);
+        return json(res, 200, { ok: true, ...meta });
+      } catch (e) {
+        return json(res, 503, { error: e.message || 'Windguru names file not ready' });
+      }
+    }
   }
 
   const authHandled = await handleAuth(req, res, pathname, url);

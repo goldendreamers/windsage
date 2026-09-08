@@ -18,6 +18,7 @@ import {
   followSourceRef,
   formatAlertTrigger,
   formatReadingNumber,
+  formatWindFromDisplay,
   monitoringScheduleSummary,
   ruleForMetric,
 } from '../shared/defaults';
@@ -47,7 +48,9 @@ import { MetricChooser } from '../components/MetricChooser';
 import { MetricPill } from '../components/MetricPill';
 import { MonitoringDurationModal } from '../components/MonitoringDurationModal';
 import { Section } from '../components/Section';
+import { SimpleNotifyPicker } from '../components/SimpleNotifyPicker';
 import { StatusPanel } from '../components/StatusPanel';
+import { WarnNumberInput } from '../components/WarnNumberInput';
 
 type ReadingLike = {
   wind_avg?: number | null;
@@ -66,12 +69,10 @@ function metricReadingPills(
     windDirEnabled: boolean;
     maxWindEnabled?: boolean;
     maxWaveEnabled?: boolean;
+    simpleMode?: boolean;
   },
 ) {
-  const dir =
-    data?.wind_direction == null || !Number.isFinite(Number(data.wind_direction))
-      ? null
-      : Math.round(Number(data.wind_direction));
+  const dir = formatWindFromDisplay(data?.wind_direction, !!opts.simpleMode);
 
   if (metric === 'temperature') {
     return [
@@ -96,8 +97,8 @@ function metricReadingPills(
       },
       {
         title: 'Dir',
-        value: dir,
-        unit: '°',
+        value: dir.value,
+        unit: dir.unit,
         icon: brandImages.wind,
         emphasize: opts.windDirEnabled,
       },
@@ -131,8 +132,8 @@ function metricReadingPills(
     },
     {
       title: 'Dir',
-      value: dir,
-      unit: '°',
+      value: dir.value,
+      unit: dir.unit,
       icon: brandImages.wind,
       emphasize: opts.windDirEnabled,
     },
@@ -539,6 +540,7 @@ export function StationDetailScreen({
               windDirEnabled: !!station.rule.windDirEnabled,
               maxWindEnabled: !!station.rule.maxWindEnabled,
               maxWaveEnabled: !!station.rule.maxWaveEnabled,
+              simpleMode,
             }).map((pill) => (
               <MetricPill
                 key={`fcst-${pill.title}`}
@@ -573,6 +575,7 @@ export function StationDetailScreen({
             windDirEnabled: !!station.rule.windDirEnabled,
             maxWindEnabled: !!station.rule.maxWindEnabled,
             maxWaveEnabled: !!station.rule.maxWaveEnabled,
+            simpleMode,
           }).map((pill) => (
             <MetricPill
               key={`live-${pill.title}`}
@@ -595,6 +598,7 @@ export function StationDetailScreen({
               ? `${formatReadingNumber(result.metricValue)} ${metricUnit(station.rule.metric)}`
               : null
           }
+          quiet={simpleMode}
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>
@@ -632,6 +636,15 @@ export function StationDetailScreen({
         ) : null}
       </Section>
 
+      {simpleMode ? (
+        <Section title="Ping me" icon="bell">
+          <SimpleNotifyPicker
+            rule={station.rule}
+            onChange={(rule) => onPersist({ ...station, rule })}
+            hideLabel
+          />
+        </Section>
+      ) : (
       <Section title="Alert rule" icon="bell" hint={alertHint}>
         <MetricChooser
           value={station.rule.metric}
@@ -670,51 +683,29 @@ export function StationDetailScreen({
             })}
           </View>
         </View>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(station.rule.threshold)}
-          onChangeText={(text) => {
-            const threshold = Number(text.replace(',', '.'));
-            onChange({
-              ...station,
-              rule: {
-                ...station.rule,
-                threshold: Number.isFinite(threshold) ? threshold : station.rule.threshold,
-              },
-            });
-          }}
-          onEndEditing={(e) => {
-            const threshold = Number(e.nativeEvent.text.replace(',', '.'));
-            onPersist({
-              ...station,
-              rule: {
-                ...station.rule,
-                threshold: Number.isFinite(threshold) ? threshold : station.rule.threshold,
-              },
-            });
-          }}
-          keyboardType="decimal-pad"
+          value={station.rule.threshold}
+          onLiveChange={(threshold) =>
+            onChange({ ...station, rule: { ...station.rule, threshold } })
+          }
+          onCommit={(threshold) =>
+            onPersist({ ...station, rule: { ...station.rule, threshold } })
+          }
+          rangeWarning={(n) => (n < 0 ? 'Negative value' : null)}
         />
 
         <Text style={[styles.label, styles.spaced]}>Must hold for (minutes)</Text>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(station.rule.sustainedMinutes)}
-          onChangeText={(text) => {
-            const sustainedMinutes = Math.max(1, Math.round(Number(text)) || 1);
-            onChange({
-              ...station,
-              rule: { ...station.rule, sustainedMinutes },
-            });
-          }}
-          onEndEditing={(e) => {
-            const sustainedMinutes = Math.max(1, Math.round(Number(e.nativeEvent.text)) || 1);
-            onPersist({
-              ...station,
-              rule: { ...station.rule, sustainedMinutes },
-            });
-          }}
-          keyboardType="number-pad"
+          value={station.rule.sustainedMinutes}
+          onLiveChange={(sustainedMinutes) =>
+            onChange({ ...station, rule: { ...station.rule, sustainedMinutes } })
+          }
+          onCommit={(sustainedMinutes) =>
+            onPersist({ ...station, rule: { ...station.rule, sustainedMinutes } })
+          }
+          rangeWarning={(n) => (n < 1 ? 'Under 1 minute' : null)}
         />
 
         {windPrimary ? (
@@ -950,23 +941,20 @@ export function StationDetailScreen({
         ) : null}
 
         <Text style={[styles.label, styles.spaced]}>Cloud poll on (minutes)</Text>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(pollIntervalMinutes)}
-          onChangeText={(text) => {
-            const minutes = Math.max(10, Math.round(Number(text)) || 10);
-            onPollIntervalChange(minutes);
-          }}
-          onEndEditing={(e) => {
-            const minutes = Math.max(10, Math.round(Number(e.nativeEvent.text)) || 10);
-            onPollIntervalChange(minutes);
-          }}
-          keyboardType="number-pad"
+          value={pollIntervalMinutes}
+          onLiveChange={onPollIntervalChange}
+          onCommit={onPollIntervalChange}
+          rangeWarning={(n) =>
+            n <= 0 ? 'Cloud waits at least 1 minute' : n < 10 ? 'Under 10 min' : null
+          }
         />
         <Text style={styles.hint}>
           Phone stays idle — Wald home server polls your weather sources. Status: {bgStatus}
         </Text>
       </Section>
+      )}
 
       <View style={[styles.block, styles.rowBetween]}>
         <View style={{ flex: 1, paddingRight: 12 }}>

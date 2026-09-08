@@ -15,7 +15,7 @@ import {
   type CatalogStation,
   findExistingFollow,
   followSourceRef,
-  suggestCatalogStations,
+  searchCatalogStations,
   suggestExistingFollows,
   windguruName,
 } from '../shared/defaults';
@@ -33,7 +33,7 @@ import {
   resolveFollowInput,
 } from '../core/stations';
 import { parseWindguruRef } from '../core/windguru';
-import { getCloudBaseUrl } from '../core/cloud';
+import { fetchCatalogSearch, getCloudBaseUrl } from '../core/cloud';
 import { LocationPicker, type LocationPick } from './LocationPicker';
 import type { LocationBlend, UiMode } from '../shared/types';
 import { normalizeUiMode } from '../shared/defaults';
@@ -82,8 +82,13 @@ export function AddStationModal({
   const [locationPick, setLocationPick] = useState<LocationPick | null>(null);
   const [pendingMembers, setPendingMembers] = useState<LocationBlend['members'] | null>(null);
   const [pendingCatalog, setPendingCatalog] = useState<CatalogStation | null>(null);
+  const [catalogHits, setCatalogHits] = useState<CatalogStation[]>([]);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [showAllMatches, setShowAllMatches] = useState(false);
   const nicknameInputRef = useRef<TextInput>(null);
   const mode = normalizeUiMode(uiMode);
+  const simpleMode = mode !== 'advanced';
 
   useEffect(() => {
     if (!visible) return;
@@ -126,15 +131,108 @@ export function AddStationModal({
 
   const existingSuggestions = useMemo(
     () =>
-      suggestExistingFollows(existingStations, stationId).filter(
-        (f) => normalizeProvider(f.provider) === provider,
-      ),
-    [existingStations, stationId, provider],
+      suggestExistingFollows(
+        existingStations,
+        stationId.trim() || (simpleMode && provider !== 'location' ? nickname.trim() : ''),
+        80,
+      ).filter((f) => (simpleMode ? true : normalizeProvider(f.provider) === provider)),
+    [existingStations, stationId, nickname, provider, simpleMode],
   );
-  const catalogSuggestions = useMemo(
-    () => suggestCatalogStations(catalogStations, existingStations, stationId, 6, provider),
-    [catalogStations, existingStations, stationId, provider],
-  );
+
+  const searchQuery = (stationId.trim() || (simpleMode && provider !== 'location' ? nickname.trim() : '')).trim();
+  const searchReady =
+    provider !== 'location' && (searchQuery.length >= 2 || /^\d+$/.test(searchQuery));
+
+  useEffect(() => {
+    if (!visible) return;
+    if (!searchReady) {
+      setCatalogHits([]);
+      setCatalogTotal(0);
+      setSearching(false);
+      return;
+    }
+    const directWindguru = parseWindguruRef(searchQuery);
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      void (async () => {
+        const limit = showAllMatches ? 400 : 40;
+        const providerFilter = simpleMode ? 'windguru' : provider;
+        const kindFilter = simpleMode && !directWindguru ? 'station' : undefined;
+        const remote = await fetchCatalogSearch(searchQuery, {
+          limit,
+          provider: providerFilter,
+          kind: kindFilter,
+        });
+        if (cancelled) return;
+        const keepRow = (entry: CatalogStation) => {
+          if (!simpleMode) return true;
+          if (normalizeProvider(entry.provider) !== 'windguru') return false;
+          if (entry.kind === 'spot' && !directWindguru) return false;
+          return true;
+        };
+        let rows: CatalogStation[] = [];
+        let total = 0;
+        if (remote.fromServer) {
+          rows = remote.stations.filter(keepRow);
+          total = remote.total;
+        } else {
+          const local = searchCatalogStations(catalogStations, searchQuery, {
+            limit,
+            provider: providerFilter,
+            kind: kindFilter,
+          });
+          rows = local.stations.filter(keepRow);
+          total = local.total;
+        }
+        const ref = directWindguru;
+        if (
+          ref &&
+          (simpleMode || providerFilter === 'windguru') &&
+          !rows.some(
+            (entry) =>
+              normalizeProvider(entry.provider) === 'windguru' && entry.stationId === ref.id,
+          )
+        ) {
+          try {
+            const resolved = await resolveFollowInput('windguru', searchQuery);
+            if (cancelled) return;
+            if (resolved?.inputId) {
+              const hit: CatalogStation = {
+                provider: 'windguru',
+                stationId: resolved.inputId,
+                kind: resolved.kind === 'spot' ? 'spot' : 'station',
+                sourceName: resolved.spotName || resolved.sourceName || null,
+                liveStationId: resolved.liveStationId ?? null,
+                linkedLiveStation: resolved.linkedLiveStation ?? null,
+                liveLinkWarning: resolved.liveLinkWarning || resolved.warning || null,
+              };
+              rows = [hit, ...rows.filter((entry) => entry.stationId !== hit.stationId)];
+              total = Math.max(total, rows.length);
+            }
+          } catch {
+            // Resolve is best-effort; name search may still have hits.
+          }
+        }
+        if (cancelled) return;
+        setCatalogHits(rows);
+        setCatalogTotal(total);
+        setSearching(false);
+      })();
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    visible,
+    searchReady,
+    searchQuery,
+    showAllMatches,
+    simpleMode,
+    provider,
+    catalogStations,
+  ]);
 
   const reset = () => {
     setStationId('');
@@ -147,6 +245,10 @@ export function AddStationModal({
     setLocationPick(null);
     setPendingMembers(null);
     setPendingCatalog(null);
+    setCatalogHits([]);
+    setCatalogTotal(0);
+    setSearching(false);
+    setShowAllMatches(false);
   };
 
   const close = () => {
@@ -528,10 +630,18 @@ export function AddStationModal({
             </View>
           ) : null}
 
-          {catalogSuggestions.length > 0 ? (
+          {catalogHits.length > 0 ? (
             <View style={styles.suggestions}>
-              <Text style={styles.suggestLabel}>Suggested from house catalog</Text>
-              {catalogSuggestions.map((entry) => (
+              <Text style={styles.suggestLabel}>
+                {searching
+                  ? 'Searching…'
+                  : catalogTotal > catalogHits.length
+                    ? `${catalogHits.length} of ${catalogTotal} matches`
+                    : catalogTotal === 1
+                      ? '1 match'
+                      : `${catalogTotal || catalogHits.length} matches`}
+              </Text>
+              {catalogHits.map((entry) => (
                 <Pressable
                   key={`cat_${entry.provider}_${entry.stationId}`}
                   style={styles.suggestRow}
@@ -548,7 +658,21 @@ export function AddStationModal({
                   <Text style={styles.suggestOpen}>Select</Text>
                 </Pressable>
               ))}
+              {catalogTotal > catalogHits.length ? (
+                <Pressable
+                  style={styles.suggestRow}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setShowAllMatches(true);
+                  }}
+                  disabled={busy}
+                >
+                  <Text style={styles.suggestName}>Show all {catalogTotal} matches</Text>
+                </Pressable>
+              ) : null}
             </View>
+          ) : searching ? (
+            <Text style={styles.linkHint}>Searching live stations…</Text>
           ) : null}
 
           {linkHint ? <Text style={styles.linkHint}>{linkHint}</Text> : null}
