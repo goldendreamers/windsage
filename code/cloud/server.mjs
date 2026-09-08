@@ -502,8 +502,13 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       if (notify && result.shouldNotify && station.enabled !== false) {
         const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
         if (!delivered) {
-          const state = bag.alertStates[station.id] || nextState;
-          state.notifiedForRun = false;
+          const state = {
+            ...(bag.alertStates[station.id] || nextState),
+            notifiedForRun: false,
+            lastNotifyMs: prev.lastNotifyMs ?? null,
+            notifyDayUtc: prev.notifyDayUtc ?? null,
+            notifyCountToday: prev.notifyCountToday ?? 0,
+          };
           bag.alertStates[station.id] = state;
           if (bag.snapshots?.[station.id]) {
             bag.snapshots[station.id].alertState = state;

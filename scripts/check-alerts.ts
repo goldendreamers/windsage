@@ -209,12 +209,18 @@ const hotPrev = {
   conditionSinceMs: Date.now() - 21 * 60 * 60 * 1000,
   notifiedForRun: true,
   lastStationId: station.stationId,
+  lastNotifyMs: 1_700_000_000_000,
+  notifyDayUtc: '2026-09-08',
+  notifyCountToday: 2,
 };
 const refused = evaluateAlert(gfsReading, gfsHistory, station, hotPrev, Date.now());
 assert.equal(refused.result.conditionMet, false);
 assert.equal(refused.result.reading, null);
 assert.equal(refused.nextState.conditionSinceMs, null);
 assert.equal(refused.nextState.notifiedForRun, false);
+assert.equal(refused.nextState.lastNotifyMs, 1_700_000_000_000);
+assert.equal(refused.nextState.notifyDayUtc, '2026-09-08');
+assert.equal(refused.nextState.notifyCountToday, 2);
 assert.match(refused.result.message, /live station/i);
 
 const annoying = resolveNotifyPrefs({ preset: 'annoying', how: ['phone'] });

@@ -672,6 +672,9 @@ export function evaluateAlert(reading, history, station, prev, nowMs = Date.now(
         lastValue: null,
         lastError: 'Refused to evaluate a model forecast as a live reading',
         lastStationId: station.stationId,
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
       },
     };
   }
