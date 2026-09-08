@@ -1,9 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_ALERT_STATE,
+  DEFAULT_NOTIFY_PREFS,
   DEFAULT_RULE,
   DEFAULT_SETTINGS,
   createFollowedStation,
+  normalizeNotifyPrefs,
   normalizeUiMode,
 } from '../shared/defaults';
 import type { AlertState, AlertStateMap, AppSettings, FollowedStation } from '../shared/types';
@@ -20,12 +22,14 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     provider: raw.provider,
     kind: raw.kind === 'spot' ? 'spot' : 'station',
     enabled: raw.enabled !== false,
+    monitoringUntilMs: raw.monitoringUntilMs ?? null,
     rule: { ...DEFAULT_RULE, ...(raw.rule ?? {}) },
     sourceName: raw.sourceName ?? null,
     liveStationId: raw.liveStationId ?? null,
     linkedLiveStation: raw.linkedLiveStation ?? null,
     liveLinkWarning: raw.liveLinkWarning ?? null,
     locationBlend: raw.locationBlend ?? null,
+    starred: raw.starred === true,
   });
 }
 
@@ -43,6 +47,7 @@ function mergeSettings(raw: Partial<AppSettings> | null): AppSettings {
       raw.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes,
     ),
     uiMode: normalizeUiMode(raw.uiMode ?? DEFAULT_SETTINGS.uiMode),
+    notifyPrefs: normalizeNotifyPrefs(raw.notifyPrefs ?? DEFAULT_NOTIFY_PREFS),
   };
 }
 
@@ -70,6 +75,7 @@ async function migrateLegacySettings(): Promise<AppSettings | null> {
       stations,
       pollIntervalMinutes: Math.max(10, legacy.pollIntervalMinutes ?? 10),
       uiMode: 'simple',
+      notifyPrefs: { ...DEFAULT_NOTIFY_PREFS },
     };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(migrated));
     return migrated;

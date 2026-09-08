@@ -17,6 +17,9 @@ import {
   displayName,
   followSourceRef,
   formatAlertTrigger,
+  formatReadingNumber,
+  formatWindFromDisplay,
+  monitoringScheduleSummary,
   ruleForMetric,
 } from '../shared/defaults';
 import {
@@ -43,8 +46,11 @@ import {
 import { followTargetFromResolved, resolveFollowInput, stationPageUrl } from '../core/stations';
 import { MetricChooser } from '../components/MetricChooser';
 import { MetricPill } from '../components/MetricPill';
+import { MonitoringDurationModal } from '../components/MonitoringDurationModal';
 import { Section } from '../components/Section';
+import { SimpleNotifyPicker } from '../components/SimpleNotifyPicker';
 import { StatusPanel } from '../components/StatusPanel';
+import { WarnNumberInput } from '../components/WarnNumberInput';
 
 type ReadingLike = {
   wind_avg?: number | null;
@@ -63,12 +69,10 @@ function metricReadingPills(
     windDirEnabled: boolean;
     maxWindEnabled?: boolean;
     maxWaveEnabled?: boolean;
+    simpleMode?: boolean;
   },
 ) {
-  const dir =
-    data?.wind_direction == null || !Number.isFinite(Number(data.wind_direction))
-      ? null
-      : Math.round(Number(data.wind_direction));
+  const dir = formatWindFromDisplay(data?.wind_direction, !!opts.simpleMode);
 
   if (metric === 'temperature') {
     return [
@@ -93,8 +97,8 @@ function metricReadingPills(
       },
       {
         title: 'Dir',
-        value: dir,
-        unit: '°',
+        value: dir.value,
+        unit: dir.unit,
         icon: brandImages.wind,
         emphasize: opts.windDirEnabled,
       },
@@ -128,8 +132,8 @@ function metricReadingPills(
     },
     {
       title: 'Dir',
-      value: dir,
-      unit: '°',
+      value: dir.value,
+      unit: dir.unit,
       icon: brandImages.wind,
       emphasize: opts.windDirEnabled,
     },
@@ -169,6 +173,10 @@ type Props = {
   onResetAlert: () => void;
   onUnfollow: () => void;
   onAlertFeedback?: (rating: 'good' | 'meh') => Promise<void> | void;
+  onOpenMenu?: () => void;
+  simpleMode?: boolean;
+  shareUrl?: string;
+  onShare?: () => void;
 };
 
 export function StationDetailScreen({
@@ -187,9 +195,15 @@ export function StationDetailScreen({
   onResetAlert,
   onUnfollow,
   onAlertFeedback,
+  onOpenMenu,
+  simpleMode = false,
+  shareUrl,
+  onShare,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState<'good' | 'meh' | null>(null);
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const [monitorIntentOn, setMonitorIntentOn] = useState(true);
   const reading = result?.reading;
   const forecast = result?.forecast ?? null;
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
@@ -223,6 +237,13 @@ export function StationDetailScreen({
   const allowSourceIdEdit = providerAllowsSourceIdEdit(provider);
   const openOnLabel =
     provider === 'location' ? 'Open in Google Maps' : `Open on ${providerMeta.label}`;
+  const monitor = monitoringScheduleSummary(station);
+
+  const openMonitorDuration = (nextOn: boolean) => {
+    void Haptics.selectionAsync();
+    setMonitorIntentOn(nextOn);
+    setMonitorOpen(true);
+  };
 
   return (
     <ScrollView
@@ -230,9 +251,24 @@ export function StationDetailScreen({
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable style={styles.back} onPress={onBack}>
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable style={styles.back} onPress={onBack}>
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.titleBlock}>
         <Image source={brandImages.station} style={styles.titleIcon} contentFit="contain" />
@@ -494,21 +530,17 @@ export function StationDetailScreen({
           icon="wind"
           hint={
             result?.forecastModel
-              ? `${result.forecastModel} · nearest model hour for this spot`
-              : 'Model forecast for this spot (no native live sensor)'
-          }
-          right={
-            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
-              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
-            </Pressable>
+              ? `${result.forecastModel} · nearest model hour at this spot — not what the alert watches`
+              : 'Model forecast for this spot — not what the alert watches'
           }
         >
           <View style={styles.metricsRow}>
             {metricReadingPills(station.rule.metric, forecast, {
-              emphasize: true,
+              emphasize: false,
               windDirEnabled: !!station.rule.windDirEnabled,
               maxWindEnabled: !!station.rule.maxWindEnabled,
               maxWaveEnabled: !!station.rule.maxWaveEnabled,
+              simpleMode,
             }).map((pill) => (
               <MetricPill
                 key={`fcst-${pill.title}`}
@@ -532,19 +564,18 @@ export function StationDetailScreen({
             : undefined
         }
         right={
-          showForecast ? undefined : (
-            <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
-              <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
-            </Pressable>
-          )
+          <Pressable style={styles.ghostBtn} onPress={onCheck} disabled={checking}>
+            <Text style={styles.ghostBtnText}>{checking ? 'Checking…' : 'Check now'}</Text>
+          </Pressable>
         }
       >
         <View style={styles.metricsRow}>
           {metricReadingPills(station.rule.metric, reading, {
-            emphasize: !showForecast,
+            emphasize: true,
             windDirEnabled: !!station.rule.windDirEnabled,
             maxWindEnabled: !!station.rule.maxWindEnabled,
             maxWaveEnabled: !!station.rule.maxWaveEnabled,
+            simpleMode,
           }).map((pill) => (
             <MetricPill
               key={`live-${pill.title}`}
@@ -562,6 +593,12 @@ export function StationDetailScreen({
           sustainedMinutes={station.rule.sustainedMinutes}
           progress={progress}
           ruleHint={formatAlertTrigger(station.rule, 'short')}
+          evaluatedLabel={
+            result?.metricValue != null
+              ? `${formatReadingNumber(result.metricValue)} ${metricUnit(station.rule.metric)}`
+              : null
+          }
+          quiet={simpleMode}
         />
         {alertState?.notifiedForRun && onAlertFeedback ? (
           <View style={styles.feedbackBox}>
@@ -599,6 +636,15 @@ export function StationDetailScreen({
         ) : null}
       </Section>
 
+      {simpleMode ? (
+        <Section title="Ping me" icon="bell">
+          <SimpleNotifyPicker
+            rule={station.rule}
+            onChange={(rule) => onPersist({ ...station, rule })}
+            hideLabel
+          />
+        </Section>
+      ) : (
       <Section title="Alert rule" icon="bell" hint={alertHint}>
         <MetricChooser
           value={station.rule.metric}
@@ -637,51 +683,29 @@ export function StationDetailScreen({
             })}
           </View>
         </View>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(station.rule.threshold)}
-          onChangeText={(text) => {
-            const threshold = Number(text.replace(',', '.'));
-            onChange({
-              ...station,
-              rule: {
-                ...station.rule,
-                threshold: Number.isFinite(threshold) ? threshold : station.rule.threshold,
-              },
-            });
-          }}
-          onEndEditing={(e) => {
-            const threshold = Number(e.nativeEvent.text.replace(',', '.'));
-            onPersist({
-              ...station,
-              rule: {
-                ...station.rule,
-                threshold: Number.isFinite(threshold) ? threshold : station.rule.threshold,
-              },
-            });
-          }}
-          keyboardType="decimal-pad"
+          value={station.rule.threshold}
+          onLiveChange={(threshold) =>
+            onChange({ ...station, rule: { ...station.rule, threshold } })
+          }
+          onCommit={(threshold) =>
+            onPersist({ ...station, rule: { ...station.rule, threshold } })
+          }
+          rangeWarning={(n) => (n < 0 ? 'Negative value' : null)}
         />
 
         <Text style={[styles.label, styles.spaced]}>Must hold for (minutes)</Text>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(station.rule.sustainedMinutes)}
-          onChangeText={(text) => {
-            const sustainedMinutes = Math.max(1, Math.round(Number(text)) || 1);
-            onChange({
-              ...station,
-              rule: { ...station.rule, sustainedMinutes },
-            });
-          }}
-          onEndEditing={(e) => {
-            const sustainedMinutes = Math.max(1, Math.round(Number(e.nativeEvent.text)) || 1);
-            onPersist({
-              ...station,
-              rule: { ...station.rule, sustainedMinutes },
-            });
-          }}
-          keyboardType="number-pad"
+          value={station.rule.sustainedMinutes}
+          onLiveChange={(sustainedMinutes) =>
+            onChange({ ...station, rule: { ...station.rule, sustainedMinutes } })
+          }
+          onCommit={(sustainedMinutes) =>
+            onPersist({ ...station, rule: { ...station.rule, sustainedMinutes } })
+          }
+          rangeWarning={(n) => (n < 1 ? 'Under 1 minute' : null)}
         />
 
         {windPrimary ? (
@@ -917,37 +941,36 @@ export function StationDetailScreen({
         ) : null}
 
         <Text style={[styles.label, styles.spaced]}>Cloud poll on (minutes)</Text>
-        <TextInput
+        <WarnNumberInput
           style={styles.input}
-          value={String(pollIntervalMinutes)}
-          onChangeText={(text) => {
-            const minutes = Math.max(10, Math.round(Number(text)) || 10);
-            onPollIntervalChange(minutes);
-          }}
-          onEndEditing={(e) => {
-            const minutes = Math.max(10, Math.round(Number(e.nativeEvent.text)) || 10);
-            onPollIntervalChange(minutes);
-          }}
-          keyboardType="number-pad"
+          value={pollIntervalMinutes}
+          onLiveChange={onPollIntervalChange}
+          onCommit={onPollIntervalChange}
+          rangeWarning={(n) =>
+            n <= 0 ? 'Cloud waits at least 1 minute' : n < 10 ? 'Under 10 min' : null
+          }
         />
         <Text style={styles.hint}>
           Phone stays idle — Wald home server polls your weather sources. Status: {bgStatus}
         </Text>
       </Section>
+      )}
 
       <View style={[styles.block, styles.rowBetween]}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.sectionTitle}>Monitoring</Text>
-          <Text style={styles.hint}>On by default. Off pauses alerts for this station only</Text>
+          {monitor.detailHint ? (
+            <Text style={styles.hint}>{monitor.detailHint}</Text>
+          ) : (
+            <Text style={styles.hint}>On by default. Off pauses alerts for this station only</Text>
+          )}
         </View>
         <Switch
           value={station.enabled !== false}
-          onValueChange={(enabled) => {
-            void Haptics.selectionAsync();
-            onPersist({ ...station, enabled });
-          }}
+          onValueChange={openMonitorDuration}
           trackColor={{ false: '#23404C', true: colors.accent }}
           thumbColor="#fff"
+          accessibilityLabel="Monitoring"
         />
       </View>
 
@@ -1008,6 +1031,17 @@ export function StationDetailScreen({
         </Text>
       </Pressable>
 
+      {onShare ? (
+        <Pressable
+          style={styles.secondaryBtn}
+          onPress={onShare}
+          accessibilityRole="button"
+          accessibilityLabel="Share follow link"
+          accessibilityHint={shareUrl}
+        >
+          <Text style={styles.secondaryBtnText}>Share link</Text>
+        </Pressable>
+      ) : null}
       <Pressable style={styles.secondaryBtn} onPress={onResetAlert}>
         <Text style={styles.secondaryBtnText}>Reset alert memory</Text>
       </Pressable>
@@ -1016,6 +1050,16 @@ export function StationDetailScreen({
           {provider === 'location' ? 'Unfollow map pin' : 'Unfollow station'}
         </Text>
       </Pressable>
+      <MonitoringDurationModal
+        visible={monitorOpen}
+        turningOn={monitorIntentOn}
+        simpleMode={simpleMode}
+        onCancel={() => setMonitorOpen(false)}
+        onConfirm={(untilMs) => {
+          setMonitorOpen(false);
+          onPersist({ ...station, enabled: monitorIntentOn, monitoringUntilMs: untilMs });
+        }}
+      />
     </ScrollView>
   );
 }
@@ -1030,6 +1074,24 @@ const styles = StyleSheet.create({
   back: {
     alignSelf: 'flex-start',
     paddingVertical: 4,
+  },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
   },
   backText: {
     color: colors.accent,

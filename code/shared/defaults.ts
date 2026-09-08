@@ -6,9 +6,14 @@ import type {
   Comparison,
   FollowedStation,
   MetricKey,
+  NotifyChannel,
+  NotifyPrefs,
+  NotifyPreset,
   UiMode,
   WindguruKind,
 } from './types';
+
+export type { NotifyChannel, NotifyPrefs, NotifyPreset } from './types';
 
 /** Primary alert defaults per metric (threshold units match the metric). */
 export const METRIC_DEFAULTS: Record<
@@ -49,10 +54,17 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
   };
 }
 
+export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = {
+  preset: 'normal',
+  timesPerDay: 1,
+  how: ['phone'],
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
   uiMode: 'simple',
+  notifyPrefs: { ...DEFAULT_NOTIFY_PREFS },
 };
 
 export function normalizeUiMode(value: unknown): UiMode {
@@ -66,7 +78,285 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
+
+const NOTIFY_PRESETS = new Set(['annoying', 'normal', 'quiet', 'custom']);
+const NOTIFY_CHANNELS: NotifyChannel[] = ['phone', 'email', 'discord'];
+const ANNOYING_INTERVAL_MIN = 10;
+
+export function parseNotifyHow(raw: unknown): NotifyChannel[] {
+  const src = Array.isArray(raw)
+    ? raw
+    : raw === 'both'
+      ? ['phone', 'email']
+      : raw == null || raw === ''
+        ? []
+        : [raw];
+  const seen = new Set<NotifyChannel>();
+  for (const item of src) {
+    if (item === 'phone' || item === 'email' || item === 'discord') seen.add(item);
+  }
+  const ordered = NOTIFY_CHANNELS.filter((channel) => seen.has(channel));
+  return ordered.length ? ordered : ['phone'];
+}
+
+export function notifyChannelsOf(prefs: NotifyPrefs | null | undefined): NotifyChannel[] {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'quiet') return ['email'];
+  if (n.preset === 'custom') return parseNotifyHow(n.how);
+  return ['phone'];
+}
+
+export function toggleNotifyChannel(
+  current: NotifyChannel[] | null | undefined,
+  channel: NotifyChannel,
+): NotifyChannel[] {
+  const have = parseNotifyHow(current);
+  const on = have.includes(channel);
+  if (on) {
+    const next = have.filter((item) => item !== channel);
+    return next.length ? next : have;
+  }
+  return parseNotifyHow([...have, channel]);
+}
+
+export function utcDayKey(nowMs = Date.now()): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+export function normalizeNotifyPrefs(raw: unknown): NotifyPrefs {
+  const src = raw && typeof raw === 'object' ? (raw as Partial<NotifyPrefs>) : {};
+  const preset = NOTIFY_PRESETS.has(String(src.preset))
+    ? (src.preset as NotifyPreset)
+    : 'normal';
+  const how = parseNotifyHow(src.how);
+  const n = Math.trunc(Number(src.timesPerDay));
+  const timesPerDay = Number.isFinite(n) ? Math.min(24, Math.max(1, n)) : 1;
+  return { preset, timesPerDay, how };
+}
+
+export type ResolvedNotifyPrefs = {
+  preset: NotifyPreset;
+  maxPerDay: number | null;
+  minIntervalMinutes: number;
+  push: boolean;
+  email: boolean;
+  discord: boolean;
+};
+
+function resolvedChannels(channels: NotifyChannel[], opts?: { hasGoogleEmail?: boolean }) {
+  const hasGoogle = opts?.hasGoogleEmail === true;
+  const wantEmail = channels.includes('email');
+  return {
+    push: channels.includes('phone'),
+    email: wantEmail && hasGoogle,
+    discord: channels.includes('discord'),
+  };
+}
+
+export function resolveNotifyPrefs(
+  prefs: NotifyPrefs | null | undefined,
+  opts?: { hasGoogleEmail?: boolean },
+): ResolvedNotifyPrefs {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'annoying') {
+    return {
+      preset: 'annoying',
+      maxPerDay: null,
+      minIntervalMinutes: ANNOYING_INTERVAL_MIN,
+      ...resolvedChannels(['phone'], opts),
+    };
+  }
+  if (n.preset === 'quiet') {
+    return {
+      preset: 'quiet',
+      maxPerDay: 1,
+      minIntervalMinutes: 24 * 60,
+      ...resolvedChannels(['email'], opts),
+    };
+  }
+  if (n.preset === 'custom') {
+    const times = n.timesPerDay ?? 1;
+    return {
+      preset: 'custom',
+      maxPerDay: times,
+      minIntervalMinutes: Math.max(ANNOYING_INTERVAL_MIN, Math.floor((24 * 60) / times)),
+      ...resolvedChannels(parseNotifyHow(n.how), opts),
+    };
+  }
+  return {
+    preset: 'normal',
+    maxPerDay: 1,
+    minIntervalMinutes: 24 * 60,
+    ...resolvedChannels(['phone'], opts),
+  };
+}
+
+export function notifyPrefsSummary(prefs: NotifyPrefs | null | undefined): string {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'annoying') return 'Annoying · every 10 min';
+  if (n.preset === 'quiet') return 'Quiet · email only';
+  if (n.preset === 'custom') {
+    const how = parseNotifyHow(n.how).join(' + ');
+    const times = n.timesPerDay ?? 1;
+    return `Custom · ${times}× a day · ${how}`;
+  }
+  return 'Normal · once a day';
+}
+
+export function alertNotifyDue(
+  prev: Pick<AlertState, 'notifiedForRun' | 'lastCheckMs' | 'lastNotifyMs' | 'notifyDayUtc' | 'notifyCountToday'> | null | undefined,
+  resolved: ResolvedNotifyPrefs,
+  nowMs = Date.now(),
+): boolean {
+  if (!resolved.push && !resolved.email && !resolved.discord) return false;
+  const day = utcDayKey(nowMs);
+  const count =
+    prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  if (resolved.maxPerDay != null && count >= resolved.maxPerDay) return false;
+  const lastRaw = prev?.lastNotifyMs;
+  const lastMs =
+    typeof lastRaw === 'number' && Number.isFinite(lastRaw)
+      ? lastRaw
+      : prev?.notifiedForRun &&
+          typeof prev.lastCheckMs === 'number' &&
+          Number.isFinite(prev.lastCheckMs)
+        ? prev.lastCheckMs
+        : null;
+  if (lastMs != null && nowMs - lastMs < resolved.minIntervalMinutes * 60 * 1000) return false;
+  if (prev?.notifiedForRun && lastMs == null) return false;
+  return true;
+}
+
+export function stampAlertNotify(prev: AlertState | null | undefined, nowMs = Date.now()) {
+  const day = utcDayKey(nowMs);
+  const count = prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  return {
+    lastNotifyMs: nowMs,
+    notifyDayUtc: day,
+    notifyCountToday: count + 1,
+  };
+}
+
+export function parseLooseNumber(raw: unknown): number | null {
+  const n = Number(String(raw ?? '').replace(',', '.').trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+
+export type MonitoringDurationPreset = 'day' | 'week' | 'forever';
+export type MonitoringCustomUnit = 'hours' | 'days';
+
+export function normalizeMonitoringUntilMs(raw: unknown): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function monitoringUntilMsForPreset(
+  preset: MonitoringDurationPreset,
+  nowMs = Date.now(),
+): number | null {
+  if (preset === 'forever') return null;
+  if (preset === 'week') return nowMs + WEEK_MS;
+  return nowMs + DAY_MS;
+}
+
+export function monitoringUntilMsForCustomHours(hours: number, nowMs = Date.now()): number {
+  const h = Math.max(1, Math.trunc(Number(hours) || 0));
+  return nowMs + h * HOUR_MS;
+}
+
+export function monitoringUntilMsForCustomAmount(
+  amount: number,
+  unit: MonitoringCustomUnit,
+  nowMs = Date.now(),
+): number {
+  const n = Math.max(1, Math.trunc(Number(amount) || 0));
+  return monitoringUntilMsForCustomHours(unit === 'days' ? n * 24 : n, nowMs);
+}
+
+export function applyMonitoringSchedule<
+  T extends { enabled?: boolean; monitoringUntilMs?: number | null },
+>(station: T, nowMs = Date.now()): T {
+  if (!station) return station;
+  const raw = station.monitoringUntilMs;
+  if (raw == null) return station;
+  const untilMs = Number(raw);
+  if (!Number.isFinite(untilMs) || untilMs > nowMs) return station;
+  const currentlyOn = station.enabled !== false;
+  return {
+    ...station,
+    enabled: !currentlyOn,
+    monitoringUntilMs: null,
+  };
+}
+
+export function applyMonitoringSchedules<
+  T extends { enabled?: boolean; monitoringUntilMs?: number | null },
+>(stations: T[] | null | undefined, nowMs = Date.now()): { stations: T[]; changed: boolean } {
+  const list = Array.isArray(stations) ? stations : [];
+  let changed = false;
+  const next = list.map((station) => {
+    const applied = applyMonitoringSchedule(station, nowMs);
+    if (applied !== station) changed = true;
+    return applied;
+  });
+  return { stations: next, changed };
+}
+
+export function formatMonitoringUntilClock(untilMs: number, nowMs = Date.now()): string {
+  const d = new Date(untilMs);
+  const now = new Date(nowMs);
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleString(undefined, opts);
+}
+
+export type MonitoringScheduleSummary = {
+  on: boolean;
+  untilMs: number | null;
+  detailHint: string | null;
+};
+
+export function monitoringScheduleSummary(
+  station: { enabled?: boolean; monitoringUntilMs?: number | null } | null | undefined,
+  nowMs = Date.now(),
+): MonitoringScheduleSummary {
+  if (!station) {
+    return { on: true, untilMs: null, detailHint: null };
+  }
+  const applied = applyMonitoringSchedule(station, nowMs);
+  const on = applied.enabled !== false;
+  const untilRaw = applied.monitoringUntilMs;
+  const untilMs = untilRaw == null ? null : Number(untilRaw);
+  const hasUntil = untilMs != null && Number.isFinite(untilMs) && untilMs > nowMs;
+  const when = hasUntil && untilMs != null ? formatMonitoringUntilClock(untilMs, nowMs) : null;
+  if (on) {
+    return {
+      on: true,
+      untilMs: hasUntil ? untilMs : null,
+      detailHint: when ? `Alerts stay on until ${when}` : null,
+    };
+  }
+  return {
+    on: false,
+    untilMs: hasUntil ? untilMs : null,
+    detailHint: when ? `Paused until ${when}` : 'Alerts are off',
+  };
+}
 
 export const METRIC_OPTIONS = [
   {
@@ -118,6 +408,41 @@ export function formatThresholdNumber(value: number): string {
 export function formatReadingNumber(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return '—';
   return formatThresholdNumber(Number(value));
+}
+
+/** Eight-point compass, meteorological “from”. 90 → east, 225 → south-west. */
+const COMPASS_8 = [
+  'north',
+  'north-east',
+  'east',
+  'south-east',
+  'south',
+  'south-west',
+  'west',
+  'north-west',
+] as const;
+
+export function windDirectionName(deg: number | null | undefined): string | null {
+  if (deg == null || !Number.isFinite(Number(deg))) return null;
+  const d = ((Number(deg) % 360) + 360) % 360;
+  const idx = Math.round(d / 45) % 8;
+  return COMPASS_8[idx];
+}
+
+/** Meteorological “from” in whole degrees, 0–359. */
+export function windDirectionDeg(deg: number | null | undefined): number | null {
+  if (deg == null || !Number.isFinite(Number(deg))) return null;
+  return Math.round(((Number(deg) % 360) + 360) % 360) % 360;
+}
+
+/** Simple mode: compass words. Advanced: exact degrees. */
+export function formatWindFromDisplay(
+  deg: number | null | undefined,
+  simpleMode: boolean,
+): { value: string | number | null; unit: string } {
+  if (simpleMode) return { value: windDirectionName(deg), unit: '' };
+  const n = windDirectionDeg(deg);
+  return { value: n, unit: n == null ? '' : '°' };
 }
 
 export type HomeLiveStat = { label: string; value: string; unit: string };
@@ -255,11 +580,13 @@ export function createFollowedStation(
     nickname: String(nickname ?? '').trim(),
     sourceName: String(partial?.sourceName ?? '').trim() || null,
     enabled: partial?.enabled !== false,
+    monitoringUntilMs: normalizeMonitoringUntilMs(partial?.monitoringUntilMs),
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
     linkedLiveStation: partial?.linkedLiveStation ?? null,
     liveLinkWarning: partial?.liveLinkWarning ?? null,
     locationBlend: partial?.locationBlend ?? null,
+    starred: partial?.starred === true,
   };
 }
 
@@ -315,6 +642,50 @@ export function followSourceRef(station: FollowedStation): string {
   return `#${sid}`;
 }
 
+export function isFollowStarred(
+  station: Pick<FollowedStation, 'starred'> | null | undefined,
+): boolean {
+  return station?.starred === true;
+}
+
+/** Starred follows first, otherwise the stored array order. */
+export function organizeFollows(stations: FollowedStation[]): FollowedStation[] {
+  const starred: FollowedStation[] = [];
+  const rest: FollowedStation[] = [];
+  for (const s of stations || []) {
+    if (isFollowStarred(s)) starred.push(s);
+    else rest.push(s);
+  }
+  return [...starred, ...rest];
+}
+
+/** Swap a follow one step in the organized list. Will not cross the starred group. */
+export function moveFollow(
+  stations: FollowedStation[],
+  id: string,
+  delta: -1 | 1,
+): FollowedStation[] {
+  const displayed = organizeFollows(stations);
+  const i = displayed.findIndex((s) => s.id === id);
+  if (i < 0) return stations;
+  const j = i + delta;
+  if (j < 0 || j >= displayed.length) return stations;
+  if (isFollowStarred(displayed[i]) !== isFollowStarred(displayed[j])) return stations;
+  const next = displayed.slice();
+  const a = next[i];
+  const b = next[j];
+  if (!a || !b) return stations;
+  next[i] = b;
+  next[j] = a;
+  return organizeFollows(next);
+}
+
+export function toggleFollowStar(stations: FollowedStation[], id: string): FollowedStation[] {
+  return organizeFollows(
+    stations.map((s) => (s.id === id ? { ...s, starred: !isFollowStarred(s) } : s)),
+  );
+}
+
 /** Match a follow by provider + external id (`stationId`).
 
  * Do not match on `liveStationId`: many spots share one live sensor, and after
@@ -342,30 +713,76 @@ export function findExistingFollow(
   return null;
 }
 
-/** Typeahead filter over already-followed stations (Windguru name / ids). */
+/** Latin city spellings → native-script Windguru names. Keep in sync with catalogSearch.mjs. */
+export const PLACE_NAME_ALIASES: Record<string, string[]> = {
+  haifa: ['חיפה'],
+  'tel aviv': ['תל אביב'],
+  telaviv: ['תל אביב'],
+  herzliya: ['הרצליה'],
+  eilat: ['אילת'],
+  ashkelon: ['אשקלון'],
+  ashdod: ['אשדוד'],
+  netanya: ['נתניה'],
+  acre: ['עכו'],
+  akko: ['עכו'],
+  jerusalem: ['ירושלים'],
+  tiberias: ['טבריה'],
+};
+
+/** Fold accents so "bobik" matches "Bobík" and "haifa" matches "Haïfa". */
+export function foldSearchText(value: string): string {
+  let s = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  s = s
+    .replace(/ł/g, 'l')
+    .replace(/ø/g, 'o')
+    .replace(/æ/g, 'ae')
+    .replace(/œ/g, 'oe')
+    .replace(/ß/g, 'ss')
+    .replace(/đ/g, 'd');
+  return s;
+}
+
+export function compactSearchText(value: string): string {
+  return foldSearchText(value).replace(/[^a-z0-9]+/g, '');
+}
+
+function followMatchesQuery(station: FollowedStation, query: string): boolean {
+  const qRaw = query.trim();
+  const q = foldSearchText(qRaw);
+  if (!q) return false;
+  const digits = qRaw.replace(/\D/g, '');
+  const label = foldSearchText(windguruName(station));
+  const nick = foldSearchText(String(station.nickname ?? ''));
+  const sid = foldSearchText(String(station.stationId ?? ''));
+  const live = foldSearchText(String(station.liveStationId ?? ''));
+  const compact = compactSearchText(windguruName(station) + ' ' + String(station.nickname ?? ''));
+  const qCompact = compactSearchText(qRaw);
+  return (
+    label.includes(q) ||
+    (nick && nick.includes(q)) ||
+    sid.includes(q) ||
+    (live && live.includes(q)) ||
+    (qCompact.length >= 2 && compact.includes(qCompact)) ||
+    (digits.length > 0 && (sid.includes(digits) || (live && live.includes(digits))))
+  );
+}
+
+/** Typeahead filter over already-followed stations (Windguru name / ids / nickname). */
 export function suggestExistingFollows(
   stations: FollowedStation[],
   query: string,
   limit = 6,
 ): FollowedStation[] {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   if (!q) return [];
-  const digits = q.replace(/\D/g, '');
   const out: FollowedStation[] = [];
   for (const station of stations) {
-    const label = windguruName(station).toLowerCase();
-    const sid = String(station.stationId ?? '').trim().toLowerCase();
-    const live = String(station.liveStationId ?? '').trim().toLowerCase();
-    const hit =
-      label.includes(q) ||
-      sid.includes(q) ||
-      (live && live.includes(q)) ||
-      (digits.length > 0 &&
-        (sid.includes(digits) || (live && live.includes(digits))));
-    if (hit) {
-      out.push(station);
-      if (out.length >= limit) break;
-    }
+    if (!followMatchesQuery(station, q)) continue;
+    out.push(station);
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -379,10 +796,104 @@ export type CatalogStation = Pick<
   | 'liveStationId'
   | 'linkedLiveStation'
   | 'liveLinkWarning'
->;
+> & {
+  lat?: number;
+  lon?: number;
+};
 
 function catalogKey(provider: StationProvider | string | null | undefined, stationId: string) {
   return `${normalizeProvider(provider)}:${String(stationId ?? '').trim()}`;
+}
+
+/** Keep scoring in sync with code/cloud/lib/catalogSearch.mjs */
+export function catalogMatchScore(entry: CatalogStation, query: string): number {
+  const qRaw = String(query ?? '').trim();
+  const q = foldSearchText(qRaw);
+  if (!q) return 0;
+  const digits = qRaw.replace(/\D/g, '');
+  if (q.length < 2 && digits.length < 1) return 0;
+
+  const sid = String(entry?.stationId ?? '').trim();
+  const asFollow = {
+    id: `catalog_${normalizeProvider(entry.provider)}_${sid}`,
+    provider: normalizeProvider(entry.provider),
+    stationId: sid,
+    kind: entry.kind,
+    nickname: '',
+    sourceName: entry.sourceName ?? null,
+    enabled: true,
+    rule: DEFAULT_RULE,
+    liveStationId: entry.liveStationId ?? null,
+    linkedLiveStation: entry.linkedLiveStation ?? null,
+    liveLinkWarning: entry.liveLinkWarning ?? null,
+  } satisfies FollowedStation;
+  const label = foldSearchText(windguruName(asFollow));
+  const live = foldSearchText(String(entry.liveStationId ?? ''));
+  const sidFold = foldSearchText(sid);
+  const qCompact = compactSearchText(qRaw);
+  const labelCompact = compactSearchText(windguruName(asFollow));
+
+  if (label === q || sidFold === q) return 100;
+  if (/windguru\.cz/i.test(qRaw) && digits && sid === digits) return 100;
+  if (label.startsWith(q) || sidFold.startsWith(q)) return 90;
+  if (label.split(/[\s,/._-]+/).some((w) => w.startsWith(q))) return 80;
+  const aliases = PLACE_NAME_ALIASES[q];
+  if (aliases?.some((alias) => String(entry.sourceName || '').includes(alias))) return 70;
+  if (digits && (sid === digits || sid.startsWith(digits))) return 75;
+  if (label.includes(q) || sidFold.includes(q)) return 50;
+  if (qCompact.length >= 2 && labelCompact.includes(qCompact)) return 45;
+  if (live && (live.includes(q) || (digits && live.includes(digits)))) return 40;
+  if (digits.length > 0 && sid.includes(digits)) return 30;
+  return 0;
+}
+
+export type CatalogSearchOpts = {
+  limit?: number;
+  provider?: StationProvider | string | null;
+  kind?: WindguruKind | 'any' | null;
+  exclude?: FollowedStation[];
+};
+
+/** Rank matches over the full directory. Does not drop already-followed IDs unless `exclude` is set. */
+export function searchCatalogStations(
+  catalog: CatalogStation[],
+  query: string,
+  opts: CatalogSearchOpts = {},
+): { stations: CatalogStation[]; total: number } {
+  const qRaw = String(query ?? '').trim();
+  const q = foldSearchText(qRaw);
+  const digits = qRaw.replace(/\D/g, '');
+  if (!q || (q.length < 2 && digits.length < 1)) {
+    return { stations: [], total: 0 };
+  }
+
+  const limitRaw = Number(opts.limit);
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+  const wantProvider = opts.provider ? normalizeProvider(opts.provider) : null;
+  const wantKind = opts.kind && opts.kind !== 'any' ? opts.kind : null;
+  const exclude = new Set<string>();
+  for (const row of opts.exclude || []) {
+    const sid = String(row?.stationId ?? '').trim();
+    if (sid) exclude.add(catalogKey(row.provider, sid));
+  }
+
+  const scored: { entry: CatalogStation; score: number; sid: string }[] = [];
+  for (const entry of catalog) {
+    const sid = String(entry.stationId ?? '').trim();
+    const provider = normalizeProvider(entry.provider);
+    if (!sid) continue;
+    if (exclude.has(catalogKey(provider, sid))) continue;
+    if (wantProvider && provider !== wantProvider) continue;
+    if (wantKind && (entry.kind || 'station') !== wantKind) continue;
+    const score = catalogMatchScore(entry, qRaw);
+    if (score > 0) scored.push({ entry, score, sid });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return {
+    stations: scored.slice(0, limit).map((row) => row.entry),
+    total: scored.length,
+  };
 }
 
 /** Catalog suggestions excluding IDs already in the user's follow list. */
@@ -390,48 +901,12 @@ export function suggestCatalogStations(
   catalog: CatalogStation[],
   existing: FollowedStation[],
   query: string,
-  limit = 6,
+  limit = 12,
   providerFilter?: StationProvider | null,
 ): CatalogStation[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  const digits = q.replace(/\D/g, '');
-  const taken = new Set<string>();
-  for (const s of existing) {
-    if (s.stationId?.trim()) taken.add(catalogKey(s.provider, s.stationId));
-  }
-  const wantProvider = providerFilter ? normalizeProvider(providerFilter) : null;
-  const out: CatalogStation[] = [];
-  for (const entry of catalog) {
-    const sid = String(entry.stationId ?? '').trim();
-    const provider = normalizeProvider(entry.provider);
-    if (!sid || taken.has(catalogKey(provider, sid))) continue;
-    if (wantProvider && provider !== wantProvider) continue;
-    const asFollow = {
-      id: `catalog_${provider}_${sid}`,
-      provider,
-      stationId: sid,
-      kind: entry.kind,
-      nickname: '',
-      sourceName: entry.sourceName ?? null,
-      enabled: true,
-      rule: DEFAULT_RULE,
-      liveStationId: entry.liveStationId ?? null,
-      linkedLiveStation: entry.linkedLiveStation ?? null,
-      liveLinkWarning: entry.liveLinkWarning ?? null,
-    } satisfies FollowedStation;
-    const label = windguruName(asFollow).toLowerCase();
-    const live = String(entry.liveStationId ?? '').trim().toLowerCase();
-    const hit =
-      label.includes(q) ||
-      sid.toLowerCase().includes(q) ||
-      (live && live.includes(q)) ||
-      (digits.length > 0 &&
-        (sid.includes(digits) || (live && live.includes(digits))));
-    if (hit) {
-      out.push(entry);
-      if (out.length >= limit) break;
-    }
-  }
-  return out;
+  return searchCatalogStations(catalog, query, {
+    limit: Math.max(1, limit),
+    provider: providerFilter,
+    exclude: existing,
+  }).stations;
 }

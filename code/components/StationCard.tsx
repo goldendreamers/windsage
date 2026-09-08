@@ -7,6 +7,7 @@ import {
   displayName,
   followSourceRef,
   homeLiveStatColumns,
+  isFollowStarred,
 } from '../shared/defaults';
 import { PROVIDER_META, normalizeProvider } from '../shared/providers';
 import { colors } from '../shared/theme';
@@ -17,7 +18,12 @@ type Props = {
   reading: StationReading | null;
   result: CheckResult | null;
   alertState?: AlertState;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
   onPress: () => void;
+  onToggleStar?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 export const StationCard = memo(function StationCard({
@@ -25,15 +31,18 @@ export const StationCard = memo(function StationCard({
   reading,
   result,
   alertState,
+  canMoveUp = false,
+  canMoveDown = false,
   onPress,
+  onToggleStar,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const name = displayName(station);
   const provider = normalizeProvider(station.provider);
   const providerShort = PROVIDER_META[provider]?.short || 'WG';
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
-  const displayReading =
-    forecastOnly && result?.forecast ? result.forecast : reading;
-  const showingForecast = forecastOnly && !!result?.forecast;
+  const displayReading = reading ?? result?.reading ?? null;
   const holding = !!result?.conditionMet;
   const errored = !!alertState?.lastError && !reading && !result?.forecast;
   const prev = alertState?.lastValue;
@@ -55,20 +64,31 @@ export const StationCard = memo(function StationCard({
           : '↓'
       : '';
 
-  const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, showingForecast);
+  const liveCols = homeLiveStatColumns(station.rule.metric, displayReading, false);
   const alertCol = alertThresholdDisplay(station.rule);
+  const starred = isFollowStarred(station);
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.card,
-        pressed && styles.cardPressed,
         station.enabled === false && styles.cardPaused,
+        starred && styles.cardStarred,
       ]}
     >
       <View style={styles.topRow}>
-        <View style={styles.identity}>
+        {onToggleStar ? (
+          <Pressable
+            onPress={onToggleStar}
+            hitSlop={8}
+            style={styles.starBtn}
+            accessibilityRole="button"
+            accessibilityLabel={starred ? 'Unstar follow' : 'Star follow'}
+          >
+            <Text style={[styles.star, starred && styles.starOn]}>{starred ? '★' : '☆'}</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={onPress} style={styles.identity}>
           <Image source={brandImages.station} style={styles.icon} contentFit="contain" />
           <View style={styles.titles}>
             <Text style={styles.nickname} numberOfLines={1}>
@@ -78,11 +98,8 @@ export const StationCard = memo(function StationCard({
             <Text style={styles.meta} numberOfLines={2}>
               {providerShort} · {followSourceRef(station)}
               {station.enabled === false ? ' · paused' : ''}
-              {showingForecast
-                ? ` · forecast${result?.forecastModel ? ` (${result.forecastModel})` : ''}`
-                : ''}
               {forecastOnly && station.linkedLiveStation
-                ? ` · alerts via #${station.linkedLiveStation.id}`
+                ? ` · alerts via live #${station.linkedLiveStation.id}`
                 : ''}
             </Text>
             {station.liveLinkWarning && station.linkedLiveStation ? (
@@ -91,11 +108,41 @@ export const StationCard = memo(function StationCard({
               </Text>
             ) : null}
           </View>
-        </View>
-        <Text style={styles.chevron}>›</Text>
+        </Pressable>
+        {onMoveUp || onMoveDown ? (
+          <View style={styles.reorder}>
+            {onMoveUp ? (
+              <Pressable
+                onPress={onMoveUp}
+                disabled={!canMoveUp}
+                hitSlop={6}
+                style={[styles.moveBtn, !canMoveUp && styles.moveBtnOff]}
+                accessibilityRole="button"
+                accessibilityLabel="Move up"
+              >
+                <Text style={styles.moveText}>↑</Text>
+              </Pressable>
+            ) : null}
+            {onMoveDown ? (
+              <Pressable
+                onPress={onMoveDown}
+                disabled={!canMoveDown}
+                hitSlop={6}
+                style={[styles.moveBtn, !canMoveDown && styles.moveBtnOff]}
+                accessibilityRole="button"
+                accessibilityLabel="Move down"
+              >
+                <Text style={styles.moveText}>↓</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+        <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" accessibilityLabel="Open follow">
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
 
-      <View style={styles.stats}>
+      <Pressable onPress={onPress} style={styles.stats}>
         {liveCols.map((col, index) => (
           <Fragment key={`${col.label}-${index}`}>
             {index > 0 ? <View style={styles.divider} /> : null}
@@ -119,8 +166,8 @@ export const StationCard = memo(function StationCard({
           </Text>
           <Text style={styles.statUnit}>{alertCol.unit}</Text>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
 });
 
@@ -133,18 +180,30 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     gap: 12,
   },
-  cardPressed: {
-    opacity: 0.88,
-    borderColor: colors.accent,
-  },
   cardPaused: {
     opacity: 0.72,
+  },
+  cardStarred: {
+    borderColor: 'rgba(46, 196, 168, 0.45)',
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+  },
+  starBtn: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  star: {
+    color: colors.muted,
+    fontSize: 22,
+    lineHeight: 26,
+  },
+  starOn: {
+    color: colors.accent,
   },
   identity: {
     flexDirection: 'row',
@@ -175,6 +234,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     marginTop: 2,
+  },
+  reorder: {
+    gap: 2,
+  },
+  moveBtn: {
+    width: 28,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.input,
+  },
+  moveBtnOff: {
+    opacity: 0.28,
+  },
+  moveText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 16,
   },
   chevron: {
     color: colors.muted,

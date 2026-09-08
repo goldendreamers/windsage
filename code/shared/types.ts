@@ -78,6 +78,8 @@ export interface FollowedStation {
   /** Official source name (not the user nickname). */
   sourceName?: string | null;
   enabled: boolean;
+  /** Auto-flip `enabled` at this time (pause-for / keep-on-for). Null = forever. */
+  monitoringUntilMs?: number | null;
   rule: AlertRule;
   /** Live station used for sensor readings (native link or nearest). */
   liveStationId?: string | null;
@@ -90,6 +92,8 @@ export interface FollowedStation {
    * weighted by distance × historical accuracy × user rating.
    */
   locationBlend?: LocationBlend | null;
+  /** Home-list favorite — starred follows sort to the top. */
+  starred?: boolean;
 }
 
 export interface LocationBlendMember {
@@ -119,11 +123,27 @@ export interface LocationBlend {
 /** Simple: map pin + GPS. Advanced: Google Maps search still available. */
 export type UiMode = 'simple' | 'advanced';
 
+export type NotifyPreset = 'annoying' | 'normal' | 'quiet' | 'custom';
+export type NotifyChannel = 'phone' | 'email' | 'discord';
+/** Legacy single-value how. Prefer `NotifyChannel[]`. `'both'` still loads as phone+email. */
+export type NotifyHow = NotifyChannel | 'both' | NotifyChannel[];
+
+/** How often / how to send wind alerts. Account-level, not per station. */
+export interface NotifyPrefs {
+  preset: NotifyPreset;
+  /** Advanced custom: 1–24 alerts per UTC day. Ignored for named presets. */
+  timesPerDay?: number;
+  /** Advanced custom: any mix of phone, email, Discord. */
+  how?: NotifyHow;
+}
+
 export interface AppSettings {
   stations: FollowedStation[];
   pollIntervalMinutes: number;
   /** Local UI preference; default simple. Not synced to the cloud. */
   uiMode?: UiMode;
+  /** Alert volume + channel. Missing → normal (once a day, phone). */
+  notifyPrefs?: NotifyPrefs;
 }
 
 export interface StationReading {
@@ -135,6 +155,11 @@ export interface StationReading {
   wave_height: number | null;
   datetime: string | null;
   unixtime: number | null;
+  /**
+   * `forecast` = Windguru GFS/model hour. Alerts must never evaluate this.
+   * Live anemometers/blends omit it or use `live`.
+   */
+  source?: 'live' | 'forecast';
 }
 
 export interface HistorySeries {
@@ -151,6 +176,12 @@ export interface AlertState {
   lastValue: number | null;
   lastError: string | null;
   lastStationId: string | null;
+  /** Last time a push/email actually fired for this follow. */
+  lastNotifyMs?: number | null;
+  /** UTC YYYY-MM-DD for `notifyCountToday`. */
+  notifyDayUtc?: string | null;
+  /** Alerts sent on `notifyDayUtc` (per follow). */
+  notifyCountToday?: number;
 }
 
 export type AlertStateMap = Record<string, AlertState>;
@@ -159,8 +190,8 @@ export interface CheckResult {
   /** Live sensor reading used for alert evaluation (native or nearest). */
   reading: StationReading | null;
   /**
-   * Spot model forecast “now” — set when the followed spot has no native live sensor.
-   * Home/detail show this; alerts still use `reading` from the nearest live station.
+   * Spot model forecast “now” — context only when the followed spot has no native live sensor.
+   * Never used for alert evaluation, home Alert-column hold, or StatusPanel.
    */
   forecast?: StationReading | null;
   /** Windguru model label for `forecast` (e.g. GFS 13 km). */

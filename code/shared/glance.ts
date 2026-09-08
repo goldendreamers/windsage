@@ -22,9 +22,7 @@ function metricOf(
   reading: StationReading | null,
   result: CheckResult | null,
 ): number | null {
-  const r = result?.reading ?? reading;
-  const f = result?.forecast;
-  const src = r?.wind_avg != null || r?.wind_max != null ? r : f;
+  const src = result?.reading ?? reading;
   if (!src) return result?.metricValue ?? null;
   switch (station.rule.metric) {
     case 'wind_max':

@@ -195,13 +195,20 @@ export async function fetchAuthProviders(): Promise<{
 export async function registerAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -219,13 +226,20 @@ export async function registerAccount(
 export async function loginAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -277,10 +291,12 @@ export async function pullMyStations(): Promise<AppSettings | null> {
   const data = await cloudFetch<{
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/me/stations', { method: 'GET', token });
   return {
     stations: data.stations || [],
     pollIntervalMinutes: Math.max(10, data.pollIntervalMinutes || 10),
+    notifyPrefs: data.notifyPrefs,
   };
 }
 
@@ -383,6 +399,7 @@ export async function syncStationsToCloud(
         stations: settings.stations,
         clearStations,
         pollIntervalMinutes: settings.pollIntervalMinutes,
+        notifyPrefs: settings.notifyPrefs,
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
@@ -407,6 +424,7 @@ export async function syncStationsToCloud(
       stations: settings.stations,
       clearStations,
       pollIntervalMinutes: settings.pollIntervalMinutes,
+      notifyPrefs: settings.notifyPrefs,
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
     }),
@@ -418,9 +436,86 @@ export async function syncStationsToCloud(
   };
 }
 
+export type CatalogSearchResult = {
+  stations: Array<
+    Pick<
+      FollowedStation,
+      | 'provider'
+      | 'stationId'
+      | 'kind'
+      | 'sourceName'
+      | 'liveStationId'
+      | 'linkedLiveStation'
+      | 'liveLinkWarning'
+    >
+  >;
+  total: number;
+  catalogSize: number;
+  fromServer: boolean;
+};
+
+function mapCatalogRows(
+  rows: Array<{
+    provider?: FollowedStation['provider'];
+    stationId?: string;
+    kind?: FollowedStation['kind'];
+    sourceName?: string | null;
+    liveStationId?: string | null;
+    linkedLiveStation?: FollowedStation['linkedLiveStation'];
+    liveLinkWarning?: string | null;
+  }>,
+): CatalogSearchResult['stations'] {
+  return rows
+    .filter((s) => s.stationId?.trim())
+    .map((s) => ({
+      provider: s.provider || 'windguru',
+      stationId: String(s.stationId).trim(),
+      kind: s.kind === 'spot' ? 'spot' : 'station',
+      sourceName: s.sourceName ?? null,
+      liveStationId: s.liveStationId ?? null,
+      linkedLiveStation: s.linkedLiveStation ?? null,
+      liveLinkWarning: s.liveLinkWarning ?? null,
+    }));
+}
+
+/** Ranked lookup over the live directory. Server searches all ~6,900 names; client does not need the full dump. */
+export async function fetchCatalogSearch(
+  query: string,
+  opts?: { limit?: number; provider?: string | null; kind?: string | null },
+): Promise<CatalogSearchResult> {
+  const q = query.trim();
+  const limit = opts?.limit && opts.limit > 0 ? Math.min(opts.limit, 400) : 40;
+  if (!q) return { stations: [], total: 0, catalogSize: 0, fromServer: false };
+  try {
+    const params = new URLSearchParams();
+    params.set('q', q);
+    params.set('limit', String(limit));
+    if (opts?.provider) params.set('provider', opts.provider);
+    if (opts?.kind) params.set('kind', opts.kind);
+    const data = await cloudFetch<{
+      stations?: CatalogSearchResult['stations'];
+      total?: number;
+      catalogSize?: number;
+      query?: string;
+    }>(`/v1/catalog/stations?${params.toString()}`, { method: 'GET' });
+    if (Array.isArray(data.stations) && typeof data.total === 'number') {
+      return {
+        stations: mapCatalogRows(data.stations),
+        total: data.total,
+        catalogSize: Number(data.catalogSize) || 0,
+        fromServer: true,
+      };
+    }
+  } catch {
+    /* fall through — caller ranks a locally cached catalog */
+  }
+  return { stations: [], total: 0, catalogSize: 0, fromServer: false };
+}
+
 export async function fetchCatalogStations(): Promise<
   Pick<
     FollowedStation,
+    | 'provider'
     | 'stationId'
     | 'kind'
     | 'sourceName'
@@ -432,6 +527,7 @@ export async function fetchCatalogStations(): Promise<
   try {
     const data = await cloudFetch<{
       stations: Array<{
+        provider?: FollowedStation['provider'];
         stationId: string;
         kind?: FollowedStation['kind'];
         sourceName?: string | null;
@@ -440,9 +536,10 @@ export async function fetchCatalogStations(): Promise<
         liveLinkWarning?: string | null;
       }>;
     }>('/v1/catalog/stations', { method: 'GET' });
-    return (data.stations || [])
+    const rows = (data.stations || [])
       .filter((s) => s.stationId?.trim())
       .map((s) => ({
+        provider: s.provider || 'windguru',
         stationId: String(s.stationId).trim(),
         kind: s.kind === 'spot' ? 'spot' : 'station',
         sourceName: s.sourceName ?? null,
@@ -450,6 +547,9 @@ export async function fetchCatalogStations(): Promise<
         linkedLiveStation: s.linkedLiveStation ?? null,
         liveLinkWarning: s.liveLinkWarning ?? null,
       }));
+    // Old servers dumped the full ~6,900-row directory on empty GET — never keep that in RN state.
+    if (rows.length > 400) return [];
+    return rows;
   } catch {
     return [];
   }
@@ -500,6 +600,7 @@ export async function fetchCloudSnapshot(): Promise<{
   lastPollAt: number | null;
   cloud: boolean;
   stations?: FollowedStation[];
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -508,12 +609,14 @@ export async function fetchCloudSnapshot(): Promise<{
       lastPollAt: number | null;
       cloud: boolean;
       stations: FollowedStation[];
+      notifyPrefs?: import('../shared/types').NotifyPrefs;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
       lastPollAt: data.lastPollAt ?? null,
       cloud: !!data.cloud,
       stations: data.stations,
+      notifyPrefs: data.notifyPrefs,
     };
   }
 
@@ -523,6 +626,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: number | null;
     cloud: boolean;
     stations: FollowedStation[];
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -532,6 +636,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: data.lastPollAt ?? null,
     cloud: !!data.cloud,
     stations: data.stations,
+    notifyPrefs: data.notifyPrefs,
   };
 }
 

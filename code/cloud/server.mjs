@@ -24,8 +24,8 @@ import {
   cacheKey,
   mapsStatus,
 } from './lib/providers/index.mjs';
-import { normalizeWindguruFollowInput, fetchSpotForecastNow } from './lib/wind.mjs';
-import { autocompletePlaces, geocodeAddress, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
+import { normalizeWindguruFollowInput, fetchSpotForecastNow, parseWindguruRef, resolveWindguruId, windguruCatalogStations, shouldResolveWindguruCatalogQuery, catalogRowFromWindguruResolved } from './lib/wind.mjs';
+import { autocompletePlaces, geocodeAddress, geocodePlaceName, placeDetails, reverseGeocode } from './lib/providers/geo.mjs';
 import { previewMapLocation, resolveLocation } from './lib/providers/location.mjs';
 import {
   loadStore,
@@ -68,8 +68,24 @@ import {
   sendWebPushMany,
 } from './lib/webpush.mjs';
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
+import { sendAlertEmail } from './lib/alertEmail.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
 import { pollReason, shouldPollAlerts } from './lib/poll.mjs';
+import { applyBagMonitoringSchedules } from './lib/monitoring.mjs';
+import {
+  mergeCatalogRows,
+  nearbyCatalogStations,
+  prependCatalogHit,
+  searchCatalogStations,
+  unionCatalogHits,
+} from './lib/catalogSearch.mjs';
+import { NAME_FILES, persistWindguruNameFiles } from './lib/windguruNames.mjs';
+import {
+  applyNotifyPrefs,
+  bagGoogleEmail,
+  normalizeNotifyPrefs,
+  resolveNotifyPrefs,
+} from './lib/notifyPrefs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -117,6 +133,9 @@ const DEFAULT_ALERT = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
 
 const MIME = {
@@ -214,23 +233,35 @@ async function dispatchAlertNotifications(bag, station, result, sid) {
     liveStationId: station.liveStationId || station.linkedLiveStation?.id || sid,
     kind: 'alert',
   };
+  const googleEmail = bagGoogleEmail(bag);
+  const resolved = resolveNotifyPrefs(bag.notifyPrefs, {
+    hasGoogleEmail: !!googleEmail,
+  });
 
   let delivered = 0;
-  const pushTokens = collectPushTokens(bag);
-  for (const to of pushTokens) {
-    const r = await sendExpoPush({ to, title, body, data });
-    if (r?.ok) delivered += 1;
+  if (resolved.push) {
+    const pushTokens = collectPushTokens(bag);
+    for (const to of pushTokens) {
+      const r = await sendExpoPush({ to, title, body, data });
+      if (r?.ok) delivered += 1;
+    }
+
+    const subs = collectWebPushSubscriptions(bag);
+    if (subs.length) {
+      const { results, alive } = await sendWebPushMany(subs, { title, body, data });
+      bag.webPushSubscriptions = alive;
+      delivered += results.filter((r) => r.ok).length;
+    }
   }
 
-  const subs = collectWebPushSubscriptions(bag);
-  if (subs.length) {
-    const { results, alive } = await sendWebPushMany(subs, { title, body, data });
-    bag.webPushSubscriptions = alive;
-    delivered += results.filter((r) => r.ok).length;
-  }
+  const emailed =
+    resolved.email && googleEmail
+      ? await sendAlertEmail({ title, body, to: googleEmail })
+      : { ok: false, skipped: true };
+  if (emailed?.ok) delivered += 1;
 
   console.log(
-    `[notify] ${station.id} delivered=${delivered} expo=${pushTokens.length} webPush=${subs.length}`,
+    `[notify] ${station.id} delivered=${delivered} push=${resolved.push ? 1 : 0} email=${emailed?.ok ? 1 : 0}`,
   );
   return { delivered, title, body };
 }
@@ -323,6 +354,7 @@ async function attachSpotForecast(station, result, forecastCache, priorSnap) {
 }
 
 async function runBagChecks(store, bag, { notify = true } = {}) {
+  applyBagMonitoringSchedules(bag);
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
@@ -394,10 +426,15 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       const cached = readingCache.get(key);
       const priorSnap = bag.snapshots[station.id];
 
-      if (!cached || cached.error) {
-        const message = cached?.error || 'No reading';
+      if (!cached || cached.error || cached.source === 'forecast') {
+        const message =
+          cached?.source === 'forecast'
+            ? 'Need a live station — model forecast is not the alert'
+            : cached?.error || 'No reading';
         const nextState = {
           ...prev,
+          conditionSinceMs: null,
+          notifiedForRun: false,
           lastCheckMs: Date.now(),
           lastError: message,
           lastStationId: sid,
@@ -445,7 +482,15 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       }
 
       const history = historyCache.get(histKey);
-      const evaluated = evaluateAlert(cached, history, station, prev);
+      const evaluated = evaluateAlert(
+        cached,
+        history,
+        station,
+        prev,
+        Date.now(),
+        bag.notifyPrefs,
+        { hasGoogleEmail: !!bagGoogleEmail(bag) },
+      );
       const result = await attachSpotForecast(
         station,
         evaluated.result,
@@ -465,15 +510,20 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       if (notify && result.shouldNotify && station.enabled !== false) {
         const { delivered } = await dispatchAlertNotifications(bag, station, result, sid);
         if (!delivered) {
-          const state = bag.alertStates[station.id] || nextState;
-          state.notifiedForRun = false;
+          const state = {
+            ...(bag.alertStates[station.id] || nextState),
+            notifiedForRun: false,
+            lastNotifyMs: prev.lastNotifyMs ?? null,
+            notifyDayUtc: prev.notifyDayUtc ?? null,
+            notifyCountToday: prev.notifyCountToday ?? 0,
+          };
           bag.alertStates[station.id] = state;
           if (bag.snapshots?.[station.id]) {
             bag.snapshots[station.id].alertState = state;
             bag.snapshots[station.id].result = {
               ...result,
               shouldNotify: true,
-              message: `${result.message} · phone alert not delivered yet (allow notifications + install app)`,
+              message: `${result.message} · alert not delivered yet (allow notifications, install app, or link Google for email)`,
             };
           }
           console.warn(`[notify] no delivery for ${station.id} — will retry`);
@@ -769,6 +819,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -803,6 +854,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -917,6 +969,7 @@ async function handleMe(req, res, pathname) {
       ok: true,
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -928,6 +981,7 @@ async function handleMe(req, res, pathname) {
     if (body.pollIntervalMinutes) {
       user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
+    applyNotifyPrefs(user, body);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -963,6 +1017,7 @@ async function handleMe(req, res, pathname) {
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
       cloud: true,
       user: publicUser(user),
     });
@@ -1089,6 +1144,7 @@ async function handleDevices(req, res, pathname) {
     if (body.pollIntervalMinutes) {
       bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
+    applyNotifyPrefs(bag, body);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1121,6 +1177,7 @@ async function handleDevices(req, res, pathname) {
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},
+      notifyPrefs: normalizeNotifyPrefs(bag.notifyPrefs),
       cloud: true,
       userId: device.userId || null,
     });
@@ -1188,13 +1245,13 @@ async function handleDevices(req, res, pathname) {
     if (!delivered) {
       if (!webPushConfigured && !expoCount) {
         error =
-          'Phone lock-screen push is off on the server (missing WEB_PUSH_VAPID keys). Windsage does not send email alerts.';
+          'Phone lock-screen push is off on the server (missing WEB_PUSH_VAPID keys). Use Menu → Alerts → Quiet for email if Google is linked.';
       } else if (!subs.length && !expoCount) {
         error =
-          'This phone is not subscribed yet. Open the home-screen app in Safari (iPhone) or Chrome (Android), allow notifications, then try again. Windsage does not send email alerts.';
+          'This phone is not subscribed yet. Open the home-screen app in Safari (iPhone) or Chrome (Android), allow notifications, then try again. Quiet email still needs Google linked.';
       } else {
         error =
-          'Push send failed. Re-open the installed app, allow notifications, and try again. Windsage does not send email alerts.';
+          'Push send failed. Re-open the installed app, allow notifications, and try again. Quiet email still needs Google linked.';
       }
     }
     return json(res, delivered ? 200 : 400, {
@@ -1419,13 +1476,98 @@ async function handleApi(req, res, pathname, url) {
     }
   }
 
-  // Shared catalog for follow suggestions only — never auto-added to user bags.
+  // Follow search directory: Windguru live names (public station_list) + a
+  // PII-stripped leftover catalog. Personal follows are not copied here.
+  // With ?q= rank over the full directory and return a page (phones never need all ~7k rows).
   if (req.method === 'GET' && pathname === '/v1/catalog/stations') {
     const store = await loadStore(DATA_DIR);
+    const shared = publicCatalogStations(store);
+    let windguru = [];
+    try {
+      windguru = await windguruCatalogStations();
+    } catch (e) {
+      console.error('[windsage-cloud] windguru directory failed', e);
+    }
+    const merged = mergeCatalogRows([windguru, shared]);
+    const q = String(url.searchParams.get('q') || '').trim();
+    const limitRaw = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.trunc(limitRaw), 400) : 40;
+    const provider = String(url.searchParams.get('provider') || '').trim() || null;
+    const kind = String(url.searchParams.get('kind') || '').trim() || null;
+    if (!q) {
+      return json(res, 200, {
+        ok: true,
+        stations: shared.slice(0, limit),
+        total: shared.length,
+        catalogSize: merged.length,
+      });
+    }
+    const found = searchCatalogStations(merged, q, { limit: Math.max(limit, 80), provider, kind });
+    let stations = found.stations;
+    let total = found.total;
+    if (shouldResolveWindguruCatalogQuery(q, merged) && (!provider || provider === 'windguru')) {
+      try {
+        const parsed = parseWindguruRef(q);
+        if (parsed) {
+          const resolved = await resolveWindguruId(parsed.id);
+          const hit = catalogRowFromWindguruResolved(resolved);
+          if (hit) {
+            const already = stations.some(
+              (row) =>
+                String(row.provider || 'windguru').toLowerCase() === 'windguru' &&
+                String(row.stationId) === hit.stationId,
+            );
+            stations = prependCatalogHit(stations, hit, limit);
+            if (!already) total += 1;
+          }
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] windguru catalog id resolve failed', e);
+      }
+    }
+    if (!/^\d+$/.test(q) && total < 12) {
+      try {
+        const geo = await geocodePlaceName(q);
+        if (geo?.lat != null && geo?.lon != null) {
+          const extra = nearbyCatalogStations(merged, geo.lat, geo.lon, {
+            radiusKm: 80,
+            limit: 80,
+            provider,
+            kind,
+          });
+          const combined = unionCatalogHits(stations, extra, limit);
+          stations = combined.stations;
+          total = combined.total;
+        }
+      } catch (e) {
+        console.error('[windsage-cloud] catalog place expand failed', e);
+      }
+    }
     return json(res, 200, {
       ok: true,
-      stations: publicCatalogStations(store),
+      stations,
+      total,
+      catalogSize: merged.length,
+      query: q,
+      limit,
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/v1/catalog/station-names') {
+    const filePath = path.join(DATA_DIR, NAME_FILES.meta);
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const meta = JSON.parse(raw);
+      return json(res, 200, { ok: true, ...meta });
+    } catch {
+      try {
+        const rows = await windguruCatalogStations();
+        const meta = await persistWindguruNameFiles(rows, [WEB_DIR]);
+        return json(res, 200, { ok: true, ...meta });
+      } catch (e) {
+        return json(res, 503, { error: e.message || 'Windguru names file not ready' });
+      }
+    }
   }
 
   const authHandled = await handleAuth(req, res, pathname, url);

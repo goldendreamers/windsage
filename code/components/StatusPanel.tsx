@@ -14,6 +14,10 @@ type Props = {
   progress: number;
   /** Alert threshold only, e.g. "15 kt" — never a live reading. */
   ruleHint?: string | null;
+  /** Evaluated live metric, e.g. "18.4 kt" — never the GFS hour. */
+  evaluatedLabel?: string | null;
+  /** Hide caption noise in simple mode (Wald quiet simple). */
+  quiet?: boolean;
 };
 
 export function StatusPanel({
@@ -22,6 +26,8 @@ export function StatusPanel({
   sustainedMinutes,
   progress,
   ruleHint,
+  evaluatedLabel,
+  quiet = false,
 }: Props) {
   const width = useRef(new Animated.Value(0)).current;
 
@@ -53,8 +59,10 @@ export function StatusPanel({
       : condition || 'Waiting for first check…';
 
   const heldMin = Math.floor((result?.sustainedMs ?? 0) / 60000);
+  const liveAt = String(evaluatedLabel ?? '').trim() || null;
   const metaParts = [
     !paused && thresholdText && condition ? condition : null,
+    result?.conditionMet && liveAt ? `at ${liveAt}` : null,
     result?.conditionMet
       ? `Held ${formatDuration(result.sustainedMs ?? 0)} of ${sustainedMinutes}m`
       : `Need ${sustainedMinutes}m steady`,
@@ -87,10 +95,14 @@ export function StatusPanel({
         />
       </View>
 
-      <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
-      {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
-        <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
-      ) : null}
+      {quiet ? null : (
+        <>
+          <Text style={styles.meta}>{metaParts.join(' · ')}</Text>
+          {heldMin === 0 && result && !result.conditionMet && result.metricValue != null ? (
+            <Text style={styles.metaQuiet}>Fires when that level holds long enough</Text>
+          ) : null}
+        </>
+      )}
       {alertState?.lastError ? <Text style={styles.errorText}>{alertState.lastError}</Text> : null}
     </View>
   );

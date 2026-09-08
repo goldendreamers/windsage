@@ -10,10 +10,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
+import { isFollowStarred, organizeFollows } from '../shared/defaults';
 import type { CloudAnnouncement } from '../core/cloud';
 import { isRunningAsInstalledApp } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
@@ -59,8 +60,11 @@ type Props = {
   catalogStations?: CatalogStation[];
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
+  onToggleStar?: (stationId: string) => void;
+  onMoveFollow?: (stationId: string, delta: -1 | 1) => void;
   onOpenAccount?: () => void;
   onOpenDownload?: () => void;
+  onOpenMenu?: () => void;
   announcement?: CloudAnnouncement | null;
   onDismissAnnouncement?: () => void;
   uiMode?: import('../shared/types').UiMode;
@@ -72,7 +76,6 @@ export function HomeScreen({
   refreshing,
   addOpen,
   cloudStatus,
-  accountLabel,
   onOpenAdd,
   onCloseAdd,
   onAdd,
@@ -80,13 +83,17 @@ export function HomeScreen({
   catalogStations = [],
   onRefresh,
   onOpenStation,
-  onOpenAccount,
+  onToggleStar,
+  onMoveFollow,
   onOpenDownload,
+  onOpenMenu,
   announcement,
   onDismissAnnouncement,
   uiMode,
 }: Props) {
   const hasStations = stations.length > 0;
+  const orderedStations = useMemo(() => organizeFollows(stations), [stations]);
+  const advanced = uiMode === 'advanced';
   const [installedApp, setInstalledApp] = useState(() =>
     Platform.OS === 'web' ? isRunningAsInstalledApp() : true,
   );
@@ -198,26 +205,30 @@ export function HomeScreen({
                   : 'Follow spots or stations you care about'}
             </Text>
           </View>
-          {onOpenAccount ? (
+          <View style={styles.headerActions}>
             <Pressable
-              style={styles.accountBtn}
+              style={styles.addBtn}
               onPress={() => {
                 void Haptics.selectionAsync();
-                onOpenAccount();
+                onOpenAdd();
               }}
             >
-              <Text style={styles.accountBtnText}>{accountLabel || 'Account'}</Text>
+              <Text style={styles.addBtnText}>+ Follow</Text>
             </Pressable>
-          ) : null}
-          <Pressable
-            style={styles.addBtn}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onOpenAdd();
-            }}
-          >
-            <Text style={styles.addBtnText}>+ Follow</Text>
-          </Pressable>
+            {onOpenMenu ? (
+              <Pressable
+                style={styles.menuBtn}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onOpenMenu();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Menu"
+              >
+                <Text style={styles.menuBtnText}>Menu</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         {hasStations && headline ? (
@@ -267,8 +278,13 @@ export function HomeScreen({
           </View>
         ) : (
           <View style={styles.list}>
-            {stations.map((station) => {
+            {orderedStations.map((station, index) => {
               const item = live[station.id];
+              const prev = orderedStations[index - 1];
+              const next = orderedStations[index + 1];
+              const starred = isFollowStarred(station);
+              const canMoveUp = !!prev && isFollowStarred(prev) === starred;
+              const canMoveDown = !!next && isFollowStarred(next) === starred;
               return (
                 <StationCard
                   key={station.id}
@@ -276,7 +292,33 @@ export function HomeScreen({
                   reading={item?.reading ?? null}
                   result={item?.result ?? null}
                   alertState={item?.alertState}
+                  canMoveUp={canMoveUp}
+                  canMoveDown={canMoveDown}
                   onPress={() => onOpenStation(station.id)}
+                  onToggleStar={
+                    advanced && onToggleStar
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onToggleStar(station.id);
+                        }
+                      : undefined
+                  }
+                  onMoveUp={
+                    advanced && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, -1);
+                        }
+                      : undefined
+                  }
+                  onMoveDown={
+                    advanced && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, 1);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}
@@ -372,6 +414,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   addBtn: {
     backgroundColor: colors.accentDim,
     borderRadius: 999,
@@ -382,6 +429,19 @@ const styles = StyleSheet.create({
   },
   addBtnText: {
     color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
     fontWeight: '800',
     fontSize: 13,
   },
