@@ -92,6 +92,8 @@ export interface FollowedStation {
    * weighted by distance × historical accuracy × user rating.
    */
   locationBlend?: LocationBlend | null;
+  /** Home-list favorite — starred follows sort to the top. */
+  starred?: boolean;
 }
 
 export interface LocationBlendMember {

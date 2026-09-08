@@ -10,10 +10,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { brandImages } from '../shared/assets';
 import type { AlertState, CheckResult, FollowedStation, StationReading } from '../shared/types';
 import type { CatalogStation } from '../shared/defaults';
+import { isFollowStarred, organizeFollows } from '../shared/defaults';
 import type { CloudAnnouncement } from '../core/cloud';
 import { isRunningAsInstalledApp } from '../core/pwaInstall';
 import { colors } from '../shared/theme';
@@ -59,6 +60,8 @@ type Props = {
   catalogStations?: CatalogStation[];
   onRefresh: () => void;
   onOpenStation: (stationId: string) => void;
+  onToggleStar?: (stationId: string) => void;
+  onMoveFollow?: (stationId: string, delta: -1 | 1) => void;
   onOpenAccount?: () => void;
   onOpenDownload?: () => void;
   onOpenMenu?: () => void;
@@ -80,6 +83,8 @@ export function HomeScreen({
   catalogStations = [],
   onRefresh,
   onOpenStation,
+  onToggleStar,
+  onMoveFollow,
   onOpenDownload,
   onOpenMenu,
   announcement,
@@ -87,6 +92,8 @@ export function HomeScreen({
   uiMode,
 }: Props) {
   const hasStations = stations.length > 0;
+  const orderedStations = useMemo(() => organizeFollows(stations), [stations]);
+  const advanced = uiMode === 'advanced';
   const [installedApp, setInstalledApp] = useState(() =>
     Platform.OS === 'web' ? isRunningAsInstalledApp() : true,
   );
@@ -271,8 +278,13 @@ export function HomeScreen({
           </View>
         ) : (
           <View style={styles.list}>
-            {stations.map((station) => {
+            {orderedStations.map((station, index) => {
               const item = live[station.id];
+              const prev = orderedStations[index - 1];
+              const next = orderedStations[index + 1];
+              const starred = isFollowStarred(station);
+              const canMoveUp = !!prev && isFollowStarred(prev) === starred;
+              const canMoveDown = !!next && isFollowStarred(next) === starred;
               return (
                 <StationCard
                   key={station.id}
@@ -280,7 +292,33 @@ export function HomeScreen({
                   reading={item?.reading ?? null}
                   result={item?.result ?? null}
                   alertState={item?.alertState}
+                  canMoveUp={canMoveUp}
+                  canMoveDown={canMoveDown}
                   onPress={() => onOpenStation(station.id)}
+                  onToggleStar={
+                    advanced && onToggleStar
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onToggleStar(station.id);
+                        }
+                      : undefined
+                  }
+                  onMoveUp={
+                    advanced && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, -1);
+                        }
+                      : undefined
+                  }
+                  onMoveDown={
+                    advanced && onMoveFollow
+                      ? () => {
+                          void Haptics.selectionAsync();
+                          onMoveFollow(station.id, 1);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}

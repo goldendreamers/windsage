@@ -174,6 +174,8 @@ type Props = {
   onAlertFeedback?: (rating: 'good' | 'meh') => Promise<void> | void;
   onOpenMenu?: () => void;
   simpleMode?: boolean;
+  shareUrl?: string;
+  onShare?: () => void;
 };
 
 export function StationDetailScreen({
@@ -194,6 +196,8 @@ export function StationDetailScreen({
   onAlertFeedback,
   onOpenMenu,
   simpleMode = false,
+  shareUrl,
+  onShare,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState<'good' | 'meh' | null>(null);
@@ -1039,6 +1043,17 @@ export function StationDetailScreen({
         </Text>
       </Pressable>
 
+      {onShare ? (
+        <Pressable
+          style={styles.secondaryBtn}
+          onPress={onShare}
+          accessibilityRole="button"
+          accessibilityLabel="Share follow link"
+          accessibilityHint={shareUrl}
+        >
+          <Text style={styles.secondaryBtnText}>Share link</Text>
+        </Pressable>
+      ) : null}
       <Pressable style={styles.secondaryBtn} onPress={onResetAlert}>
         <Text style={styles.secondaryBtnText}>Reset alert memory</Text>
       </Pressable>

@@ -29,6 +29,7 @@ function mergeStation(raw: Partial<FollowedStation>): FollowedStation | null {
     linkedLiveStation: raw.linkedLiveStation ?? null,
     liveLinkWarning: raw.liveLinkWarning ?? null,
     locationBlend: raw.locationBlend ?? null,
+    starred: raw.starred === true,
   });
 }
 

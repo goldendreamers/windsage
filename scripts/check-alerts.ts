@@ -10,7 +10,7 @@ import {
   modelGustAtLeastAvg,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, resolveNotifyPrefs, ruleForMetric, toggleNotifyChannel } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, isFollowStarred, organizeFollows, resolveNotifyPrefs, ruleForMetric, toggleFollowStar, toggleNotifyChannel } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -260,5 +260,12 @@ assert.equal(flipped.monitoringUntilMs, null);
 assert.deepEqual(toggleNotifyChannel(['phone'], 'email'), ['phone', 'email']);
 assert.deepEqual(toggleNotifyChannel(['phone', 'email'], 'email'), ['phone']);
 assert.deepEqual(toggleNotifyChannel(['phone'], 'phone'), ['phone']);
+
+const a = createFollowedStation('1', 'A');
+const b = createFollowedStation('2', 'B');
+const starred = toggleFollowStar([a, b], b.id);
+assert.equal(isFollowStarred(starred[0]), true);
+assert.equal(starred[0].id, b.id);
+assert.equal(organizeFollows(starred)[0].id, b.id);
 
 console.log('check-alerts: ok');
