@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { BootScreen } from '../components/BootScreen';
+import { AppMenu } from '../components/AppMenu';
 import { AccountScreen } from '../screens/AccountScreen';
 import { DownloadScreen } from '../screens/DownloadScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -30,7 +31,7 @@ import {
   syncStationsToCloud,
   type CloudAnnouncement,
 } from '../core/cloud';
-import { DEFAULT_SETTINGS, createFollowedStation, displayName, normalizeUiMode, windguruName } from '../shared/defaults';
+import { DEFAULT_SETTINGS, applyMonitoringSchedules, createFollowedStation, displayName, normalizeNotifyPrefs, normalizeUiMode, windguruName } from '../shared/defaults';
 import type { CatalogStation } from '../shared/defaults';
 import { normalizeProvider } from '../shared/providers';
 import { configureAndroidChannel, ensureNotificationPermissions, registerWebPushSubscription, sendThresholdNotification } from '../core/notifications';
@@ -49,11 +50,13 @@ import type {
 
 /** Ensure cloud/local stations always have provider + safe nickname before setSettings. */
 function withStationDefaults(stations: FollowedStation[] | null | undefined): FollowedStation[] {
-  return (stations || []).map((s) => ({
-    ...s,
-    provider: normalizeProvider(s?.provider || 'windguru'),
-    nickname: s?.nickname ?? '',
-  }));
+  return applyMonitoringSchedules(
+    (stations || []).map((s) => ({
+      ...s,
+      provider: normalizeProvider(s?.provider || 'windguru'),
+      nickname: s?.nickname ?? '',
+    })),
+  ).stations;
 }
 
 async function hapticLight() {
@@ -119,6 +122,7 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(() => webPathIsDownload());
   const [account, setAccount] = useState<CloudUser | null>(null);
   const [catalogStations, setCatalogStations] = useState<CatalogStation[]>([]);
@@ -201,6 +205,15 @@ export default function App() {
         ]);
         setLastPollAt(snap.lastPollAt);
         setCloudStatus(`cloud · ${formatCloudAge(snap.lastPollAt)}`);
+        if (snap.notifyPrefs) {
+          const incoming = normalizeNotifyPrefs(snap.notifyPrefs);
+          const cur = normalizeNotifyPrefs(settingsRef.current.notifyPrefs);
+          if (JSON.stringify(incoming) !== JSON.stringify(cur)) {
+            const next = { ...settingsRef.current, notifyPrefs: incoming };
+            setSettings(next);
+            await saveSettings(next);
+          }
+        }
         if (source === 'manual') {
           await hapticLight();
           showToast('Synced from Wald cloud');
@@ -284,6 +297,7 @@ export default function App() {
         user: CloudUser;
         stations: FollowedStation[];
         pollIntervalMinutes: number;
+        notifyPrefs?: import('../shared/types').NotifyPrefs;
       },
       opts?: { importLocalGuestFollows?: boolean },
     ) => {
@@ -305,6 +319,9 @@ export default function App() {
         stations,
         pollIntervalMinutes: Math.max(10, payload.pollIntervalMinutes || 10),
         uiMode: normalizeUiMode(settingsRef.current.uiMode),
+        notifyPrefs: normalizeNotifyPrefs(
+          payload.notifyPrefs ?? settingsRef.current.notifyPrefs,
+        ),
       };
       setSettings(next);
       await saveSettings(next);
@@ -405,6 +422,7 @@ export default function App() {
           user: me,
           stations: pulled?.stations || [],
           pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+          notifyPrefs: pulled?.notifyPrefs,
         });
       }
     };
@@ -424,7 +442,12 @@ export default function App() {
         // Paint from local storage first — do not wait on push/cloud network.
         const loaded = await loadSettings();
         if (cancelled) return;
-        setSettings(loaded);
+        const booted = {
+          ...loaded,
+          stations: withStationDefaults(loaded.stations),
+          notifyPrefs: normalizeNotifyPrefs(loaded.notifyPrefs),
+        };
+        setSettings(booted);
         setLoading(false);
         await SplashScreen.hideAsync().catch(() => undefined);
 
@@ -445,6 +468,7 @@ export default function App() {
                   user: me,
                   stations: pulled.stations,
                   pollIntervalMinutes: pulled.pollIntervalMinutes,
+                  notifyPrefs: pulled.notifyPrefs,
                 });
                 return;
               }
@@ -464,6 +488,9 @@ export default function App() {
                   stations: cloudStations,
                   pollIntervalMinutes: Math.max(10, pulled.pollIntervalMinutes || 10),
                   uiMode: normalizeUiMode(settingsRef.current.uiMode),
+                  notifyPrefs: normalizeNotifyPrefs(
+                    pulled.notifyPrefs ?? settingsRef.current.notifyPrefs,
+                  ),
                 };
                 setSettings(merged);
                 await saveSettings(merged);
@@ -613,6 +640,7 @@ export default function App() {
               stations: [],
               pollIntervalMinutes: settingsRef.current.pollIntervalMinutes || 10,
               uiMode: normalizeUiMode(settingsRef.current.uiMode),
+              notifyPrefs: normalizeNotifyPrefs(settingsRef.current.notifyPrefs),
             };
             setSettings(cleared);
             void saveSettings(cleared);
@@ -665,6 +693,8 @@ export default function App() {
             showToast(ok ? `Thanks — alert marked ${rating}` : 'Sign in to save feedback');
           }}
           onUnfollow={() => void unfollow(activeStation)}
+          onOpenMenu={() => setMenuOpen(true)}
+          simpleMode={normalizeUiMode(settings.uiMode) !== 'advanced'}
         />
       ) : (
         <HomeScreen
@@ -685,6 +715,7 @@ export default function App() {
           onRefresh={() => void refreshFromCloud('manual')}
           onOpenStation={setActiveStationId}
           onOpenAccount={() => setAccountOpen(true)}
+          onOpenMenu={() => setMenuOpen(true)}
           onOpenDownload={openDownload}
           announcement={announcement}
           onDismissAnnouncement={() => void onDismissAnnouncement()}
@@ -699,6 +730,23 @@ export default function App() {
           cloudStatus={cloudStatus}
         />
       )}
+
+      <AppMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        notifyPrefs={settings.notifyPrefs}
+        hasGoogleEmail={!!account?.sso?.google?.email}
+        showCustom={normalizeUiMode(settings.uiMode) === 'advanced'}
+        onChangeNotifyPrefs={(prefs) => {
+          void persistSettings({ ...settingsRef.current, notifyPrefs: prefs });
+        }}
+        onNeedGoogle={() => {
+          setMenuOpen(false);
+          setDownloadOpen(false);
+          setActiveStationId(null);
+          setAccountOpen(true);
+        }}
+      />
 
       {toast ? (
         <View style={styles.toast}>

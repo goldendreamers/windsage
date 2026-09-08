@@ -18,6 +18,7 @@ import {
   followSourceRef,
   formatAlertTrigger,
   formatReadingNumber,
+  monitoringScheduleSummary,
   ruleForMetric,
 } from '../shared/defaults';
 import {
@@ -44,6 +45,7 @@ import {
 import { followTargetFromResolved, resolveFollowInput, stationPageUrl } from '../core/stations';
 import { MetricChooser } from '../components/MetricChooser';
 import { MetricPill } from '../components/MetricPill';
+import { MonitoringDurationModal } from '../components/MonitoringDurationModal';
 import { Section } from '../components/Section';
 import { StatusPanel } from '../components/StatusPanel';
 
@@ -170,6 +172,8 @@ type Props = {
   onResetAlert: () => void;
   onUnfollow: () => void;
   onAlertFeedback?: (rating: 'good' | 'meh') => Promise<void> | void;
+  onOpenMenu?: () => void;
+  simpleMode?: boolean;
 };
 
 export function StationDetailScreen({
@@ -188,9 +192,13 @@ export function StationDetailScreen({
   onResetAlert,
   onUnfollow,
   onAlertFeedback,
+  onOpenMenu,
+  simpleMode = false,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState<'good' | 'meh' | null>(null);
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const [monitorIntentOn, setMonitorIntentOn] = useState(true);
   const reading = result?.reading;
   const forecast = result?.forecast ?? null;
   const forecastOnly = !!(station.linkedLiveStation || station.liveLinkWarning);
@@ -224,6 +232,13 @@ export function StationDetailScreen({
   const allowSourceIdEdit = providerAllowsSourceIdEdit(provider);
   const openOnLabel =
     provider === 'location' ? 'Open in Google Maps' : `Open on ${providerMeta.label}`;
+  const monitor = monitoringScheduleSummary(station);
+
+  const openMonitorDuration = (nextOn: boolean) => {
+    void Haptics.selectionAsync();
+    setMonitorIntentOn(nextOn);
+    setMonitorOpen(true);
+  };
 
   return (
     <ScrollView
@@ -231,9 +246,24 @@ export function StationDetailScreen({
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Pressable style={styles.back} onPress={onBack}>
-        <Text style={styles.backText}>‹ Home</Text>
-      </Pressable>
+      <View style={styles.navRow}>
+        <Pressable style={styles.back} onPress={onBack}>
+          <Text style={styles.backText}>‹ Home</Text>
+        </Pressable>
+        {onOpenMenu ? (
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onOpenMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+          >
+            <Text style={styles.menuBtnText}>Menu</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.titleBlock}>
         <Image source={brandImages.station} style={styles.titleIcon} contentFit="contain" />
@@ -937,16 +967,18 @@ export function StationDetailScreen({
       <View style={[styles.block, styles.rowBetween]}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.sectionTitle}>Monitoring</Text>
-          <Text style={styles.hint}>On by default. Off pauses alerts for this station only</Text>
+          {monitor.detailHint ? (
+            <Text style={styles.hint}>{monitor.detailHint}</Text>
+          ) : (
+            <Text style={styles.hint}>On by default. Off pauses alerts for this station only</Text>
+          )}
         </View>
         <Switch
           value={station.enabled !== false}
-          onValueChange={(enabled) => {
-            void Haptics.selectionAsync();
-            onPersist({ ...station, enabled });
-          }}
+          onValueChange={openMonitorDuration}
           trackColor={{ false: '#23404C', true: colors.accent }}
           thumbColor="#fff"
+          accessibilityLabel="Monitoring"
         />
       </View>
 
@@ -1015,6 +1047,16 @@ export function StationDetailScreen({
           {provider === 'location' ? 'Unfollow map pin' : 'Unfollow station'}
         </Text>
       </Pressable>
+      <MonitoringDurationModal
+        visible={monitorOpen}
+        turningOn={monitorIntentOn}
+        simpleMode={simpleMode}
+        onCancel={() => setMonitorOpen(false)}
+        onConfirm={(untilMs) => {
+          setMonitorOpen(false);
+          onPersist({ ...station, enabled: monitorIntentOn, monitoringUntilMs: untilMs });
+        }}
+      />
     </ScrollView>
   );
 }
@@ -1029,6 +1071,24 @@ const styles = StyleSheet.create({
   back: {
     alignSelf: 'flex-start',
     paddingVertical: 4,
+  },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
   },
   backText: {
     color: colors.accent,

@@ -78,6 +78,8 @@ export interface FollowedStation {
   /** Official source name (not the user nickname). */
   sourceName?: string | null;
   enabled: boolean;
+  /** Auto-flip `enabled` at this time (pause-for / keep-on-for). Null = forever. */
+  monitoringUntilMs?: number | null;
   rule: AlertRule;
   /** Live station used for sensor readings (native link or nearest). */
   liveStationId?: string | null;
@@ -119,11 +121,27 @@ export interface LocationBlend {
 /** Simple: map pin + GPS. Advanced: Google Maps search still available. */
 export type UiMode = 'simple' | 'advanced';
 
+export type NotifyPreset = 'annoying' | 'normal' | 'quiet' | 'custom';
+export type NotifyChannel = 'phone' | 'email' | 'discord';
+/** Legacy single-value how. Prefer `NotifyChannel[]`. `'both'` still loads as phone+email. */
+export type NotifyHow = NotifyChannel | 'both' | NotifyChannel[];
+
+/** How often / how to send wind alerts. Account-level, not per station. */
+export interface NotifyPrefs {
+  preset: NotifyPreset;
+  /** Advanced custom: 1–24 alerts per UTC day. Ignored for named presets. */
+  timesPerDay?: number;
+  /** Advanced custom: any mix of phone, email, Discord. */
+  how?: NotifyHow;
+}
+
 export interface AppSettings {
   stations: FollowedStation[];
   pollIntervalMinutes: number;
   /** Local UI preference; default simple. Not synced to the cloud. */
   uiMode?: UiMode;
+  /** Alert volume + channel. Missing → normal (once a day, phone). */
+  notifyPrefs?: NotifyPrefs;
 }
 
 export interface StationReading {
@@ -156,6 +174,12 @@ export interface AlertState {
   lastValue: number | null;
   lastError: string | null;
   lastStationId: string | null;
+  /** Last time a push/email actually fired for this follow. */
+  lastNotifyMs?: number | null;
+  /** UTC YYYY-MM-DD for `notifyCountToday`. */
+  notifyDayUtc?: string | null;
+  /** Alerts sent on `notifyDayUtc` (per follow). */
+  notifyCountToday?: number;
 }
 
 export type AlertStateMap = Record<string, AlertState>;

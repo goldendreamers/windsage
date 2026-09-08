@@ -1,9 +1,10 @@
-import { DEFAULT_ALERT_STATE } from '../shared/defaults';
+import { alertNotifyDue, DEFAULT_ALERT_STATE, resolveNotifyPrefs, stampAlertNotify } from '../shared/defaults';
 import type {
   AlertState,
   CheckResult,
   FollowedStation,
   HistorySeries,
+  NotifyPrefs,
   StationReading,
 } from '../shared/types';
 import { fetchCurrentReading, fetchRecentHistory, fetchSpotForecastNow, isForecastOnlySpot, metricUnit, metricValue } from './windguru';
@@ -153,6 +154,7 @@ export function evaluateAlert(
   station: FollowedStation,
   prev: AlertState,
   nowMs = Date.now(),
+  notifyPrefs?: NotifyPrefs | null,
 ): { result: CheckResult; nextState: AlertState } {
   if (isForecastModelReading(reading)) {
     return {
@@ -218,12 +220,21 @@ export function evaluateAlert(
 
   const requiredMs = station.rule.sustainedMinutes * 60 * 1000;
   const monitoringOn = station.enabled !== false;
+  const resolved = resolveNotifyPrefs(notifyPrefs);
+  const cadenceOk = alertNotifyDue(prev, resolved, nowMs);
   const shouldNotify =
-    monitoringOn && conditionMet && sustainedMs >= requiredMs && !notifiedForRun;
+    monitoringOn && conditionMet && sustainedMs >= requiredMs && cadenceOk;
 
   if (shouldNotify) {
     notifiedForRun = true;
   }
+  const stamp = shouldNotify
+    ? stampAlertNotify(prev, nowMs)
+    : {
+        lastNotifyMs: prev.lastNotifyMs ?? null,
+        notifyDayUtc: prev.notifyDayUtc ?? null,
+        notifyCountToday: prev.notifyCountToday ?? 0,
+      };
 
   const unit = metricUnit(metric);
   const formatValue = (v: number | null | undefined) => {
@@ -276,6 +287,9 @@ export function evaluateAlert(
       lastValue: value,
       lastError: null,
       lastStationId: station.stationId,
+      lastNotifyMs: stamp.lastNotifyMs,
+      notifyDayUtc: stamp.notifyDayUtc,
+      notifyCountToday: stamp.notifyCountToday,
     },
   };
 }

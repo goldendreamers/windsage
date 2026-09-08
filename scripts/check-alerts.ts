@@ -10,7 +10,7 @@ import {
   modelGustAtLeastAvg,
   sustainedDurationMs,
 } from '../code/core/alerts';
-import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertThresholdDisplay, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, ruleForMetric } from '../code/shared/defaults';
+import { DEFAULT_ALERT_STATE, METRIC_DEFAULTS, alertConditionLabel, alertNotifyDue, alertThresholdDisplay, applyMonitoringSchedule, createFollowedStation, formatAlertTrigger, homeLiveStatColumns, resolveNotifyPrefs, ruleForMetric } from '../code/shared/defaults';
 import type { HistorySeries, StationReading } from '../code/shared/types';
 
 const reading = (
@@ -216,5 +216,39 @@ assert.equal(refused.result.reading, null);
 assert.equal(refused.nextState.conditionSinceMs, null);
 assert.equal(refused.nextState.notifiedForRun, false);
 assert.match(refused.result.message, /live station/i);
+
+const annoying = resolveNotifyPrefs({ preset: 'annoying', how: ['phone'] });
+assert.equal(alertNotifyDue(prev, annoying, Date.now()), true);
+const firstPing = evaluateAlert(
+  reading(18, 28),
+  history,
+  station,
+  prev,
+  Date.now(),
+  { preset: 'annoying', how: ['phone'] },
+);
+assert.equal(firstPing.result.shouldNotify, true);
+const tooSoon = evaluateAlert(
+  reading(18, 28),
+  history,
+  station,
+  firstPing.nextState,
+  Date.now() + 60 * 1000,
+  { preset: 'annoying', how: ['phone'] },
+);
+assert.equal(tooSoon.result.shouldNotify, false);
+const again = evaluateAlert(
+  reading(18, 28),
+  history,
+  station,
+  firstPing.nextState,
+  Date.now() + 11 * 60 * 1000,
+  { preset: 'annoying', how: ['phone'] },
+);
+assert.equal(again.result.shouldNotify, true);
+
+const flipped = applyMonitoringSchedule({ enabled: true, monitoringUntilMs: Date.now() - 1 });
+assert.equal(flipped.enabled, false);
+assert.equal(flipped.monitoringUntilMs, null);
 
 console.log('check-alerts: ok');

@@ -37,6 +37,7 @@ type Props = {
       user: CloudUser;
       stations: import('../shared/types').FollowedStation[];
       pollIntervalMinutes: number;
+      notifyPrefs?: import('../shared/types').NotifyPrefs;
     },
     opts?: { importLocalGuestFollows?: boolean },
   ) => void;
@@ -112,6 +113,7 @@ export function AccountScreen({ onBack, onAuthed, onLoggedOut, uiMode, onUiModeC
         user: me,
         stations: pulled?.stations || [],
         pollIntervalMinutes: pulled?.pollIntervalMinutes || 10,
+        notifyPrefs: pulled?.notifyPrefs,
       },
       // Google "login" to a brand-new SSO user already merged guest follows server-side
       // when created; never import leftover local guest lists for returning users.

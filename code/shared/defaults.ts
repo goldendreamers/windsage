@@ -6,9 +6,14 @@ import type {
   Comparison,
   FollowedStation,
   MetricKey,
+  NotifyChannel,
+  NotifyPrefs,
+  NotifyPreset,
   UiMode,
   WindguruKind,
 } from './types';
+
+export type { NotifyChannel, NotifyPrefs, NotifyPreset } from './types';
 
 /** Primary alert defaults per metric (threshold units match the metric). */
 export const METRIC_DEFAULTS: Record<
@@ -49,10 +54,17 @@ export function ruleForMetric(rule: AlertRule, metric: MetricKey): AlertRule {
   };
 }
 
+export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = {
+  preset: 'normal',
+  timesPerDay: 1,
+  how: ['phone'],
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   stations: [],
   pollIntervalMinutes: 10,
   uiMode: 'simple',
+  notifyPrefs: { ...DEFAULT_NOTIFY_PREFS },
 };
 
 export function normalizeUiMode(value: unknown): UiMode {
@@ -66,7 +78,272 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
+
+const NOTIFY_PRESETS = new Set(['annoying', 'normal', 'quiet', 'custom']);
+const NOTIFY_CHANNELS: NotifyChannel[] = ['phone', 'email', 'discord'];
+const ANNOYING_INTERVAL_MIN = 10;
+
+export function parseNotifyHow(raw: unknown): NotifyChannel[] {
+  const src = Array.isArray(raw)
+    ? raw
+    : raw === 'both'
+      ? ['phone', 'email']
+      : raw == null || raw === ''
+        ? []
+        : [raw];
+  const seen = new Set<NotifyChannel>();
+  for (const item of src) {
+    if (item === 'phone' || item === 'email' || item === 'discord') seen.add(item);
+  }
+  const ordered = NOTIFY_CHANNELS.filter((channel) => seen.has(channel));
+  return ordered.length ? ordered : ['phone'];
+}
+
+export function notifyChannelsOf(prefs: NotifyPrefs | null | undefined): NotifyChannel[] {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'quiet') return ['email'];
+  if (n.preset === 'custom') return parseNotifyHow(n.how);
+  return ['phone'];
+}
+
+export function utcDayKey(nowMs = Date.now()): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+export function normalizeNotifyPrefs(raw: unknown): NotifyPrefs {
+  const src = raw && typeof raw === 'object' ? (raw as Partial<NotifyPrefs>) : {};
+  const preset = NOTIFY_PRESETS.has(String(src.preset))
+    ? (src.preset as NotifyPreset)
+    : 'normal';
+  const how = parseNotifyHow(src.how);
+  const n = Math.trunc(Number(src.timesPerDay));
+  const timesPerDay = Number.isFinite(n) ? Math.min(24, Math.max(1, n)) : 1;
+  return { preset, timesPerDay, how };
+}
+
+export type ResolvedNotifyPrefs = {
+  preset: NotifyPreset;
+  maxPerDay: number | null;
+  minIntervalMinutes: number;
+  push: boolean;
+  email: boolean;
+  discord: boolean;
+};
+
+function resolvedChannels(channels: NotifyChannel[], opts?: { hasGoogleEmail?: boolean }) {
+  const hasGoogle = opts?.hasGoogleEmail === true;
+  const wantEmail = channels.includes('email');
+  return {
+    push: channels.includes('phone'),
+    email: wantEmail && hasGoogle,
+    discord: channels.includes('discord'),
+  };
+}
+
+export function resolveNotifyPrefs(
+  prefs: NotifyPrefs | null | undefined,
+  opts?: { hasGoogleEmail?: boolean },
+): ResolvedNotifyPrefs {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'annoying') {
+    return {
+      preset: 'annoying',
+      maxPerDay: null,
+      minIntervalMinutes: ANNOYING_INTERVAL_MIN,
+      ...resolvedChannels(['phone'], opts),
+    };
+  }
+  if (n.preset === 'quiet') {
+    return {
+      preset: 'quiet',
+      maxPerDay: 1,
+      minIntervalMinutes: 24 * 60,
+      ...resolvedChannels(['email'], opts),
+    };
+  }
+  if (n.preset === 'custom') {
+    const times = n.timesPerDay ?? 1;
+    return {
+      preset: 'custom',
+      maxPerDay: times,
+      minIntervalMinutes: Math.max(ANNOYING_INTERVAL_MIN, Math.floor((24 * 60) / times)),
+      ...resolvedChannels(parseNotifyHow(n.how), opts),
+    };
+  }
+  return {
+    preset: 'normal',
+    maxPerDay: 1,
+    minIntervalMinutes: 24 * 60,
+    ...resolvedChannels(['phone'], opts),
+  };
+}
+
+export function notifyPrefsSummary(prefs: NotifyPrefs | null | undefined): string {
+  const n = normalizeNotifyPrefs(prefs);
+  if (n.preset === 'annoying') return 'Annoying · every 10 min';
+  if (n.preset === 'quiet') return 'Quiet · email only';
+  if (n.preset === 'custom') {
+    const how = parseNotifyHow(n.how).join(' + ');
+    const times = n.timesPerDay ?? 1;
+    return `Custom · ${times}× a day · ${how}`;
+  }
+  return 'Normal · once a day';
+}
+
+export function alertNotifyDue(
+  prev: Pick<AlertState, 'notifiedForRun' | 'lastCheckMs' | 'lastNotifyMs' | 'notifyDayUtc' | 'notifyCountToday'> | null | undefined,
+  resolved: ResolvedNotifyPrefs,
+  nowMs = Date.now(),
+): boolean {
+  if (!resolved.push && !resolved.email && !resolved.discord) return false;
+  const day = utcDayKey(nowMs);
+  const count =
+    prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  if (resolved.maxPerDay != null && count >= resolved.maxPerDay) return false;
+  const lastRaw = prev?.lastNotifyMs;
+  const lastMs =
+    typeof lastRaw === 'number' && Number.isFinite(lastRaw)
+      ? lastRaw
+      : prev?.notifiedForRun &&
+          typeof prev.lastCheckMs === 'number' &&
+          Number.isFinite(prev.lastCheckMs)
+        ? prev.lastCheckMs
+        : null;
+  if (lastMs != null && nowMs - lastMs < resolved.minIntervalMinutes * 60 * 1000) return false;
+  if (prev?.notifiedForRun && lastMs == null) return false;
+  return true;
+}
+
+export function stampAlertNotify(prev: AlertState | null | undefined, nowMs = Date.now()) {
+  const day = utcDayKey(nowMs);
+  const count = prev?.notifyDayUtc === day ? Math.max(0, Number(prev.notifyCountToday) || 0) : 0;
+  return {
+    lastNotifyMs: nowMs,
+    notifyDayUtc: day,
+    notifyCountToday: count + 1,
+  };
+}
+
+export function parseLooseNumber(raw: unknown): number | null {
+  const n = Number(String(raw ?? '').replace(',', '.').trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+
+export type MonitoringDurationPreset = 'day' | 'week' | 'forever';
+export type MonitoringCustomUnit = 'hours' | 'days';
+
+export function normalizeMonitoringUntilMs(raw: unknown): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function monitoringUntilMsForPreset(
+  preset: MonitoringDurationPreset,
+  nowMs = Date.now(),
+): number | null {
+  if (preset === 'forever') return null;
+  if (preset === 'week') return nowMs + WEEK_MS;
+  return nowMs + DAY_MS;
+}
+
+export function monitoringUntilMsForCustomHours(hours: number, nowMs = Date.now()): number {
+  const h = Math.max(1, Math.trunc(Number(hours) || 0));
+  return nowMs + h * HOUR_MS;
+}
+
+export function monitoringUntilMsForCustomAmount(
+  amount: number,
+  unit: MonitoringCustomUnit,
+  nowMs = Date.now(),
+): number {
+  const n = Math.max(1, Math.trunc(Number(amount) || 0));
+  return monitoringUntilMsForCustomHours(unit === 'days' ? n * 24 : n, nowMs);
+}
+
+export function applyMonitoringSchedule<
+  T extends { enabled?: boolean; monitoringUntilMs?: number | null },
+>(station: T, nowMs = Date.now()): T {
+  if (!station) return station;
+  const raw = station.monitoringUntilMs;
+  if (raw == null) return station;
+  const untilMs = Number(raw);
+  if (!Number.isFinite(untilMs) || untilMs > nowMs) return station;
+  const currentlyOn = station.enabled !== false;
+  return {
+    ...station,
+    enabled: !currentlyOn,
+    monitoringUntilMs: null,
+  };
+}
+
+export function applyMonitoringSchedules<
+  T extends { enabled?: boolean; monitoringUntilMs?: number | null },
+>(stations: T[] | null | undefined, nowMs = Date.now()): { stations: T[]; changed: boolean } {
+  const list = Array.isArray(stations) ? stations : [];
+  let changed = false;
+  const next = list.map((station) => {
+    const applied = applyMonitoringSchedule(station, nowMs);
+    if (applied !== station) changed = true;
+    return applied;
+  });
+  return { stations: next, changed };
+}
+
+export function formatMonitoringUntilClock(untilMs: number, nowMs = Date.now()): string {
+  const d = new Date(untilMs);
+  const now = new Date(nowMs);
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleString(undefined, opts);
+}
+
+export type MonitoringScheduleSummary = {
+  on: boolean;
+  untilMs: number | null;
+  detailHint: string | null;
+};
+
+export function monitoringScheduleSummary(
+  station: { enabled?: boolean; monitoringUntilMs?: number | null } | null | undefined,
+  nowMs = Date.now(),
+): MonitoringScheduleSummary {
+  if (!station) {
+    return { on: true, untilMs: null, detailHint: null };
+  }
+  const applied = applyMonitoringSchedule(station, nowMs);
+  const on = applied.enabled !== false;
+  const untilRaw = applied.monitoringUntilMs;
+  const untilMs = untilRaw == null ? null : Number(untilRaw);
+  const hasUntil = untilMs != null && Number.isFinite(untilMs) && untilMs > nowMs;
+  const when = hasUntil && untilMs != null ? formatMonitoringUntilClock(untilMs, nowMs) : null;
+  if (on) {
+    return {
+      on: true,
+      untilMs: hasUntil ? untilMs : null,
+      detailHint: when ? `Alerts stay on until ${when}` : null,
+    };
+  }
+  return {
+    on: false,
+    untilMs: hasUntil ? untilMs : null,
+    detailHint: when ? `Paused until ${when}` : 'Alerts are off',
+  };
+}
 
 export const METRIC_OPTIONS = [
   {
@@ -255,6 +532,7 @@ export function createFollowedStation(
     nickname: String(nickname ?? '').trim(),
     sourceName: String(partial?.sourceName ?? '').trim() || null,
     enabled: partial?.enabled !== false,
+    monitoringUntilMs: normalizeMonitoringUntilMs(partial?.monitoringUntilMs),
     rule: { ...DEFAULT_RULE, ...(partial?.rule ?? {}) },
     liveStationId: partial?.liveStationId ?? null,
     linkedLiveStation: partial?.linkedLiveStation ?? null,

@@ -61,6 +61,7 @@ type Props = {
   onOpenStation: (stationId: string) => void;
   onOpenAccount?: () => void;
   onOpenDownload?: () => void;
+  onOpenMenu?: () => void;
   announcement?: CloudAnnouncement | null;
   onDismissAnnouncement?: () => void;
   uiMode?: import('../shared/types').UiMode;
@@ -82,6 +83,7 @@ export function HomeScreen({
   onOpenStation,
   onOpenAccount,
   onOpenDownload,
+  onOpenMenu,
   announcement,
   onDismissAnnouncement,
   uiMode,
@@ -209,15 +211,30 @@ export function HomeScreen({
               <Text style={styles.accountBtnText}>{accountLabel || 'Account'}</Text>
             </Pressable>
           ) : null}
-          <Pressable
-            style={styles.addBtn}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onOpenAdd();
-            }}
-          >
-            <Text style={styles.addBtnText}>+ Follow</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.addBtn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                onOpenAdd();
+              }}
+            >
+              <Text style={styles.addBtnText}>+ Follow</Text>
+            </Pressable>
+            {onOpenMenu ? (
+              <Pressable
+                style={styles.menuBtn}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onOpenMenu();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Menu"
+              >
+                <Text style={styles.menuBtnText}>Menu</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         {hasStations && headline ? (
@@ -372,6 +389,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   addBtn: {
     backgroundColor: colors.accentDim,
     borderRadius: 999,
@@ -382,6 +404,19 @@ const styles = StyleSheet.create({
   },
   addBtnText: {
     color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  menuBtn: {
+    backgroundColor: colors.input,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  menuBtnText: {
+    color: colors.text,
     fontWeight: '800',
     fontSize: 13,
   },

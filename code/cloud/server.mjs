@@ -70,6 +70,12 @@ import {
 import { formatAlertNotificationCopy, formatTestNotificationCopy } from './lib/notifyCopy.mjs';
 import { clientIp, takeToken } from './lib/rateLimit.mjs';
 import { pollReason, shouldPollAlerts } from './lib/poll.mjs';
+import { applyBagMonitoringSchedules } from './lib/monitoring.mjs';
+import {
+  applyNotifyPrefs,
+  bagGoogleEmail,
+  normalizeNotifyPrefs,
+} from './lib/notifyPrefs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WINDSAGE_HOST || '0.0.0.0';
@@ -117,6 +123,9 @@ const DEFAULT_ALERT = {
   lastValue: null,
   lastError: null,
   lastStationId: null,
+  lastNotifyMs: null,
+  notifyDayUtc: null,
+  notifyCountToday: 0,
 };
 
 const MIME = {
@@ -323,6 +332,7 @@ async function attachSpotForecast(station, result, forecastCache, priorSnap) {
 }
 
 async function runBagChecks(store, bag, { notify = true } = {}) {
+  applyBagMonitoringSchedules(bag);
   const stations = (bag.stations || []).filter((s) => s.stationId?.trim());
   if (!bag.alertStates) bag.alertStates = {};
   if (!bag.snapshots) bag.snapshots = {};
@@ -450,7 +460,15 @@ async function runBagChecks(store, bag, { notify = true } = {}) {
       }
 
       const history = historyCache.get(histKey);
-      const evaluated = evaluateAlert(cached, history, station, prev);
+      const evaluated = evaluateAlert(
+        cached,
+        history,
+        station,
+        prev,
+        Date.now(),
+        bag.notifyPrefs,
+        { hasGoogleEmail: !!bagGoogleEmail(bag) },
+      );
       const result = await attachSpotForecast(
         station,
         evaluated.result,
@@ -774,6 +792,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -808,6 +827,7 @@ async function handleAuth(req, res, pathname, url) {
       user: publicUser(user),
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -922,6 +942,7 @@ async function handleMe(req, res, pathname) {
       ok: true,
       stations: user.stations || [],
       pollIntervalMinutes: user.pollIntervalMinutes || DEFAULT_POLL_MIN,
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
     });
   }
 
@@ -933,6 +954,7 @@ async function handleMe(req, res, pathname) {
     if (body.pollIntervalMinutes) {
       user.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
+    applyNotifyPrefs(user, body);
     if (body.pushToken) {
       if (!user.pushTokens.includes(body.pushToken)) user.pushTokens.push(body.pushToken);
     }
@@ -968,6 +990,7 @@ async function handleMe(req, res, pathname) {
       lastPollAt: user.lastPollAt || null,
       stations: user.stations || [],
       snapshots: user.snapshots || {},
+      notifyPrefs: normalizeNotifyPrefs(user.notifyPrefs),
       cloud: true,
       user: publicUser(user),
     });
@@ -1094,6 +1117,7 @@ async function handleDevices(req, res, pathname) {
     if (body.pollIntervalMinutes) {
       bag.pollIntervalMinutes = Math.max(10, Number(body.pollIntervalMinutes) || 10);
     }
+    applyNotifyPrefs(bag, body);
     if (body.pushToken) {
       device.pushToken = body.pushToken;
       if (!device.pushTokens.includes(body.pushToken)) device.pushTokens.push(body.pushToken);
@@ -1126,6 +1150,7 @@ async function handleDevices(req, res, pathname) {
       lastPollAt: bag.lastPollAt || null,
       stations: bag.stations || [],
       snapshots: bag.snapshots || {},
+      notifyPrefs: normalizeNotifyPrefs(bag.notifyPrefs),
       cloud: true,
       userId: device.userId || null,
     });

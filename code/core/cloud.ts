@@ -195,13 +195,20 @@ export async function fetchAuthProviders(): Promise<{
 export async function registerAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -219,13 +226,20 @@ export async function registerAccount(
 export async function loginAccount(
   username: string,
   password: string,
-): Promise<{ token: string; user: CloudUser; stations: FollowedStation[]; pollIntervalMinutes: number }> {
+): Promise<{
+  token: string;
+  user: CloudUser;
+  stations: FollowedStation[];
+  pollIntervalMinutes: number;
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
+}> {
   const { creds, pushToken } = await registerWithCloud();
   const data = await cloudFetch<{
     token: string;
     user: CloudUser;
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -277,10 +291,12 @@ export async function pullMyStations(): Promise<AppSettings | null> {
   const data = await cloudFetch<{
     stations: FollowedStation[];
     pollIntervalMinutes: number;
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>('/v1/me/stations', { method: 'GET', token });
   return {
     stations: data.stations || [],
     pollIntervalMinutes: Math.max(10, data.pollIntervalMinutes || 10),
+    notifyPrefs: data.notifyPrefs,
   };
 }
 
@@ -383,6 +399,7 @@ export async function syncStationsToCloud(
         stations: settings.stations,
         clearStations,
         pollIntervalMinutes: settings.pollIntervalMinutes,
+        notifyPrefs: settings.notifyPrefs,
         pushToken: tokenPush ?? undefined,
         webPushSubscription: webPushSubscription || undefined,
         deviceId: creds.deviceId,
@@ -407,6 +424,7 @@ export async function syncStationsToCloud(
       stations: settings.stations,
       clearStations,
       pollIntervalMinutes: settings.pollIntervalMinutes,
+      notifyPrefs: settings.notifyPrefs,
       pushToken: tokenPush ?? undefined,
       webPushSubscription: webPushSubscription || undefined,
     }),
@@ -500,6 +518,7 @@ export async function fetchCloudSnapshot(): Promise<{
   lastPollAt: number | null;
   cloud: boolean;
   stations?: FollowedStation[];
+  notifyPrefs?: import('../shared/types').NotifyPrefs;
 }> {
   const session = await getSessionToken();
   if (session) {
@@ -508,12 +527,14 @@ export async function fetchCloudSnapshot(): Promise<{
       lastPollAt: number | null;
       cloud: boolean;
       stations: FollowedStation[];
+      notifyPrefs?: import('../shared/types').NotifyPrefs;
     }>('/v1/me/snapshot', { method: 'GET', token: session });
     return {
       snapshots: data.snapshots || {},
       lastPollAt: data.lastPollAt ?? null,
       cloud: !!data.cloud,
       stations: data.stations,
+      notifyPrefs: data.notifyPrefs,
     };
   }
 
@@ -523,6 +544,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: number | null;
     cloud: boolean;
     stations: FollowedStation[];
+    notifyPrefs?: import('../shared/types').NotifyPrefs;
   }>(`/v1/devices/${encodeURIComponent(creds.deviceId)}/snapshot`, {
     method: 'GET',
     secret: creds.secret,
@@ -532,6 +554,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lastPollAt: data.lastPollAt ?? null,
     cloud: !!data.cloud,
     stations: data.stations,
+    notifyPrefs: data.notifyPrefs,
   };
 }
 

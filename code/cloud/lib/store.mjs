@@ -197,6 +197,7 @@ export function ensureDevice(store, deviceId, secret) {
       webPushSubscriptions: [],
       stations: [],
       pollIntervalMinutes: 10,
+      notifyPrefs: { preset: 'normal', timesPerDay: 1, how: ['phone'] },
       alertStates: {},
       snapshots: {},
       createdAt: Date.now(),
@@ -211,6 +212,7 @@ export function ensureDevice(store, deviceId, secret) {
     device.pushTokens = device.pushToken ? [device.pushToken] : [];
   }
   if (!Array.isArray(device.webPushSubscriptions)) device.webPushSubscriptions = [];
+  if (!device.notifyPrefs) device.notifyPrefs = { preset: 'normal', timesPerDay: 1, how: ['phone'] };
   return device;
 }
 
@@ -224,6 +226,7 @@ export function createUser(store, partial = {}) {
     sso: partial.sso ?? {},
     stations: partial.stations ?? [],
     pollIntervalMinutes: partial.pollIntervalMinutes ?? 10,
+    notifyPrefs: partial.notifyPrefs ?? { preset: 'normal', timesPerDay: 1, how: ['phone'] },
     alertStates: partial.alertStates ?? {},
     snapshots: partial.snapshots ?? {},
     pushTokens: partial.pushTokens ?? [],
